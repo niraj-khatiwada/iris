@@ -1,0 +1,46 @@
+import type { ThemeMode } from '@/types/settings'
+
+/** Suggested prompts shown on the welcome screen. */
+export const SUGGESTIONS = [
+  {
+    id: 'plan',
+    title: 'Plan my day',
+    description: 'Turn a messy list into a focused plan.',
+    prompt:
+      'Help me plan a focused day around my most important work. Ask me what matters most first.',
+  },
+  {
+    id: 'write',
+    title: 'Draft something',
+    description: 'A message, a note, or a first draft.',
+    prompt:
+      'Help me draft a concise, friendly message. Ask me who it is for and what I want to say.',
+  },
+  {
+    id: 'think',
+    title: 'Think it through',
+    description: 'Untangle a decision or a problem.',
+    prompt:
+      'I have a decision to make. Help me think it through by asking one useful question at a time.',
+  },
+  {
+    id: 'focus',
+    title: 'Set a focus',
+    description: 'Start a short, deliberate work session.',
+    prompt:
+      'Help me choose one meaningful thing to focus on for the next 45 minutes.',
+  },
+] as const
+
+export const APP_NAME = 'Iris'
+export const DEFAULT_MODEL = 'local-preview'
+export const DEFAULT_USER_NAME = 'You'
+export const QUICK_CONVERSATION_ID = 'iris:quick'
+export const QUICK_CONVERSATION_TITLE = 'Quick chat'
+export const CHAT_STORAGE_KEY = 'iris.chat'
+export const SETTINGS_STORAGE_KEY = 'iris.settings'
+export const THEME_LABELS: Record<ThemeMode, string> = {
+  light: 'Light',
+  dark: 'Dark',
+  system: 'System',
+}

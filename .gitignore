@@ -1,0 +1,41 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# testing
+/coverage
+
+# production
+/build
+/out/
+/dist/
+
+# misc
+.DS_Store
+*.pem
+latest.json
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+bun-error.log*
+
+# local env files
+.env*.local
+/**/.env
+
+# typescript
+*.tsbuildinfo
+
+# rust
+/src-tauri/target
+/src-tauri/gen
+
+# tauri generated
+/src-tauri/.tauri
+
+# editor
+.idea/

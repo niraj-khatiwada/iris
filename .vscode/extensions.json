@@ -1,0 +1,9 @@
+{
+  "recommendations": [
+    "biomejs.biome",
+    "rust-lang.rust-analyzer",
+    "bradlc.vscode-tailwindcss",
+    "tamasfe.even-better-toml",
+    "usernamehw.errorlens"
+  ]
+}
