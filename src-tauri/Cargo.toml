@@ -21,6 +21,9 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-window-state = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 log = "0.4"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "multipart", "rustls-tls"] }
+futures-util = "0.3"
+base64 = "0.22"
 tauri-plugin-global-shortcut = "2.4.1"
 
 [profile.release]
@@ -32,3 +35,4 @@ strip = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = "0.3"
+tauri-nspanel = "2.1"

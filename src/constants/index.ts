@@ -1,4 +1,4 @@
-import type { ThemeMode } from '@/types/settings'
+import type { ThemeMode, TtsVoice } from '@/types/settings'
 
 /** Suggested prompts shown on the welcome screen. */
 export const SUGGESTIONS = [
@@ -33,7 +33,14 @@ export const SUGGESTIONS = [
 ] as const
 
 export const APP_NAME = 'Iris'
-export const DEFAULT_MODEL = 'local-preview'
+export const DEFAULT_BASE_URL = 'https://api.deepseek.com'
+export const DEFAULT_MODEL = 'deepseek-flash'
+export const DEFAULT_TTS_VOICE: TtsVoice = 'stella'
+export const DEFAULT_OPEN_SHORTCUT = 'commandorcontrol+space'
+export const TTS_VOICES: ReadonlyArray<{ id: TtsVoice; label: string }> = [
+  { id: 'stella', label: 'Stella' },
+  { id: 'tide', label: 'Tide' },
+]
 export const DEFAULT_USER_NAME = 'You'
 export const QUICK_CONVERSATION_ID = 'iris:quick'
 export const QUICK_CONVERSATION_TITLE = 'Quick chat'

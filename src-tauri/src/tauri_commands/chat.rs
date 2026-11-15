@@ -4,6 +4,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
+use crate::core::agent::AgentConfig;
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatMessageInput {
@@ -18,6 +20,11 @@ pub struct SendMessageRequest {
     pub request_id: String,
     pub conversation_id: String,
     pub messages: Vec<ChatMessageInput>,
+    pub api_key: String,
+    pub base_url: String,
+    pub model: String,
+    pub auto_speak: bool,
+    pub tts_voice: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -32,6 +39,13 @@ pub struct ChatTokenPayload {
 pub struct ChatDonePayload {
     pub request_id: String,
     pub cancelled: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatErrorPayload {
+    pub request_id: String,
+    pub message: String,
 }
 
 struct ActiveGeneration {
@@ -100,18 +114,50 @@ pub fn send_message(
         return Err("There is nothing to send yet.".to_string());
     }
 
+    let api_key = request.api_key.trim().to_string();
+    if api_key.is_empty() {
+        return Err("Add your DeepSeek API key in Settings.".to_string());
+    }
+
+    let base_url = request.base_url.trim().to_string();
+    if base_url.is_empty() {
+        return Err("Add a DeepSeek API base URL in Settings.".to_string());
+    }
+
+    let model = request.model.trim().to_string();
+    let model = if model.is_empty() {
+        "deepseek-flash".to_string()
+    } else {
+        model
+    };
+    let tts_voice = if request.tts_voice == "tide" {
+        "tide".to_string()
+    } else {
+        "stella".to_string()
+    };
+    let config = AgentConfig {
+        api_key,
+        base_url,
+        model,
+        auto_speak: request.auto_speak,
+        tts_voice,
+    };
+
+    crate::sys::speech::stop(&app);
     let cancelled = state.start(request.request_id.clone());
-    tauri::async_runtime::spawn(crate::core::agent::stream_placeholder_reply(
-        app, request, cancelled,
+    tauri::async_runtime::spawn(crate::core::agent::stream_reply(
+        app, request, config, cancelled,
     ));
     Ok(())
 }
 
 #[tauri::command]
 pub fn cancel_generation(
+    app: AppHandle,
     state: State<'_, GenerationState>,
     request_id: Option<String>,
 ) -> Result<(), String> {
     state.cancel(request_id.as_deref());
+    crate::sys::speech::stop(&app);
     Ok(())
 }

@@ -7,6 +7,7 @@ import {
   QUICK_CONVERSATION_TITLE,
 } from '@/constants'
 import { cancelActiveRun, startAgentRun } from '@/services/agent'
+import { useSettingsStore } from '@/stores/settingsStore'
 import type { AgentMessage, ChatMessage, Conversation } from '@/types/chat'
 import { newId } from '@/utils/id'
 import { titleFromMessage } from '@/utils/string'
@@ -250,13 +251,19 @@ export const useChatStore = create<ChatState>()(
           conversation.messages.length === 0 ||
           conversation.title === 'New conversation' ||
           conversation.title === QUICK_CONVERSATION_TITLE
-        const history: AgentMessage[] = [
-          ...conversation.messages,
-          userMessage,
-        ].map((message) => ({
-          role: message.role,
-          content: message.content,
-        }))
+        const history: AgentMessage[] = [...conversation.messages, userMessage]
+          .filter(
+            (message) =>
+              message.role === 'user' ||
+              (message.role === 'assistant' &&
+                message.status === 'complete' &&
+                message.content.trim().length > 0),
+          )
+          .map((message) => ({
+            role: message.role,
+            content: message.content,
+          }))
+        const settings = useSettingsStore.getState()
 
         set((current) => ({
           conversations: current.conversations.map((item) =>
@@ -274,6 +281,11 @@ export const useChatStore = create<ChatState>()(
         const requestId = startAgentRun({
           conversationId,
           messages: history,
+          apiKey: settings.apiKey,
+          baseUrl: settings.baseUrl,
+          model: settings.model,
+          autoSpeak: settings.autoSpeak,
+          ttsVoice: settings.ttsVoice,
           onToken: (token) => {
             if (get().streamingRequestId !== requestId) {
               return

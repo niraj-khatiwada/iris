@@ -3,3 +3,15 @@ pub const CHAT_TOKEN: &str = "chat:token";
 
 /// The end of a streamed response, whether it completed or was cancelled.
 pub const CHAT_DONE: &str = "chat:done";
+
+/// A streamed response failed after it started (HTTP, protocol, or provider error).
+pub const CHAT_ERROR: &str = "chat:error";
+
+/// Automatic read-aloud started playing.
+pub const SPEECH_START: &str = "speech:start";
+
+/// Automatic read-aloud finished, stopped, or was superseded.
+pub const SPEECH_END: &str = "speech:end";
+
+/// The quick overlay was hidden by the shortcut, Escape, or an explicit action.
+pub const OVERLAY_HIDDEN: &str = "overlay:hidden";

@@ -2,15 +2,22 @@ import {
   cancelGeneration,
   sendMessage,
   subscribeToChatDone,
+  subscribeToChatError,
   subscribeToChatToken,
 } from '@/tauri/commands/chat'
 import type { AgentMessage } from '@/types/chat'
+import type { TtsVoice } from '@/types/settings'
 import { newId } from '@/utils/id'
 import { isTauri } from '@/utils/tauri'
 
 export type AgentRunOptions = {
   conversationId: string
   messages: AgentMessage[]
+  apiKey: string
+  baseUrl: string
+  model: string
+  autoSpeak: boolean
+  ttsVoice: TtsVoice
   onToken: (token: string) => void
   onDone: (result: { cancelled: boolean }) => void
   onError: (message: string) => void
@@ -71,10 +78,16 @@ export function startAgentRun(options: AgentRunOptions): string {
             finish({ cancelled: payload.cancelled })
           }
         })
+        const offError = await subscribeToChatError((payload) => {
+          if (payload.requestId === requestId) {
+            finish({ cancelled: false }, payload.message)
+          }
+        })
 
         cleanup = () => {
           offToken()
           offDone()
+          offError()
         }
 
         if (finished) {
@@ -86,6 +99,11 @@ export function startAgentRun(options: AgentRunOptions): string {
           requestId,
           conversationId: options.conversationId,
           messages: options.messages,
+          apiKey: options.apiKey,
+          baseUrl: options.baseUrl,
+          model: options.model,
+          autoSpeak: options.autoSpeak,
+          ttsVoice: options.ttsVoice,
         })
       } catch (error) {
         finish(

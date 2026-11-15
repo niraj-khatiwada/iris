@@ -5,6 +5,7 @@ import type { AgentMessage } from '@/types/chat'
 
 const CHAT_TOKEN_EVENT = 'chat:token'
 const CHAT_DONE_EVENT = 'chat:done'
+const CHAT_ERROR_EVENT = 'chat:error'
 
 export type ChatTokenPayload = {
   requestId: string
@@ -16,10 +17,20 @@ export type ChatDonePayload = {
   cancelled: boolean
 }
 
+export type ChatErrorPayload = {
+  requestId: string
+  message: string
+}
+
 export function sendMessage(request: {
   requestId: string
   conversationId: string
   messages: AgentMessage[]
+  apiKey: string
+  baseUrl: string
+  model: string
+  autoSpeak: boolean
+  ttsVoice: string
 }) {
   return invoke<void>('send_message', { request })
 }
@@ -40,6 +51,14 @@ export function subscribeToChatDone(
   handler: (payload: ChatDonePayload) => void,
 ): Promise<UnlistenFn> {
   return listen<ChatDonePayload>(CHAT_DONE_EVENT, (event) =>
+    handler(event.payload),
+  )
+}
+
+export function subscribeToChatError(
+  handler: (payload: ChatErrorPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<ChatErrorPayload>(CHAT_ERROR_EVENT, (event) =>
     handler(event.payload),
   )
 }
