@@ -52,6 +52,9 @@ fn main() {
         .setup(|app| {
             app.manage(GenerationState::default());
             app.manage(crate::sys::speech::SpeechState::default());
+            let storage =
+                crate::core::storage::Storage::open(app.handle()).map_err(std::io::Error::other)?;
+            app.manage(storage);
 
             #[cfg(target_os = "macos")]
             if let Err(error) = crate::sys::overlay::setup_panels(app.handle()) {
@@ -157,6 +160,11 @@ fn main() {
             tauri_commands::screen::request_screen_capture_permission,
             tauri_commands::screen::open_screen_capture_settings,
             tauri_commands::shortcut::set_open_shortcut,
+            tauri_commands::storage::load_conversations,
+            tauri_commands::storage::save_conversation,
+            tauri_commands::storage::save_conversations,
+            tauri_commands::storage::delete_conversation,
+            tauri_commands::storage::clear_conversations,
             tauri_commands::voice::stop_speaking,
             tauri_commands::voice::transcribe_audio,
         ])

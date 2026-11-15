@@ -20,6 +20,7 @@ type ChatState = {
   streamingMessageId: string | null
   createConversation: () => string
   ensureQuickConversation: () => string
+  hydrateConversations: (conversations: Conversation[]) => void
   resetQuickConversation: () => void
   selectConversation: (id: string) => void
   deleteConversation: (id: string) => void
@@ -146,27 +147,72 @@ export const useChatStore = create<ChatState>()(
         return QUICK_CONVERSATION_ID
       },
 
+      hydrateConversations: (conversations) =>
+        set((state) => {
+          const normalized = conversations
+            .map((conversation) => ({
+              ...conversation,
+              messages: conversation.messages.map((message) =>
+                message.status === 'streaming'
+                  ? { ...message, status: 'complete' as const }
+                  : message,
+              ),
+            }))
+            .sort((a, b) => b.updatedAt - a.updatedAt)
+          const activeConversationId =
+            state.activeConversationId &&
+            normalized.some(
+              (conversation) => conversation.id === state.activeConversationId,
+            )
+              ? state.activeConversationId
+              : (normalized[0]?.id ?? null)
+
+          return { conversations: normalized, activeConversationId }
+        }),
+
       resetQuickConversation: () => {
         cancelActiveRun()
         const now = Date.now()
 
-        set((state) => ({
-          conversations: [
-            {
-              id: QUICK_CONVERSATION_ID,
-              title: QUICK_CONVERSATION_TITLE,
-              createdAt: now,
-              updatedAt: now,
-              messages: [],
-            },
-            ...state.conversations.filter(
-              (conversation) => conversation.id !== QUICK_CONVERSATION_ID,
-            ),
-          ],
-          streamingRequestId: null,
-          streamingConversationId: null,
-          streamingMessageId: null,
-        }))
+        set((state) => {
+          const quick = state.conversations.find(
+            (conversation) => conversation.id === QUICK_CONVERSATION_ID,
+          )
+          // Keep the old quick chat in history under a new id instead of dropping it.
+          const archived =
+            quick && quick.messages.length > 0
+              ? {
+                  ...quick,
+                  id: newId(),
+                  updatedAt: now,
+                  messages: quick.messages.map((message) =>
+                    message.status === 'streaming'
+                      ? { ...message, status: 'complete' as const }
+                      : message,
+                  ),
+                }
+              : null
+          const fresh = {
+            id: QUICK_CONVERSATION_ID,
+            title: QUICK_CONVERSATION_TITLE,
+            createdAt: now,
+            updatedAt: now,
+            messages: [],
+          }
+
+          return {
+            conversations: [
+              fresh,
+              ...(archived ? [archived] : []),
+              ...state.conversations.filter(
+                (conversation) => conversation.id !== QUICK_CONVERSATION_ID,
+              ),
+            ],
+            streamingRequestId: null,
+            streamingConversationId: null,
+            streamingMessageId: null,
+          }
+        })
       },
 
       deleteConversation: (id) =>
