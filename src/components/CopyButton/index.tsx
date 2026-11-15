@@ -34,7 +34,7 @@ function CopyButton({ text }: { text: string }) {
         onPress={copy}
       >
         {copied ? (
-          <Check className="size-3.5 text-success" />
+          <Check className="size-3.5 text-primary" />
         ) : (
           <Copy className="size-3.5" />
         )}
