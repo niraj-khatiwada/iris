@@ -51,6 +51,7 @@ fn main() {
     builder
         .setup(|app| {
             app.manage(GenerationState::default());
+            app.manage(crate::core::agent::SummaryCache::default());
             app.manage(crate::sys::speech::SpeechState::default());
             let storage =
                 crate::core::storage::Storage::open(app.handle()).map_err(std::io::Error::other)?;

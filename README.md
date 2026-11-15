@@ -187,26 +187,34 @@ Anthropic and Codex providers are planned later; keep provider-specific protocol
 
 ## Local data
 
-- Conversations and settings live in `localStorage` inside the webviews for now. The quick
-  overlay and the history window share the same keys. The DeepSeek API key is part of those
-  settings until the settings/secret-storage revamp.
+- Conversations are stored in SQLite at `Application Support/com.iris.app/iris.db`. The quick
+  overlay and the history window share the database, and `useChatStorage` mirrors changes into it
+  while keeping `localStorage` as a fast cross-window cache and crash fallback. Existing local
+  conversations are migrated on first launch.
+- New quick chats archive the previous quick conversation under a new id, so old messages stay in
+  History instead of being discarded.
+- Settings and the DeepSeek API key still live in `localStorage` until the settings/secret-storage
+  revamp moves the key to the Keychain.
+- Long conversations are summarized automatically. `core/agent.rs` keeps the newest turns
+  verbatim and folds older ones into a compact summary (one extra non-streaming DeepSeek call per
+  new block of history, cached per conversation), so a chat keeps working past the context window.
+  The summary only affects the request; the stored messages stay untouched.
 - No telemetry, no cloud sync, no network requests in the preview build.
 - The future provider integration is the only thing that should talk to the network.
 
-### Storage plan
+### Storage
 
-SQLite is the right home for chat history once the Rust agent lands. Keep it in Rust (for
-example `rusqlite` or `sqlx`) rather than reaching into SQL from the webview:
+Chat history is stored in Rust with `rusqlite`, not by reaching into SQL from the webview:
 
-- `conversations` — id, title, created_at, updated_at, source (`quick` / `history`), archived
-- `messages` — id, conversation_id, role, content, created_at, model, metadata JSON
-- `attachments` — id, message_id, kind, path, mime_type, width, height
-- `settings` — key/value for app preferences
-- FTS5 index over message content for search
+- `conversations` — id, title, created_at, updated_at
+- `messages` — id, conversation_id, role, content, created_at, status, error
 
-Store screenshots and other large attachments as files under Application Support, with their
-paths in SQLite. Keep API keys in the macOS Keychain, never in the database. Add a small
-migration table from day one.
+The database lives at `Application Support/com.iris.app/iris.db`. Conversations are saved
+individually after a short debounce; `localStorage` remains the immediate cross-window cache and
+is merged by `updatedAt` on launch/focus. Attachments, FTS5 search, settings, and Keychain-backed
+secrets are still planned. Store screenshots and other large attachments as files under
+Application Support, with their paths in SQLite. Keep API keys in the macOS Keychain, never in the
+database.
 
 ## Notes
 

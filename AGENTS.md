@@ -35,6 +35,7 @@ Pre-commit (Husky) runs `lint-staged` (Biome) and `tsc:check`.
 - DeepSeek settings live in `src/stores/settingsStore.ts`: API key, base URL, model, auto-speak, and TTS voice. The API key is temporary localStorage storage, matching the demo; do not commit a real key. The future settings revamp should move it to the Keychain.
 - Rust: `core/` for domain logic, `sys/` for platform helpers, `tauri_commands/` for command entry points, `utils/` for shared helpers.
 - Keep the agent event contract (`chat:token`, `chat:done`, `chat:error`) stable. The DeepSeek protocol lives in `src-tauri/src/core/agent.rs`; automatic TTS lives in `src-tauri/src/sys/speech.rs`.
+- `core/agent.rs` compresses long conversations before sending: once a conversation passes `CONTEXT_BUDGET_CHARS`, older turns are folded into a summary (cached per conversation in `SummaryCache`) while the newest `RECENT_BUDGET_CHARS` stay verbatim. The summary is injected into the system prompt, so the visible history and SQLite rows are never rewritten.
 - The quick overlay uses the fixed `iris:quick` conversation (`ensureQuickConversation` / `resetQuickConversation`). Do not switch the history window's active conversation from the overlay.
 
 ## Code style
@@ -67,7 +68,7 @@ export const useThingStore = create<ThingState>()(
 ```
 
 - Read with selectors. Write with actions.
-- Persist only durable data. Streaming flags and transient UI state stay out of storage.
+- Persist only durable data. Streaming flags and transient UI state stay out of storage. SQLite is the durable conversation store; localStorage is only the cache.
 - Sanitize persisted data in `merge` if its shape can go stale (see `chatStore`).
 
 ### Rust
@@ -121,7 +122,7 @@ export const useThingStore = create<ThingState>()(
 - The summon shortcut is configurable in Settings → Shortcuts (`openShortcut` in `settingsStore`). Rust registers `commandorcontrol+space` at startup, then `set_open_shortcut` replaces it with the recorded choice; the shortcut toggles the overlay and Escape closes it. There is no frontend shortcut plugin.
 - A menu bar tray icon (`src-tauri/icons/tray.png`, generated from `assets/tray-icon.svg`) owns **Ask Iris**, **History**, and **Quit Iris**. `RunEvent::ExitRequested` is prevented only while both windows are hidden; the menu bar's Quit always quits.
 - The overlay is CSS glass only. Do not apply a window-level native material to the overlay: it adds a second square window edge around the rounded card. Keep the transparent shadow gutter and the single `.liquid-glass` panel.
-- Chat history is still in `localStorage`. Do not add SQLite or `tauri-plugin-sql` until the backend storage work starts; the planned schema is in `README.md`.
+- Chat history is durable in SQLite via `src-tauri/src/core/storage.rs` (`iris.db` in the app data directory). The Zustand store still uses `localStorage` as the fast cross-window cache and crash fallback; `src/hooks/useChatStorage.ts` merges the two by `updatedAt` and saves conversations individually after a short debounce. New quick chats archive the previous quick conversation instead of deleting it.
 - Automatic read-aloud is backend-owned: chat completion triggers `/v1/tools/tts`, then `afplay`. Stop it on new messages, Cancel, New chat, and app exit. `speech:start` / `speech:end` carry the conversation id so the overlay can show a speaking strip. The overlay still hides reply text until Show response.
 - Screen Recording and Microphone permissions are declared in `src-tauri/Info.plist`. Screen Recording is exposed by `src-tauri/src/sys/screen.rs` + `src/tauri/commands/screen.ts`; use it before the region-capture UI. Microphone access is used only for overlay voice input.
 
