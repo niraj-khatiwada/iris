@@ -4,7 +4,7 @@ A personal, always-available desktop AI assistant for macOS — the Jarvis I act
 
 Iris is a native desktop app, not a browser tab. It opens instantly, stays out of the way, streams responses in place, and keeps its conversation history on your Mac.
 
-> **Status:** foundation. The floating quick-chat overlay, history window, streaming pipeline, cancellation, persistence, settings, and the Dynamic Island are in place. The agent runtime currently runs a clearly-labelled local preview reply; a real model provider plugs into one file.
+> **Status:** foundation. The floating quick-chat overlay, history window, Dynamic Island, and settings are in place. The desktop backend streams DeepSeek replies and reads them aloud automatically with DeepSeek TTS.
 
 ## Stack
 
@@ -13,6 +13,7 @@ Iris is a native desktop app, not a browser tab. It opens instantly, stays out o
 | Desktop shell   | Tauri 2                                      |
 | UI              | React 19 + Vite 8                            |
 | Design system   | HeroUI v3 + Tailwind CSS v4                  |
+| Model           | DeepSeek Messages API (deepseek-flash)       |
 | Live status     | islandcn via the shadcn registry             |
 | Motion          | `motion` springs for the overlay layout      |
 | State           | Zustand                                      |
@@ -39,6 +40,8 @@ bun run tauri:dev
 
 The first Rust build takes a few minutes; later builds are incremental.
 
+Open Settings (`⌘,`) and add your DeepSeek API key and, if needed, the API origin and model. The default origin is `https://api.deepseek.com` and the default model is `deepseek-flash`.
+
 To work on the UI without the native shell:
 
 ```bash
@@ -51,8 +54,12 @@ That runs a browser preview on [http://localhost:3002](http://localhost:3002) wi
 
 Iris launches as a floating quick-chat window, not a normal app window.
 
-- **⌥Space** summons or dismisses it from anywhere. **⌘⇧Space** is a fallback if another
-  launcher already owns ⌥Space.
+- **⌘Space** summons or dismisses it from anywhere by default. Record any shortcut you want in
+  Settings → Shortcuts. The overlay is a non-activating panel: it appears on the current Space
+  without focusing Iris, the history window, or the app you are using.
+- Click the microphone in the overlay to record. Stop to transcribe; **Send after listening**
+  (Settings → Voice, on by default) sends the transcript immediately, or places it in the input
+  when off. The blob switches to listening/speaking states.
 - It sits above normal and full-screen apps and on every macOS Space, bottom-centred, with no
   sidebar and no message bubbles.
 - A transparent, click-through canvas covers every display behind it. It is the future surface
@@ -60,7 +67,7 @@ Iris launches as a floating quick-chat window, not a normal app window.
 - It stays open when another app takes focus. **Esc** or the close button hides it; the shortcut
   toggles it.
 - The clock button opens the history window, where the older conversation UI still lives.
-- The iris orb in the menu bar offers **Ask Iris**, **History**, and **Quit Iris**. Iris keeps
+- The AI blob in the menu bar offers **Ask Iris**, **History**, and **Quit Iris**. Iris keeps
   running when the overlay hides; quit from there.
 - Quick chats are stored as one rolling **Quick chat** conversation, so they remain available in
   history. **+** starts a fresh one.
@@ -68,7 +75,7 @@ Iris launches as a floating quick-chat window, not a normal app window.
   the Dynamic Island's motion language.
 - The overlay is only revealed after the webview has painted, so there is no empty native
   surface or flash on launch.
-- Processing is voice-first: Iris shows an orb/ring/wave effect and only a Cancel button. The
+- Processing is voice-first: Iris shows a blob/ring/wave effect and only a Cancel button. The
   response text is not shown. Once it finishes, a small **Show response** button reveals it.
 - The history window stays hidden at launch; closing it does not quit Iris.
 
@@ -127,8 +134,9 @@ src-tauri/src/
 
 ## Dynamic Island and notifications
 
-The app mounts one `DynamicIsland` in `src/main.tsx`. It owns the island provider, the pill, and
-the activities the app already has:
+The app mounts one `DynamicIsland` in `src/main.tsx`. It currently mounts the island provider
+only; the visible pill is temporarily hidden while the top bar is reworked. The provider keeps the
+activity and notice code ready for the next pass:
 
 - **Agent responses** appear while a reply streams, with elapsed time, an expandable detail view,
   and a Stop control. Failures alert once and fold away.
@@ -150,21 +158,38 @@ activities and wrappers in `src/components/dynamic-island` instead of editing th
 ## How a response flows
 
 1. `src/stores/chatStore.ts` adds the user message and an empty assistant message.
-2. `src/services/agent.ts` starts a run and subscribes to `chat:token` / `chat:done`.
-3. The Rust command `send_message` spawns `core::agent::stream_placeholder_reply`.
-4. Tokens are emitted back to the webview and appended to the active message.
-5. `cancel_generation` (or starting another run) stops the stream; a cancelled message with no text is removed.
+2. `src/services/agent.ts` starts a run and subscribes to `chat:token` / `chat:done` / `chat:error`.
+3. The Rust command `send_message` calls DeepSeek's Anthropic-compatible Messages API
+   (`/anthropic/v1/messages`) and streams the response.
+4. Tokens are emitted back to the webview and appended to the active message, which stays hidden
+   in the overlay. `cancel_generation` stops the stream.
+5. On completion, the backend automatically sends the reply to DeepSeek TTS
+   (`/v1/tools/tts`), wraps the 24 kHz PCM in a WAV, and plays it with `afplay`. The overlay shows
+   **Response ready** with a **Show response** control instead of the text.
 
 The event contract is deliberately small, so replacing the preview with a streaming HTTP provider only touches `src-tauri/src/core/agent.rs`.
 
-## Where to add the real model
+## DeepSeek backend
 
-`src-tauri/src/core/agent.rs` is the only integration point. Keep emitting `ChatTokenPayload` and end with `ChatDonePayload`; the frontend needs no changes. Provider credentials should live in the macOS Keychain rather than the webview.
+`src-tauri/src/core/agent.rs` is the DeepSeek integration point. It uses the demo's
+Anthropic-compatible Messages protocol and includes the read-link tool and safety check. The
+settings provide the API key, origin, and model; the default is `deepseek-flash`.
+
+`src-tauri/src/sys/speech.rs` owns automatic read-aloud. It calls `/v1/tools/tts` with the selected
+voice, wraps the raw PCM in a WAV, and plays it with macOS `afplay`. A new message, Cancel, New
+chat, or quitting stops the current speech.
+
+The API key is stored in the settings store for now, matching the demo and the current settings
+prototype. Move it to the macOS Keychain when settings are revamped. Do not commit a real key.
+
+Anthropic and Codex providers are planned later; keep provider-specific protocol code inside
+`core/agent.rs` so the frontend and event contract do not change.
 
 ## Local data
 
 - Conversations and settings live in `localStorage` inside the webviews for now. The quick
-  overlay and the history window share the same keys.
+  overlay and the history window share the same keys. The DeepSeek API key is part of those
+  settings until the settings/secret-storage revamp.
 - No telemetry, no cloud sync, no network requests in the preview build.
 - The future provider integration is the only thing that should talk to the network.
 
@@ -186,22 +211,26 @@ migration table from day one.
 ## Notes
 
 - The quick overlay is a frameless, transparent, always-on-top window; the history window keeps
-  the overlay title bar and the Dynamic Island.
+  full-height header drag regions; the Dynamic Island pill is hidden for now.
 - The overlay is a single CSS **liquid-glass** card (sheen, noise, rim light) over the desktop.
   Its transparent window draws only the card, with a shadow gutter and no native window edge.
 - The full-screen canvas is click-through (`set_ignore_cursor_events(true)`) and is raised on every
   Space with `CanJoinAllSpaces | FullScreenAuxiliary`; the input panel sits above it at a higher
   window level.
-- **⌥Space** toggles the overlay (⌘⇧Space also works). `Esc` hides it. The history window's
+- The configured summon shortcut toggles the overlay. `Esc` hides it. The history window's
   shortcuts still work once it is open.
 - The overlay is always dark; the history window follows light/dark/system.
-- Screen Recording permission is declared in `src-tauri/Info.plist` and exposed through
-  `src-tauri/src/sys/screen.rs` + `src/tauri/commands/screen.ts`. The drag-to-select region capture
-  will request it the same way Raycast does.
+- Screen Recording and Microphone permissions are declared in `src-tauri/Info.plist`.
+  Screen Recording is exposed through `src-tauri/src/sys/screen.rs` +
+  `src/tauri/commands/screen.ts`; the drag-to-select region capture will request it the same way
+  Raycast does. The microphone is used only by the overlay's voice input.
 - Text inputs are intentionally quiet: no focus ring, glow, or accent outline. The caret is the
   focus cue.
 - Glass is a first-class part of the look: the overlay uses the `.liquid-glass` surface (sheen,
   noise, rim light), and the history window uses `.glass-rail`, `.glass-control`, and
-  `.glass-dialog` plus a slow aurora behind the content.
+  `.glass-dialog` plus a slow monochrome light pool behind the content.
 - The chat interface is provisional; wait for the new UI direction before adding screens.
 - Screen capture and screen context are not implemented yet; the overlay is ready for them.
+- Browser preview (`bun run vite:dev`) uses a local mock reply; the desktop app uses DeepSeek.
+- Responses are read aloud automatically when the **Read responses aloud** setting is on. The
+  overlay keeps the text hidden until **Show response** is pressed.
