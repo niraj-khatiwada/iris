@@ -18,7 +18,7 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 static QUITTING: AtomicBool = AtomicBool::new(false);
 
 fn main() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         // A second launch summons the quick chat instead of starting another app.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Err(error) = crate::sys::overlay::show(app) {
@@ -43,12 +43,23 @@ fn main() {
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Info)
                 .build(),
-        )
+        );
+
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_nspanel::init());
+
+    builder
         .setup(|app| {
             app.manage(GenerationState::default());
+            app.manage(crate::sys::speech::SpeechState::default());
 
-            // Alt+Space summons Iris from anywhere; macOS calls it Option+Space. The second
-            // binding is there for machines where another launcher already owns the first.
+            #[cfg(target_os = "macos")]
+            if let Err(error) = crate::sys::overlay::setup_panels(app.handle()) {
+                log::error!("Could not convert the Iris windows to non-activating panels: {error}");
+            }
+
+            // One global shortcut summons Iris. The default is registered below; the recorder in
+            // Settings replaces it at runtime with the user's choice.
             app.handle().plugin(
                 tauri_plugin_global_shortcut::Builder::new()
                     .with_handler(|app, _shortcut, event| {
@@ -61,15 +72,20 @@ fn main() {
                     .build(),
             )?;
 
-            for shortcut in ["alt+space", "commandorcontrol+shift+space"] {
-                match app.global_shortcut().register(shortcut) {
-                    Ok(()) => log::info!("Registered global shortcut {shortcut}"),
-                    Err(error) => {
-                        log::warn!("Could not register global shortcut {shortcut}: {error}")
-                    }
+            let default_shortcut = crate::tauri_commands::shortcut::DEFAULT_OPEN_SHORTCUT;
+            let registered = match app.global_shortcut().register(default_shortcut) {
+                Ok(()) => {
+                    log::info!("Registered global shortcut {default_shortcut}");
+                    true
                 }
-            }
-
+                Err(error) => {
+                    log::warn!("Could not register global shortcut {default_shortcut}: {error}");
+                    false
+                }
+            };
+            app.manage(crate::tauri_commands::shortcut::ShortcutState::new(
+                registered.then(|| default_shortcut.to_string()),
+            ));
             // The menu bar is how Iris is reached when both windows are hidden.
             let tray = (|| -> tauri::Result<()> {
                 let ask = MenuItem::with_id(app, "ask", "Ask Iris", true, None::<&str>)?;
@@ -140,6 +156,9 @@ fn main() {
             tauri_commands::screen::get_screen_capture_permission,
             tauri_commands::screen::request_screen_capture_permission,
             tauri_commands::screen::open_screen_capture_settings,
+            tauri_commands::shortcut::set_open_shortcut,
+            tauri_commands::voice::stop_speaking,
+            tauri_commands::voice::transcribe_audio,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Iris")
@@ -156,6 +175,10 @@ fn main() {
                     api.prevent_exit();
                     log::debug!("Kept Iris running in the menu bar");
                 }
+            }
+
+            if let tauri::RunEvent::Exit = &event {
+                crate::sys::speech::stop(app);
             }
 
             #[cfg(target_os = "macos")]

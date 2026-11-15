@@ -4,5 +4,7 @@
 <dict>
   <key>NSScreenCaptureUsageDescription</key>
   <string>Iris needs screen recording access so you can select an area of your screen and use it as context.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Iris needs microphone access to hear your voice and turn it into a message.</string>
 </dict>
 </plist>
