@@ -1,6 +1,6 @@
 import { Brain, CalendarClock, PenLine, Timer } from 'lucide-react'
 
-import Logo from '@/components/Logo'
+import IrisBlob from '@/components/IrisBlob'
 import { SUGGESTIONS } from '@/constants'
 import { useChatStore } from '@/stores/chatStore'
 import { greeting } from '@/utils/format'
@@ -17,7 +17,7 @@ function EmptyState() {
 
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-6 pb-6">
-      <Logo animated size={76} />
+      <IrisBlob emotion="happy" size={76} />
       <h2 className="mt-8 text-center text-3xl font-semibold tracking-tight text-balance">
         {greeting()}
       </h2>

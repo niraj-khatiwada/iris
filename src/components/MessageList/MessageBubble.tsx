@@ -1,7 +1,7 @@
 import { Avatar } from '@heroui/react'
 
 import CopyButton from '@/components/CopyButton'
-import Logo from '@/components/Logo'
+import IrisBlob from '@/components/IrisBlob'
 import Markdown from '@/components/Markdown'
 import type { ChatMessage } from '@/types/chat'
 import { formatMessageTime } from '@/utils/format'
@@ -19,7 +19,16 @@ function MessageBubble({ message }: { message: ChatMessage }) {
             <Avatar.Fallback className="text-[9px]">You</Avatar.Fallback>
           </Avatar>
         ) : (
-          <Logo size={26} />
+          <IrisBlob
+            emotion={
+              message.status === 'error'
+                ? 'sad'
+                : message.status === 'streaming'
+                  ? 'thinking'
+                  : 'neutral'
+            }
+            size={26}
+          />
         )}
       </div>
 
