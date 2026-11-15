@@ -70,13 +70,15 @@ function Composer() {
               <Button
                 isIconOnly
                 isDisabled
-                aria-label="Voice input coming soon"
+                aria-label="Voice input is available in Quick chat"
                 size="sm"
                 variant="ghost"
               >
                 <Mic className="size-4" />
               </Button>
-              <Tooltip.Content>Voice input is coming soon</Tooltip.Content>
+              <Tooltip.Content>
+                Voice input is available in Quick chat
+              </Tooltip.Content>
             </Tooltip>
 
             {streaming ? (
@@ -106,14 +108,6 @@ function Composer() {
           </div>
         </div>
       </div>
-
-      <p className="mt-2 text-center text-[10px] text-muted/70">
-        Iris can make mistakes. Check important information.
-        <span className="mx-1.5">·</span>
-        <span className="font-medium">↵</span> send
-        <span className="mx-1.5">·</span>
-        <span className="font-medium">⇧↵</span> new line
-      </p>
     </div>
   )
 }

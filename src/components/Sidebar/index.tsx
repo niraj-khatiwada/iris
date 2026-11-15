@@ -1,19 +1,21 @@
 import { Button } from '@heroui/react'
 import { PanelLeftClose, PanelLeftOpen, Plus } from 'lucide-react'
 
-import Logo from '@/components/Logo'
 import ConversationList from '@/components/Sidebar/ConversationList'
 import ConversationRail from '@/components/Sidebar/ConversationRail'
 import SidebarFooter from '@/components/Sidebar/SidebarFooter'
-import { APP_NAME } from '@/constants'
 import { useChatStore } from '@/stores/chatStore'
 import { useUIStore } from '@/stores/uiStore'
 import { cn } from '@/utils/tailwind'
+import { isTauri } from '@/utils/tauri'
 
 function Sidebar() {
   const open = useUIStore((state) => state.sidebarOpen)
   const toggleSidebar = useUIStore((state) => state.toggleSidebar)
   const createConversation = useChatStore((state) => state.createConversation)
+
+  // Native windows draw the traffic lights over the top-left. The browser preview does not.
+  const collapsedInset = isTauri() ? 'pt-8' : 'pt-2'
 
   return (
     <aside
@@ -22,37 +24,43 @@ function Sidebar() {
         open ? 'w-[280px]' : 'w-[68px]',
       )}
     >
-      <div
-        className={cn(
-          'flex items-center gap-3 px-4 pb-2 pt-3',
-          !open && 'justify-center px-2',
-        )}
-      >
-        <Logo size={28} />
-        {open ? (
-          <>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold tracking-tight">
-                {APP_NAME}
-              </p>
-              <p className="truncate text-[10px] uppercase tracking-[0.2em] text-muted/70">
-                Personal assistant
-              </p>
-            </div>
-            <Button
-              isIconOnly
-              aria-label="Collapse sidebar"
-              size="sm"
-              variant="ghost"
-              onPress={toggleSidebar}
-            >
-              <PanelLeftClose className="size-4" />
-            </Button>
-          </>
-        ) : null}
-      </div>
+      {open ? (
+        <div
+          data-tauri-drag-region
+          className="flex h-14 shrink-0 items-center justify-end pr-2"
+        >
+          <Button
+            isIconOnly
+            aria-label="Collapse sidebar"
+            size="sm"
+            variant="ghost"
+            onPress={toggleSidebar}
+          >
+            <PanelLeftClose className="size-4" />
+          </Button>
+        </div>
+      ) : (
+        <div
+          data-tauri-drag-region
+          className={cn(
+            'flex shrink-0 items-center justify-center px-1',
+            collapsedInset,
+          )}
+        >
+          <Button
+            isIconOnly
+            aria-label="Expand sidebar"
+            className="size-8"
+            size="sm"
+            variant="ghost"
+            onPress={toggleSidebar}
+          >
+            <PanelLeftOpen className="size-4" />
+          </Button>
+        </div>
+      )}
 
-      <div className={cn('px-3 pt-2', !open && 'px-2')}>
+      <div className={cn('px-3 pt-2', !open && 'flex justify-center px-2')}>
         <Button
           fullWidth={open}
           isIconOnly={!open}
@@ -64,18 +72,6 @@ function Sidebar() {
           <Plus className="size-4" />
           {open ? <span>New chat</span> : null}
         </Button>
-        {!open ? (
-          <Button
-            isIconOnly
-            fullWidth
-            aria-label="Expand sidebar"
-            className="mt-1"
-            variant="ghost"
-            onPress={toggleSidebar}
-          >
-            <PanelLeftOpen className="size-4" />
-          </Button>
-        ) : null}
       </div>
 
       {open ? <ConversationList /> : <ConversationRail />}

@@ -1,34 +1,17 @@
 import type { ReactNode } from 'react'
 
-import AgentActivity from '@/components/dynamic-island/agent-activity'
-import { useResolvedTheme } from '@/hooks/useResolvedTheme'
-import { Island, IslandProvider } from '@/lib/island'
+import { IslandProvider } from '@/lib/island'
 
 type DynamicIslandProps = {
   children: ReactNode
 }
 
 /**
- * The app's Dynamic Island: one provider, one pill, and the activities the app owns.
- *
- * HeroUI remains the app's design system. islandcn is a self-contained system layer with its
- * own black hardware look, so the two never need to share components or tokens.
+ * Keeps the island's activity store available to the app. The visible pill is intentionally
+ * hidden until the new top-bar layout gives it a home again.
  */
 export function DynamicIsland({ children }: DynamicIslandProps) {
-  const theme = useResolvedTheme()
-
-  return (
-    <IslandProvider>
-      <Island
-        backdrop={theme === 'dark' ? '#09090b' : '#f7f7f7'}
-        label="Iris live activity"
-        placement="viewport"
-        style={{ zIndex: 60 }}
-      />
-      <AgentActivity />
-      {children}
-    </IslandProvider>
-  )
+  return <IslandProvider>{children}</IslandProvider>
 }
 
 export type {

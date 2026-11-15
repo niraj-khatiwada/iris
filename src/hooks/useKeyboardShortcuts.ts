@@ -16,6 +16,19 @@ export function useKeyboardShortcuts() {
       const modifier = event.metaKey || event.ctrlKey
       const key = event.key.toLowerCase()
 
+      if (
+        event.key === '/' &&
+        !modifier &&
+        !event.altKey &&
+        !event.shiftKey &&
+        !isTypingTarget(event.target) &&
+        !document.querySelector('[role="dialog"]')
+      ) {
+        event.preventDefault()
+        focusComposer()
+        return
+      }
+
       if (modifier && key === 'n') {
         event.preventDefault()
         createConversation()
@@ -55,4 +68,17 @@ export function useKeyboardShortcuts() {
     stopStreaming,
     toggleSidebar,
   ])
+}
+
+function isTypingTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) {
+    return false
+  }
+
+  return (
+    target.isContentEditable ||
+    target.tagName === 'INPUT' ||
+    target.tagName === 'TEXTAREA' ||
+    target.tagName === 'SELECT'
+  )
 }
