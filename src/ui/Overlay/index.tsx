@@ -19,6 +19,12 @@ import Markdown from '@/components/Markdown'
 import VoiceStrip from '@/components/VoiceStrip'
 import VoiceWave from '@/components/VoiceWave'
 import { QUICK_CONVERSATION_ID } from '@/constants'
+import {
+  SENDING_EMOTIONS,
+  SENDING_SHAPES,
+  SENDING_TICK_MS,
+} from '@/constants/blob'
+import { useChatStorage } from '@/hooks/useChatStorage'
 import { useOverlayWindow } from '@/hooks/useOverlayWindow'
 import { useSpeechPlayback } from '@/hooks/useSpeechPlayback'
 import { useVoiceInput } from '@/hooks/useVoiceInput'
@@ -76,6 +82,7 @@ function Overlay() {
   const { panelRef, inputRef, hide } = useOverlayWindow()
   const autoSendVoice = useSettingsStore((state) => state.autoSendVoice)
   const voice = useVoiceInput()
+  useChatStorage()
   const speaking = useSpeechPlayback(QUICK_CONVERSATION_ID)
   const [value, setValue] = useState('')
   const [revealed, setRevealed] = useState(false)
@@ -83,6 +90,8 @@ function Overlay() {
     null,
   )
   const [copied, setCopied] = useState(false)
+  const [errorVisible, setErrorVisible] = useState(false)
+  const [sendingTick, setSendingTick] = useState(0)
   const [contentHeight, setContentHeight] = useState<number | null>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const copyTimer = useRef<number | null>(null)
@@ -115,6 +124,29 @@ function Overlay() {
   useEffect(() => {
     ensureQuickConversation()
   }, [ensureQuickConversation])
+
+  useEffect(() => {
+    if (!streaming) {
+      setSendingTick(0)
+      return
+    }
+
+    const timer = window.setInterval(() => {
+      setSendingTick((tick) => tick + 1)
+    }, SENDING_TICK_MS)
+    return () => window.clearInterval(timer)
+  }, [streaming])
+
+  useEffect(() => {
+    if (!voice.error) {
+      setErrorVisible(false)
+      return
+    }
+
+    setErrorVisible(true)
+    const timer = window.setTimeout(() => setErrorVisible(false), 3000)
+    return () => window.clearTimeout(timer)
+  }, [voice.error])
 
   // Drive the native window from the animated panel height.
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure when the view changes
@@ -291,6 +323,23 @@ function Overlay() {
         transition={panelSpring}
       >
         <div ref={contentRef} className="relative">
+          <AnimatePresence>
+            {errorVisible && voice.error ? (
+              <motion.div
+                key="voice-error"
+                animate={{ opacity: 1, y: 0 }}
+                className="pointer-events-none absolute inset-x-0 top-0 z-30 flex justify-center px-4 pt-2"
+                exit={{ opacity: 0, y: -8 }}
+                initial={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.2, ease: 'easeOut' }}
+              >
+                <p className="max-w-[90%] rounded-full border border-red-400/20 bg-red-950/85 px-3 py-1.5 text-center text-[11px] leading-4 text-red-200 shadow-lg backdrop-blur-xl">
+                  {voice.error}
+                </p>
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
+
           <AnimatePresence initial={false} mode="popLayout">
             <motion.div
               key={view}
@@ -330,13 +379,22 @@ function Overlay() {
                         <IrisBlob
                           activity={speaking ? 'speaking' : 'idle'}
                           emotion={
-                            assistant?.status === 'error'
-                              ? 'sad'
-                              : streaming
-                                ? 'thinking'
+                            streaming
+                              ? (SENDING_EMOTIONS[
+                                  sendingTick % SENDING_EMOTIONS.length
+                                ] ?? 'thinking')
+                              : assistant?.status === 'error'
+                                ? 'sad'
                                 : hasResponse
                                   ? 'happy'
                                   : 'neutral'
+                          }
+                          shape={
+                            streaming
+                              ? (SENDING_SHAPES[
+                                  sendingTick % SENDING_SHAPES.length
+                                ] ?? 'blob')
+                              : 'blob'
                           }
                           size={24}
                         />
@@ -362,7 +420,7 @@ function Overlay() {
                       {status}
                     </span>
 
-                    {streaming || speaking ? (
+                    {speaking ? (
                       <VoiceWave active compact className="w-24 shrink-0" />
                     ) : null}
 
@@ -491,18 +549,13 @@ function Overlay() {
                     </div>
                   ) : null}
 
-                  {voice.error ? (
-                    <p className="px-4 pt-2 text-[11px] leading-4 text-red-300/90">
-                      {voice.error}
-                    </p>
-                  ) : null}
-
                   <div
                     className={cn(
-                      'flex items-end gap-2 px-3',
+                      'flex items-end gap-2 px-3 transition-colors',
                       hasResponse
                         ? 'border-t border-white/[0.06] py-2'
                         : 'py-3',
+                      streaming && 'iris-input-sending',
                     )}
                   >
                     <TextArea

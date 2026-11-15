@@ -510,3 +510,33 @@ input:focus-visible {
   --tw-ring-shadow: 0 0 #0000 !important;
   --tw-ring-offset-shadow: 0 0 #0000 !important;
 }
+
+/* A quiet moving glow in the input surface while a request is in flight. */
+.iris-input-sending {
+  background-color: color-mix(in oklch, var(--primary) 3.5%, transparent);
+  background-image: linear-gradient(
+    100deg,
+    transparent 18%,
+    color-mix(in oklch, var(--primary) 9%, transparent) 44%,
+    color-mix(in oklch, white 3%, transparent) 51%,
+    transparent 78%
+  );
+  background-size: 220% 100%;
+  animation: iris-input-sweep 1.9s ease-in-out infinite;
+}
+
+@keyframes iris-input-sweep {
+  0% {
+    background-position: 135% 50%;
+  }
+  100% {
+    background-position: -135% 50%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .iris-input-sending {
+    background-image: none;
+    animation: none;
+  }
+}
