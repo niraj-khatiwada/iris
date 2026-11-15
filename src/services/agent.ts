@@ -17,6 +17,8 @@ export type AgentRunOptions = {
   baseUrl: string
   model: string
   autoSpeak: boolean
+  deepThink: boolean
+  webSearch: boolean
   ttsVoice: TtsVoice
   onToken: (token: string) => void
   onDone: (result: { cancelled: boolean }) => void
@@ -103,6 +105,8 @@ export function startAgentRun(options: AgentRunOptions): string {
           baseUrl: options.baseUrl,
           model: options.model,
           autoSpeak: options.autoSpeak,
+          deepThink: options.deepThink,
+          webSearch: options.webSearch,
           ttsVoice: options.ttsVoice,
         })
       } catch (error) {

@@ -30,6 +30,8 @@ export function sendMessage(request: {
   baseUrl: string
   model: string
   autoSpeak: boolean
+  deepThink: boolean
+  webSearch: boolean
   ttsVoice: string
 }) {
   return invoke<void>('send_message', { request })

@@ -1,6 +1,6 @@
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -30,7 +30,17 @@ struct ActiveSpeech {
 #[derive(Default)]
 pub struct SpeechState {
     active: Mutex<Option<ActiveSpeech>>,
+    /// Conversation whose read-aloud audio is still being fetched, if any.
+    preparing: Mutex<Option<String>>,
     epoch: AtomicU64,
+}
+
+impl SpeechState {
+    fn preparing(&self) -> MutexGuard<'_, Option<String>> {
+        self.preparing
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 }
 
 /// Stops the current read-aloud and invalidates any TTS request still in flight.
@@ -40,6 +50,11 @@ pub fn stop(app: &AppHandle) {
     };
 
     state.epoch.fetch_add(1, Ordering::SeqCst);
+
+    if let Some(conversation_id) = state.preparing().take() {
+        let _ = app.emit(event::SPEECH_END, SpeechEventPayload { conversation_id });
+    }
+
     let active = state
         .active
         .lock()
@@ -69,6 +84,14 @@ pub async fn speak(
     };
 
     let epoch = state.epoch.load(Ordering::SeqCst);
+    *state.preparing() = Some(conversation_id.clone());
+    let _ = app.emit(
+        event::SPEECH_PREPARING,
+        SpeechEventPayload {
+            conversation_id: conversation_id.clone(),
+        },
+    );
+
     let url = format!("{}/v1/tools/tts", base_url.trim_end_matches('/'));
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(300))
@@ -77,6 +100,7 @@ pub async fn speak(
         Ok(client) => client,
         Err(error) => {
             log::warn!("Could not create the TTS client: {error}");
+            abort(&app, &state, &conversation_id, epoch);
             return;
         }
     };
@@ -96,6 +120,7 @@ pub async fn speak(
         Ok(response) => response,
         Err(error) => {
             log::warn!("TTS request failed: {error}");
+            abort(&app, &state, &conversation_id, epoch);
             return;
         }
     };
@@ -104,6 +129,7 @@ pub async fn speak(
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
         log::warn!("TTS request failed ({status}): {body}");
+        abort(&app, &state, &conversation_id, epoch);
         return;
     }
 
@@ -111,12 +137,14 @@ pub async fn speak(
         Ok(bytes) => bytes,
         Err(error) => {
             log::warn!("Could not read the TTS audio: {error}");
+            abort(&app, &state, &conversation_id, epoch);
             return;
         }
     };
 
     // A newer message or Stop invalidated this request while it was downloading.
     if state.epoch.load(Ordering::SeqCst) != epoch {
+        // `stop` already ended the preparing state for this request.
         return;
     }
 
@@ -132,6 +160,7 @@ pub async fn speak(
         Ok(path) => path,
         Err(error) => {
             log::warn!("Could not resolve the speech cache directory: {error}");
+            abort(&app, &state, &conversation_id, epoch);
             return;
         }
     };
@@ -139,12 +168,14 @@ pub async fn speak(
     if let Some(parent) = path.parent() {
         if let Err(error) = std::fs::create_dir_all(parent) {
             log::warn!("Could not create the speech cache directory: {error}");
+            abort(&app, &state, &conversation_id, epoch);
             return;
         }
     }
 
     if let Err(error) = write_wav(&path, &pcm) {
         log::warn!("Could not write the speech audio: {error}");
+        abort(&app, &state, &conversation_id, epoch);
         return;
     }
 
@@ -153,7 +184,26 @@ pub async fn speak(
         return;
     }
 
+    // Playback is about to start; clear the preparing state without ending it.
+    *state.preparing() = None;
     play(&app, path, conversation_id);
+}
+
+/// Drops the preparing state when this request never reaches playback. Ignored when a newer
+/// request already replaced it.
+fn abort(app: &AppHandle, state: &SpeechState, conversation_id: &str, epoch: u64) {
+    if state.epoch.load(Ordering::SeqCst) != epoch {
+        return;
+    }
+
+    if state.preparing().take().is_some() {
+        let _ = app.emit(
+            event::SPEECH_END,
+            SpeechEventPayload {
+                conversation_id: conversation_id.to_string(),
+            },
+        );
+    }
 }
 
 fn play(app: &AppHandle, path: std::path::PathBuf, conversation_id: String) {
@@ -194,6 +244,7 @@ fn play(app: &AppHandle, path: std::path::PathBuf, conversation_id: String) {
         Err(error) => {
             log::warn!("Could not play the spoken reply: {error}");
             let _ = std::fs::remove_file(path);
+            let _ = app.emit(event::SPEECH_END, SpeechEventPayload { conversation_id });
         }
     }
 }

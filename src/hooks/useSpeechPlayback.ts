@@ -2,13 +2,18 @@ import { useEffect, useState } from 'react'
 
 import {
   subscribeToSpeechEnd,
+  subscribeToSpeechPreparing,
   subscribeToSpeechStart,
 } from '@/tauri/commands/voice'
 import { isTauri } from '@/utils/tauri'
 
-/** Tracks the backend's automatic read-aloud so the overlay can show a speaking state. */
+/**
+ * Tracks the backend's automatic read-aloud. `preparing` covers the gap between the reply and
+ * playback while the TTS audio is still downloading.
+ */
 export function useSpeechPlayback(conversationId?: string) {
   const [speaking, setSpeaking] = useState(false)
+  const [preparing, setPreparing] = useState(false)
 
   useEffect(() => {
     if (!isTauri()) {
@@ -16,38 +21,46 @@ export function useSpeechPlayback(conversationId?: string) {
     }
 
     let disposed = false
-    let offStart: (() => void) | undefined
-    let offEnd: (() => void) | undefined
+    const cleanup: Array<() => void> = []
 
-    void subscribeToSpeechStart((payload) => {
-      if (!conversationId || payload.conversationId === conversationId) {
-        setSpeaking(true)
-      }
-    }).then((off) => {
-      if (disposed) {
-        off()
-      } else {
-        offStart = off
-      }
+    const track = (
+      subscribe: (
+        handler: (payload: { conversationId: string }) => void,
+      ) => Promise<() => void>,
+      handler: (payload: { conversationId: string }) => void,
+    ) => {
+      void subscribe((payload) => {
+        if (!conversationId || payload.conversationId === conversationId) {
+          handler(payload)
+        }
+      }).then((off) => {
+        if (disposed) {
+          off()
+        } else {
+          cleanup.push(off)
+        }
+      })
+    }
+
+    track(subscribeToSpeechPreparing, () => {
+      setPreparing(true)
     })
-    void subscribeToSpeechEnd((payload) => {
-      if (!conversationId || payload.conversationId === conversationId) {
-        setSpeaking(false)
-      }
-    }).then((off) => {
-      if (disposed) {
-        off()
-      } else {
-        offEnd = off
-      }
+    track(subscribeToSpeechStart, () => {
+      setPreparing(false)
+      setSpeaking(true)
+    })
+    track(subscribeToSpeechEnd, () => {
+      setPreparing(false)
+      setSpeaking(false)
     })
 
     return () => {
       disposed = true
-      offStart?.()
-      offEnd?.()
+      for (const off of cleanup) {
+        off()
+      }
     }
   }, [conversationId])
 
-  return speaking
+  return { speaking, preparing }
 }

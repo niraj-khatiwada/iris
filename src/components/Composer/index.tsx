@@ -2,6 +2,7 @@ import { Button, TextArea, Tooltip } from '@heroui/react'
 import { ArrowUp, Mic, Square } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
+import ChatToggles from '@/components/ChatToggles'
 import { useChatStore } from '@/stores/chatStore'
 import { useUIStore } from '@/stores/uiStore'
 
@@ -45,6 +46,10 @@ function Composer() {
     <div className="mx-auto w-full max-w-3xl px-6 pb-6 pt-2">
       <div className="glass-control rounded-3xl p-2 transition-colors focus-within:border-accent/40">
         <div className="flex items-end gap-2 px-1.5">
+          <div className="pb-1.5">
+            <ChatToggles />
+          </div>
+
           <TextArea
             ref={textareaRef}
             aria-label="Message Iris"

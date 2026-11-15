@@ -91,6 +91,8 @@ pub struct AgentConfig {
     pub base_url: String,
     pub model: String,
     pub auto_speak: bool,
+    pub deep_think: bool,
+    pub web_search: bool,
     pub tts_voice: String,
 }
 
@@ -163,15 +165,7 @@ async fn run(
         return Ok(Outcome::Cancelled);
     };
 
-    let body = json!({
-        "model": config.model,
-        "system": prepared.system,
-        "messages": prepared.messages,
-        "thinking": { "type": "disabled" },
-        "safety_check": { "level": "high" },
-        "tools": [{ "type": "deepseek_read_url", "name": "deepseek_read_url" }],
-        "stream": true
-    });
+    let body = build_body(prepared.system, prepared.messages, config);
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(300))
@@ -536,6 +530,33 @@ async fn summarize_chunk(
     Ok(Some(summary.trim().to_string()))
 }
 
+/// Builds the streaming request body. Both composer toggles only affect the request.
+fn build_body(system: String, messages: Vec<Value>, config: &AgentConfig) -> Value {
+    let thinking = if config.deep_think {
+        "enabled"
+    } else {
+        "disabled"
+    };
+    let tools = if config.web_search {
+        json!([
+            { "type": "deepseek_read_url", "name": "deepseek_read_url" },
+            { "type": "deepseek_web_search", "name": "deepseek_web_search" }
+        ])
+    } else {
+        json!([{ "type": "deepseek_read_url", "name": "deepseek_read_url" }])
+    };
+
+    json!({
+        "model": config.model,
+        "system": system,
+        "messages": messages,
+        "thinking": { "type": thinking },
+        "safety_check": { "level": "high" },
+        "tools": tools,
+        "stream": true
+    })
+}
+
 fn emit_token(app: &AppHandle, request_id: &str, token: &str) {
     let _ = app.emit(
         event::CHAT_TOKEN,
@@ -649,8 +670,8 @@ mod tests {
     use serde_json::Value;
 
     use super::{
-        chunk_end, prepare_with, split_index, to_api_messages, trim_to_user, AgentConfig,
-        SummaryCache, Turn, RECENT_BUDGET_CHARS,
+        build_body, chunk_end, prepare_with, split_index, to_api_messages, trim_to_user,
+        AgentConfig, SummaryCache, Turn, RECENT_BUDGET_CHARS,
     };
     use crate::tauri_commands::chat::ChatMessageInput;
 
@@ -737,6 +758,31 @@ mod tests {
         }
     }
 
+    #[test]
+    fn toggles_shape_the_request() {
+        let mut config = AgentConfig {
+            api_key: "test-key".to_string(),
+            base_url: "http://127.0.0.1".to_string(),
+            model: "deepseek-flash".to_string(),
+            auto_speak: false,
+            deep_think: false,
+            web_search: false,
+            tts_voice: "stella".to_string(),
+        };
+
+        let off = build_body("system".to_string(), vec![], &config);
+        assert_eq!(off["thinking"]["type"], "disabled");
+        assert_eq!(off["tools"].as_array().unwrap().len(), 1);
+
+        config.deep_think = true;
+        config.web_search = true;
+        let on = build_body("system".to_string(), vec![], &config);
+        assert_eq!(on["thinking"]["type"], "enabled");
+        let tools = on["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[1]["name"], "deepseek_web_search");
+    }
+
     #[tokio::test]
     async fn compresses_long_conversations_and_reuses_the_summary() {
         let server = mock_server();
@@ -746,6 +792,8 @@ mod tests {
             base_url: server.base_url.clone(),
             model: "deepseek-flash".to_string(),
             auto_speak: false,
+            deep_think: false,
+            web_search: false,
             tts_voice: "stella".to_string(),
         };
         let cancelled = AtomicBool::new(false);

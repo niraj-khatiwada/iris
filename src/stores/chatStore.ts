@@ -331,6 +331,8 @@ export const useChatStore = create<ChatState>()(
           baseUrl: settings.baseUrl,
           model: settings.model,
           autoSpeak: settings.autoSpeak,
+          deepThink: settings.deepThink,
+          webSearch: settings.webSearch,
           ttsVoice: settings.ttsVoice,
           onToken: (token) => {
             if (get().streamingRequestId !== requestId) {

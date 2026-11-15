@@ -7,6 +7,9 @@ pub const CHAT_DONE: &str = "chat:done";
 /// A streamed response failed after it started (HTTP, protocol, or provider error).
 pub const CHAT_ERROR: &str = "chat:error";
 
+/// The reply finished and its read-aloud audio is being prepared.
+pub const SPEECH_PREPARING: &str = "speech:preparing";
+
 /// Automatic read-aloud started playing.
 pub const SPEECH_START: &str = "speech:start";
 

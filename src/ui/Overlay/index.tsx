@@ -12,8 +12,15 @@ import {
   X,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react'
 
+import ChatToggles from '@/components/ChatToggles'
 import IrisBlob from '@/components/IrisBlob'
 import Markdown from '@/components/Markdown'
 import VoiceStrip from '@/components/VoiceStrip'
@@ -83,7 +90,7 @@ function Overlay() {
   const autoSendVoice = useSettingsStore((state) => state.autoSendVoice)
   const voice = useVoiceInput()
   useChatStorage()
-  const speaking = useSpeechPlayback(QUICK_CONVERSATION_ID)
+  const { speaking, preparing } = useSpeechPlayback(QUICK_CONVERSATION_ID)
   const [value, setValue] = useState('')
   const [revealed, setRevealed] = useState(false)
   const [ignoredResponseId, setIgnoredResponseId] = useState<string | null>(
@@ -108,25 +115,41 @@ function Overlay() {
   const showResponse = !streaming && hasResponse && revealed
   const responseReady = !streaming && hasResponse && !revealed
   const voiceActive = voice.status !== 'idle'
-  const active = streaming || hasResponse || voiceActive || speaking
+  // The blob keeps morphing while a reply streams and while its audio is being prepared.
+  const morphing = streaming || preparing
+  const active =
+    streaming || preparing || hasResponse || voiceActive || speaking
   const status =
     assistant?.status === 'error'
       ? 'Something went wrong'
       : speaking
         ? 'Speaking'
-        : streaming
-          ? isThinking
-            ? 'Sending request…'
-            : 'Responding…'
-          : 'Ready'
+        : preparing
+          ? 'Reading aloud…'
+          : streaming
+            ? isThinking
+              ? 'Sending request…'
+              : 'Responding…'
+            : 'Ready'
   const view = voiceActive ? 'voice' : 'main'
+
+  const newChat = useCallback(() => {
+    if (isTauri()) {
+      void stopSpeaking()
+    }
+    resetQuickConversation()
+    setValue('')
+    setRevealed(false)
+    setIgnoredResponseId(null)
+    requestAnimationFrame(() => inputRef.current?.focus())
+  }, [inputRef, resetQuickConversation])
 
   useEffect(() => {
     ensureQuickConversation()
   }, [ensureQuickConversation])
 
   useEffect(() => {
-    if (!streaming) {
+    if (!morphing) {
       setSendingTick(0)
       return
     }
@@ -135,7 +158,7 @@ function Overlay() {
       setSendingTick((tick) => tick + 1)
     }, SENDING_TICK_MS)
     return () => window.clearInterval(timer)
-  }, [streaming])
+  }, [morphing])
 
   useEffect(() => {
     if (!voice.error) {
@@ -184,13 +207,20 @@ function Overlay() {
     [],
   )
 
-  // Pressing "/" returns focus to the quick input when it has drifted to a button or the card.
+  // Pressing "/" returns focus to the quick input, and Cmd/Ctrl+N starts a new chat.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      const modifier = event.metaKey || event.ctrlKey
+
+      if (modifier && event.key.toLowerCase() === 'n') {
+        event.preventDefault()
+        newChat()
+        return
+      }
+
       if (
         event.key !== '/' ||
-        event.metaKey ||
-        event.ctrlKey ||
+        modifier ||
         event.altKey ||
         event.shiftKey ||
         isTypingTarget(event.target)
@@ -204,7 +234,7 @@ function Overlay() {
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [inputRef])
+  }, [inputRef, newChat])
 
   // The native window can be hidden by the shortcut, which never reaches the React tree.
   useEffect(() => {
@@ -248,17 +278,6 @@ function Overlay() {
     }
     setRevealed(false)
     void stopStreaming()
-  }
-
-  const newChat = () => {
-    if (isTauri()) {
-      void stopSpeaking()
-    }
-    resetQuickConversation()
-    setValue('')
-    setRevealed(false)
-    setIgnoredResponseId(null)
-    requestAnimationFrame(() => inputRef.current?.focus())
   }
 
   const finishVoice = async () => {
@@ -362,7 +381,7 @@ function Overlay() {
                 />
               ) : (
                 <>
-                  <header className="flex items-center gap-2 px-4 pt-3 pb-2">
+                  <header className="flex items-center gap-2 px-4 pt-2.5 pb-1">
                     <Tooltip delay={500}>
                       <button
                         type="button"
@@ -379,7 +398,7 @@ function Overlay() {
                         <IrisBlob
                           activity={speaking ? 'speaking' : 'idle'}
                           emotion={
-                            streaming
+                            morphing
                               ? (SENDING_EMOTIONS[
                                   sendingTick % SENDING_EMOTIONS.length
                                 ] ?? 'thinking')
@@ -390,7 +409,7 @@ function Overlay() {
                                   : 'neutral'
                           }
                           shape={
-                            streaming
+                            morphing
                               ? (SENDING_SHAPES[
                                   sendingTick % SENDING_SHAPES.length
                                 ] ?? 'blob')
@@ -424,6 +443,24 @@ function Overlay() {
                       <VoiceWave active compact className="w-24 shrink-0" />
                     ) : null}
 
+                    {!streaming && (speaking || preparing) ? (
+                      <Tooltip delay={500}>
+                        <Button
+                          isIconOnly
+                          aria-label="Stop speaking"
+                          className="size-6 min-w-6 shrink-0 text-white/45"
+                          size="sm"
+                          variant="ghost"
+                          onPress={() => {
+                            void stopSpeaking()
+                          }}
+                        >
+                          <Square className="size-3 fill-current" />
+                        </Button>
+                        <Tooltip.Content>Stop speaking</Tooltip.Content>
+                      </Tooltip>
+                    ) : null}
+
                     <div className="ml-auto flex items-center gap-0.5">
                       {showResponse && assistant?.content ? (
                         <Tooltip delay={500}>
@@ -447,29 +484,19 @@ function Overlay() {
                         </Tooltip>
                       ) : null}
 
-                      {streaming || speaking ? (
+                      {streaming ? (
                         <Tooltip delay={500}>
                           <Button
                             isIconOnly
-                            aria-label={
-                              streaming ? 'Stop responding' : 'Stop speaking'
-                            }
+                            aria-label="Stop responding"
                             className="size-7 min-w-7 text-white/45"
                             size="sm"
                             variant="ghost"
-                            onPress={
-                              streaming
-                                ? cancel
-                                : () => {
-                                    void stopSpeaking()
-                                  }
-                            }
+                            onPress={cancel}
                           >
                             <Square className="size-3.5 fill-current" />
                           </Button>
-                          <Tooltip.Content>
-                            {streaming ? 'Stop' : 'Stop speaking'}
-                          </Tooltip.Content>
+                          <Tooltip.Content>Stop</Tooltip.Content>
                         </Tooltip>
                       ) : null}
 
@@ -551,13 +578,16 @@ function Overlay() {
 
                   <div
                     className={cn(
-                      'flex items-end gap-2 px-3 transition-colors',
+                      'flex items-end gap-2 px-3',
                       hasResponse
-                        ? 'border-t border-white/[0.06] py-2'
-                        : 'py-3',
-                      streaming && 'iris-input-sending',
+                        ? 'border-t border-white/[0.06] pt-1.5 pb-2.5'
+                        : 'pt-1 pb-2.5',
                     )}
                   >
+                    <div className="pb-1.5">
+                      <ChatToggles />
+                    </div>
+
                     <TextArea
                       ref={inputRef}
                       aria-label="Ask Iris"

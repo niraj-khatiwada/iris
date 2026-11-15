@@ -19,6 +19,14 @@ export type SpeechEventPayload = {
   conversationId: string
 }
 
+export function subscribeToSpeechPreparing(
+  handler: (payload: SpeechEventPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<SpeechEventPayload>('speech:preparing', (event) =>
+    handler(event.payload),
+  )
+}
+
 export function subscribeToSpeechStart(
   handler: (payload: SpeechEventPayload) => void,
 ): Promise<UnlistenFn> {

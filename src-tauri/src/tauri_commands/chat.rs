@@ -24,6 +24,12 @@ pub struct SendMessageRequest {
     pub base_url: String,
     pub model: String,
     pub auto_speak: bool,
+    /// Enables DeepSeek's DeepThink before the reply.
+    #[serde(default)]
+    pub deep_think: bool,
+    /// Declares the web search tool in addition to reading links.
+    #[serde(default)]
+    pub web_search: bool,
     pub tts_voice: String,
 }
 
@@ -140,6 +146,8 @@ pub fn send_message(
         base_url,
         model,
         auto_speak: request.auto_speak,
+        deep_think: request.deep_think,
+        web_search: request.web_search,
         tts_voice,
     };
 

@@ -195,6 +195,13 @@ Anthropic and Codex providers are planned later; keep provider-specific protocol
   History instead of being discarded.
 - Settings and the DeepSeek API key still live in `localStorage` until the settings/secret-storage
   revamp moves the key to the Keychain.
+- The composer has two request toggles, matching the DeepSeek demo: **DeepThink** sends
+  `thinking: { type: "enabled" }`, and **Search** adds the `deepseek_web_search` tool (reading links
+  is always available). Both are off by default and apply to the next message only.
+- Automatic read-aloud has a preparing phase: `speech:preparing` arrives when the reply ends and its
+  audio starts downloading, so the overlay shows `Reading aloud…` (with the blob still morphing)
+  instead of `Ready`. Playback then emits `speech:start`, and `speech:end` covers completion, Stop,
+  or a TTS failure.
 - Long conversations are summarized automatically. `core/agent.rs` keeps the newest turns
   verbatim and folds older ones into a compact summary (one extra non-streaming DeepSeek call per
   new block of history, cached per conversation), so a chat keeps working past the context window.

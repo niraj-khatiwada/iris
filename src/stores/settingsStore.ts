@@ -18,6 +18,10 @@ type SettingsState = {
   model: string
   autoSpeak: boolean
   autoSendVoice: boolean
+  /** Toggle in the composer: enable DeepSeek's DeepThink before answering. */
+  deepThink: boolean
+  /** Toggle in the composer: let DeepSeek search the web when it needs to. */
+  webSearch: boolean
   ttsVoice: TtsVoice
   /** Tauri shortcut syntax, chosen with the recorder in Settings → Shortcuts. */
   openShortcut: string
@@ -27,6 +31,8 @@ type SettingsState = {
   setModel: (model: string) => void
   setAutoSpeak: (autoSpeak: boolean) => void
   setAutoSendVoice: (autoSendVoice: boolean) => void
+  setDeepThink: (deepThink: boolean) => void
+  setWebSearch: (webSearch: boolean) => void
   setTtsVoice: (ttsVoice: TtsVoice) => void
   setOpenShortcut: (openShortcut: string) => void
 }
@@ -40,6 +46,8 @@ export const useSettingsStore = create<SettingsState>()(
       model: DEFAULT_MODEL,
       autoSpeak: true,
       autoSendVoice: true,
+      deepThink: false,
+      webSearch: false,
       ttsVoice: DEFAULT_TTS_VOICE,
       openShortcut: DEFAULT_OPEN_SHORTCUT,
       setTheme: (theme) => set({ theme }),
@@ -48,12 +56,14 @@ export const useSettingsStore = create<SettingsState>()(
       setModel: (model) => set({ model }),
       setAutoSpeak: (autoSpeak) => set({ autoSpeak }),
       setAutoSendVoice: (autoSendVoice) => set({ autoSendVoice }),
+      setDeepThink: (deepThink) => set({ deepThink }),
+      setWebSearch: (webSearch) => set({ webSearch }),
       setTtsVoice: (ttsVoice) => set({ ttsVoice }),
       setOpenShortcut: (openShortcut) => set({ openShortcut }),
     }),
     {
       name: SETTINGS_STORAGE_KEY,
-      version: 3,
+      version: 4,
       migrate: (persisted) => {
         const saved = persisted as Partial<SettingsState>
         const openShortcut =
@@ -72,6 +82,8 @@ export const useSettingsStore = create<SettingsState>()(
               : (saved.model ?? DEFAULT_MODEL),
           autoSpeak: saved.autoSpeak ?? true,
           autoSendVoice: saved.autoSendVoice ?? true,
+          deepThink: saved.deepThink ?? false,
+          webSearch: saved.webSearch ?? false,
           ttsVoice: saved.ttsVoice === 'tide' ? 'tide' : DEFAULT_TTS_VOICE,
           openShortcut,
         } as SettingsState
