@@ -1,15 +1,31 @@
 import { Button, TextArea, Tooltip } from '@heroui/react'
 import { invoke } from '@tauri-apps/api/core'
-import { ArrowUp, Check, Clock3, Copy, Eye, Plus, X } from 'lucide-react'
+import {
+  ArrowUp,
+  Check,
+  ChevronUp,
+  Copy,
+  Eye,
+  Mic,
+  Plus,
+  Square,
+  X,
+} from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 
-import IrisEffect from '@/components/IrisEffect'
-import Logo from '@/components/Logo'
+import IrisBlob from '@/components/IrisBlob'
 import Markdown from '@/components/Markdown'
+import VoiceStrip from '@/components/VoiceStrip'
+import VoiceWave from '@/components/VoiceWave'
 import { QUICK_CONVERSATION_ID } from '@/constants'
 import { useOverlayWindow } from '@/hooks/useOverlayWindow'
+import { useSpeechPlayback } from '@/hooks/useSpeechPlayback'
+import { useVoiceInput } from '@/hooks/useVoiceInput'
 import { useChatStore } from '@/stores/chatStore'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { subscribeToOverlayHidden } from '@/tauri/commands/overlay'
+import { stopSpeaking } from '@/tauri/commands/voice'
 import { cn } from '@/utils/tailwind'
 import { isTauri } from '@/utils/tauri'
 
@@ -27,6 +43,19 @@ const contentSpring = {
   mass: 0.6,
 } as const
 
+function isTypingTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) {
+    return false
+  }
+
+  return (
+    target.isContentEditable ||
+    target.tagName === 'INPUT' ||
+    target.tagName === 'TEXTAREA' ||
+    target.tagName === 'SELECT'
+  )
+}
+
 function Overlay() {
   const ensureQuickConversation = useChatStore(
     (state) => state.ensureQuickConversation,
@@ -39,11 +68,15 @@ function Overlay() {
   const conversation = useChatStore((state) =>
     state.conversations.find((item) => item.id === QUICK_CONVERSATION_ID),
   )
+  const selectConversation = useChatStore((state) => state.selectConversation)
   const streaming = useChatStore(
     (state) => state.streamingConversationId === QUICK_CONVERSATION_ID,
   )
 
   const { panelRef, inputRef, hide } = useOverlayWindow()
+  const autoSendVoice = useSettingsStore((state) => state.autoSendVoice)
+  const voice = useVoiceInput()
+  const speaking = useSpeechPlayback(QUICK_CONVERSATION_ID)
   const [value, setValue] = useState('')
   const [revealed, setRevealed] = useState(false)
   const [ignoredResponseId, setIgnoredResponseId] = useState<string | null>(
@@ -65,22 +98,19 @@ function Overlay() {
   const isThinking = streaming && !assistant?.content
   const showResponse = !streaming && hasResponse && revealed
   const responseReady = !streaming && hasResponse && !revealed
-  const active = streaming || hasResponse
+  const voiceActive = voice.status !== 'idle'
+  const active = streaming || hasResponse || voiceActive || speaking
   const status =
     assistant?.status === 'error'
       ? 'Something went wrong'
-      : streaming
-        ? 'Thinking'
-        : 'Ready'
-  const responseLabel =
-    assistant?.status === 'error' ? 'Response failed' : 'Response ready'
-  const view = streaming
-    ? 'processing'
-    : showResponse
-      ? 'revealed'
-      : responseReady
-        ? 'ready'
-        : 'idle'
+      : speaking
+        ? 'Speaking'
+        : streaming
+          ? isThinking
+            ? 'Sending request…'
+            : 'Responding…'
+          : 'Ready'
+  const view = voiceActive ? 'voice' : 'main'
 
   useEffect(() => {
     ensureQuickConversation()
@@ -122,6 +152,50 @@ function Overlay() {
     [],
   )
 
+  // Pressing "/" returns focus to the quick input when it has drifted to a button or the card.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.key !== '/' ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.shiftKey ||
+        isTypingTarget(event.target)
+      ) {
+        return
+      }
+
+      event.preventDefault()
+      inputRef.current?.focus()
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [inputRef])
+
+  // The native window can be hidden by the shortcut, which never reaches the React tree.
+  useEffect(() => {
+    if (!isTauri()) {
+      return
+    }
+
+    let disposed = false
+    let off: (() => void) | undefined
+    void subscribeToOverlayHidden(() => voice.cancel()).then((unlisten) => {
+      if (disposed) {
+        unlisten()
+      } else {
+        off = unlisten
+      }
+    })
+
+    return () => {
+      disposed = true
+      off?.()
+    }
+  }, [voice.cancel])
+
   const submit = () => {
     const text = value.trim()
     if (!text || streaming) {
@@ -145,6 +219,9 @@ function Overlay() {
   }
 
   const newChat = () => {
+    if (isTauri()) {
+      void stopSpeaking()
+    }
     resetQuickConversation()
     setValue('')
     setRevealed(false)
@@ -152,7 +229,30 @@ function Overlay() {
     requestAnimationFrame(() => inputRef.current?.focus())
   }
 
+  const finishVoice = async () => {
+    const text = await voice.stop()
+    if (!text) {
+      return
+    }
+
+    if (autoSendVoice) {
+      setValue('')
+      setRevealed(false)
+      setIgnoredResponseId(null)
+      ensureQuickConversation()
+      void sendMessage(text, QUICK_CONVERSATION_ID)
+    } else {
+      setValue(text)
+      requestAnimationFrame(() => inputRef.current?.focus())
+    }
+  }
+
   const openHistory = () => {
+    // Keep the history window on the quick conversation when it has content.
+    if (conversation && conversation.messages.length > 0) {
+      selectConversation(QUICK_CONVERSATION_ID)
+    }
+
     if (isTauri()) {
       void invoke('show_main_window')
       return
@@ -199,136 +299,181 @@ function Overlay() {
               initial={{ opacity: 0, y: 8, filter: 'blur(6px)' }}
               transition={contentSpring}
             >
-              {streaming ? (
-                <div className="flex flex-col items-center px-6 py-5">
-                  <IrisEffect />
-                  <p
-                    aria-live="polite"
-                    className="iris-shimmer mt-1 text-[12px] font-medium"
-                  >
-                    {isThinking ? 'Thinking…' : 'Responding…'}
-                  </p>
-                  <Button
-                    className="mt-3 gap-1.5 rounded-full border border-white/10 bg-white/[0.06] px-3 text-[11px] text-white/60 hover:bg-white/[0.1] hover:text-white/90"
-                    size="sm"
-                    variant="ghost"
-                    onPress={cancel}
-                  >
-                    <X className="size-3.5" />
-                    Cancel
-                  </Button>
-                </div>
+              {voiceActive ? (
+                <VoiceStrip
+                  mode={
+                    voice.status === 'recording' ? 'listening' : 'transcribing'
+                  }
+                  analyser={voice.analyser}
+                  onStop={
+                    voice.status === 'recording'
+                      ? () => void finishVoice()
+                      : voice.cancel
+                  }
+                />
               ) : (
                 <>
-                  {hasResponse ? (
-                    <header className="flex items-center gap-2 px-4 pt-3">
-                      <Logo animated size={20} />
-                      <span className="text-[10px] font-semibold tracking-[0.16em] text-white/55">
-                        IRIS
-                      </span>
-                      <span
-                        className={cn(
-                          'size-1.5 rounded-full',
-                          assistant?.status === 'error'
-                            ? 'bg-red-400'
-                            : 'bg-emerald-400/80',
-                        )}
-                      />
-                      <span className="truncate text-[11px] text-white/35">
-                        {status}
-                      </span>
-
-                      <div className="ml-auto flex items-center gap-0.5">
-                        {showResponse && assistant?.content ? (
-                          <Tooltip delay={500}>
-                            <Button
-                              isIconOnly
-                              aria-label={copied ? 'Copied' : 'Copy response'}
-                              className="size-7 min-w-7 text-white/45"
-                              size="sm"
-                              variant="ghost"
-                              onPress={copyResponse}
-                            >
-                              {copied ? (
-                                <Check className="size-3.5 text-emerald-300" />
-                              ) : (
-                                <Copy className="size-3.5" />
-                              )}
-                            </Button>
-                            <Tooltip.Content>
-                              {copied ? 'Copied' : 'Copy'}
-                            </Tooltip.Content>
-                          </Tooltip>
-                        ) : null}
-
-                        <Tooltip delay={500}>
-                          <Button
-                            isIconOnly
-                            aria-label="New quick chat"
-                            className="size-7 min-w-7 text-white/45"
-                            size="sm"
-                            variant="ghost"
-                            onPress={newChat}
-                          >
-                            <Plus className="size-3.5" />
-                          </Button>
-                          <Tooltip.Content>New chat</Tooltip.Content>
-                        </Tooltip>
-
-                        <Tooltip delay={500}>
-                          <Button
-                            isIconOnly
-                            aria-label="Open history"
-                            className="size-7 min-w-7 text-white/45"
-                            size="sm"
-                            variant="ghost"
-                            onPress={openHistory}
-                          >
-                            <Clock3 className="size-3.5" />
-                          </Button>
-                          <Tooltip.Content>History</Tooltip.Content>
-                        </Tooltip>
-
-                        <Tooltip delay={500}>
-                          <Button
-                            isIconOnly
-                            aria-label="Hide Iris"
-                            className="size-7 min-w-7 text-white/45"
-                            size="sm"
-                            variant="ghost"
-                            onPress={hide}
-                          >
-                            <X className="size-3.5" />
-                          </Button>
-                          <Tooltip.Content>Hide · Esc</Tooltip.Content>
-                        </Tooltip>
-                      </div>
-                    </header>
-                  ) : null}
-
-                  {responseReady ? (
-                    <div className="flex items-center gap-2 px-5 pb-1 pt-2">
-                      <span
-                        className={cn(
-                          'size-1.5 rounded-full',
-                          assistant?.status === 'error'
-                            ? 'bg-red-400'
-                            : 'bg-emerald-400/80',
-                        )}
-                      />
-                      <span className="text-[11px] text-white/40">
-                        {responseLabel}
-                      </span>
+                  <header className="flex items-center gap-2 px-4 pt-3 pb-2">
+                    <Tooltip delay={500}>
                       <button
                         type="button"
-                        className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.06] px-2.5 py-1 text-[11px] font-medium text-white/65 transition hover:border-white/20 hover:bg-white/[0.1] hover:text-white/90 focus-visible:outline-none"
-                        onClick={() => setRevealed(true)}
+                        aria-label="Open history"
+                        className="shrink-0 rounded-full focus-visible:outline-none"
+                        onDoubleClick={openHistory}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault()
+                            openHistory()
+                          }
+                        }}
                       >
-                        <Eye className="size-3" />
-                        Show response
+                        <IrisBlob
+                          activity={speaking ? 'speaking' : 'idle'}
+                          emotion={
+                            assistant?.status === 'error'
+                              ? 'sad'
+                              : streaming
+                                ? 'thinking'
+                                : hasResponse
+                                  ? 'happy'
+                                  : 'neutral'
+                          }
+                          size={24}
+                        />
                       </button>
+                      <Tooltip.Content>
+                        Double-click for history
+                      </Tooltip.Content>
+                    </Tooltip>
+
+                    <span className="text-[10px] font-semibold tracking-[0.16em] text-white/55">
+                      IRIS
+                    </span>
+                    <span
+                      className={cn(
+                        'size-1.5 rounded-full',
+                        assistant?.status === 'error'
+                          ? 'bg-red-400'
+                          : 'bg-primary',
+                        streaming && 'animate-pulse',
+                      )}
+                    />
+                    <span className="truncate text-[11px] text-white/35">
+                      {status}
+                    </span>
+
+                    {streaming || speaking ? (
+                      <VoiceWave active compact className="w-24 shrink-0" />
+                    ) : null}
+
+                    <div className="ml-auto flex items-center gap-0.5">
+                      {showResponse && assistant?.content ? (
+                        <Tooltip delay={500}>
+                          <Button
+                            isIconOnly
+                            aria-label={copied ? 'Copied' : 'Copy response'}
+                            className="size-7 min-w-7 text-white/45"
+                            size="sm"
+                            variant="ghost"
+                            onPress={copyResponse}
+                          >
+                            {copied ? (
+                              <Check className="size-3.5 text-primary" />
+                            ) : (
+                              <Copy className="size-3.5" />
+                            )}
+                          </Button>
+                          <Tooltip.Content>
+                            {copied ? 'Copied' : 'Copy'}
+                          </Tooltip.Content>
+                        </Tooltip>
+                      ) : null}
+
+                      {streaming || speaking ? (
+                        <Tooltip delay={500}>
+                          <Button
+                            isIconOnly
+                            aria-label={
+                              streaming ? 'Stop responding' : 'Stop speaking'
+                            }
+                            className="size-7 min-w-7 text-white/45"
+                            size="sm"
+                            variant="ghost"
+                            onPress={
+                              streaming
+                                ? cancel
+                                : () => {
+                                    void stopSpeaking()
+                                  }
+                            }
+                          >
+                            <Square className="size-3.5 fill-current" />
+                          </Button>
+                          <Tooltip.Content>
+                            {streaming ? 'Stop' : 'Stop speaking'}
+                          </Tooltip.Content>
+                        </Tooltip>
+                      ) : null}
+
+                      {responseReady ? (
+                        <Tooltip delay={500}>
+                          <Button
+                            isIconOnly
+                            aria-label="Show response"
+                            className="size-7 min-w-7 text-white/45"
+                            size="sm"
+                            variant="ghost"
+                            onPress={() => setRevealed(true)}
+                          >
+                            <Eye className="size-3.5" />
+                          </Button>
+                          <Tooltip.Content>Show response</Tooltip.Content>
+                        </Tooltip>
+                      ) : showResponse ? (
+                        <Tooltip delay={500}>
+                          <Button
+                            isIconOnly
+                            aria-label="Hide response"
+                            className="size-7 min-w-7 text-white/45"
+                            size="sm"
+                            variant="ghost"
+                            onPress={() => setRevealed(false)}
+                          >
+                            <ChevronUp className="size-3.5" />
+                          </Button>
+                          <Tooltip.Content>Hide response</Tooltip.Content>
+                        </Tooltip>
+                      ) : null}
+
+                      <Tooltip delay={500}>
+                        <Button
+                          isIconOnly
+                          aria-label="New quick chat"
+                          className="size-7 min-w-7 text-white/45"
+                          size="sm"
+                          variant="ghost"
+                          onPress={newChat}
+                        >
+                          <Plus className="size-3.5" />
+                        </Button>
+                        <Tooltip.Content>New chat</Tooltip.Content>
+                      </Tooltip>
+
+                      <Tooltip delay={500}>
+                        <Button
+                          isIconOnly
+                          aria-label="Hide Iris"
+                          className="size-7 min-w-7 text-white/45"
+                          size="sm"
+                          variant="ghost"
+                          onPress={hide}
+                        >
+                          <X className="size-3.5" />
+                        </Button>
+                        <Tooltip.Content>Hide · Esc</Tooltip.Content>
+                      </Tooltip>
                     </div>
-                  ) : null}
+                  </header>
 
                   {showResponse ? (
                     <div
@@ -346,6 +491,12 @@ function Overlay() {
                     </div>
                   ) : null}
 
+                  {voice.error ? (
+                    <p className="px-4 pt-2 text-[11px] leading-4 text-red-300/90">
+                      {voice.error}
+                    </p>
+                  ) : null}
+
                   <div
                     className={cn(
                       'flex items-end gap-2 px-3',
@@ -354,8 +505,6 @@ function Overlay() {
                         : 'py-3',
                     )}
                   >
-                    {hasResponse ? null : <Logo className="mb-1.5" size={26} />}
-
                     <TextArea
                       ref={inputRef}
                       aria-label="Ask Iris"
@@ -379,26 +528,25 @@ function Overlay() {
                     />
 
                     <div className="mb-0.5 flex shrink-0 items-center gap-0.5">
-                      {hasResponse ? null : (
-                        <Tooltip delay={500}>
-                          <Button
-                            isIconOnly
-                            aria-label="Open history"
-                            className="text-white/45"
-                            size="sm"
-                            variant="ghost"
-                            onPress={openHistory}
-                          >
-                            <Clock3 className="size-4" />
-                          </Button>
-                          <Tooltip.Content>History</Tooltip.Content>
-                        </Tooltip>
-                      )}
+                      <Tooltip delay={500}>
+                        <Button
+                          isIconOnly
+                          aria-label="Voice input"
+                          className="text-white/45"
+                          isDisabled={streaming}
+                          size="sm"
+                          variant="ghost"
+                          onPress={() => void voice.start()}
+                        >
+                          <Mic className="size-4" />
+                        </Button>
+                        <Tooltip.Content>Voice input</Tooltip.Content>
+                      </Tooltip>
 
                       <Button
                         isIconOnly
                         aria-label="Send message"
-                        isDisabled={!value.trim()}
+                        isDisabled={streaming || !value.trim()}
                         size="sm"
                         variant="primary"
                         onPress={submit}
