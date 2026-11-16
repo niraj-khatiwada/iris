@@ -16,6 +16,9 @@ pub const SPEECH_START: &str = "speech:start";
 /// Automatic read-aloud finished, stopped, or was superseded.
 pub const SPEECH_END: &str = "speech:end";
 
+/// Automatic read-aloud failed before it could play, with the reason to show the user.
+pub const SPEECH_ERROR: &str = "speech:error";
+
 /// The quick overlay was hidden by the shortcut, Escape, or an explicit action.
 pub const OVERLAY_HIDDEN: &str = "overlay:hidden";
 

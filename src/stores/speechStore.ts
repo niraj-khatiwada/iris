@@ -7,6 +7,8 @@ type SpeechState = {
   preparing: boolean
   /** A reply is being read aloud right now. */
   speaking: boolean
+  /** Why the last read-aloud attempt failed, if it did. */
+  error: string | null
 }
 
 /**
@@ -18,4 +20,5 @@ export const useSpeechStore = create<SpeechState>()(() => ({
   conversationId: null,
   preparing: false,
   speaking: false,
+  error: null,
 }))

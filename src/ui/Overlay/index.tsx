@@ -131,6 +131,7 @@ function Overlay() {
   useSpeechPlayback()
   const speaking = useSpeechStore((state) => state.speaking)
   const preparing = useSpeechStore((state) => state.preparing)
+  const speechError = useSpeechStore((state) => state.error)
   const [value, setValue] = useState('')
   const [revealed, setRevealed] = useState(false)
   const [ignoredResponseId, setIgnoredResponseId] = useState<string | null>(
@@ -174,7 +175,7 @@ function Overlay() {
   const voiceActive = voice.status !== 'idle'
   const errorMessage =
     assistant?.status === 'error' ? (assistant.error ?? '') : ''
-  const overlayError = voice.error ?? captureError
+  const overlayError = voice.error ?? speechError ?? captureError
   const apiKeyMissing = /api key/i.test(errorMessage)
   // The blob keeps morphing while a reply streams and while its audio is being prepared.
   const morphing = streaming || preparing

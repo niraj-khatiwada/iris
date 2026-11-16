@@ -3,6 +3,7 @@ import { useEffect } from 'react'
 import { useSpeechStore } from '@/stores/speechStore'
 import {
   subscribeToSpeechEnd,
+  subscribeToSpeechError,
   subscribeToSpeechPreparing,
   subscribeToSpeechStart,
 } from '@/tauri/commands/voice'
@@ -36,17 +37,38 @@ export function useSpeechPlayback() {
 
     track(() =>
       subscribeToSpeechPreparing(({ conversationId }) => {
-        setState({ conversationId, preparing: true, speaking: false })
+        setState({
+          conversationId,
+          preparing: true,
+          speaking: false,
+          error: null,
+        })
       }),
     )
     track(() =>
       subscribeToSpeechStart(({ conversationId }) => {
-        setState({ conversationId, preparing: false, speaking: true })
+        setState({
+          conversationId,
+          preparing: false,
+          speaking: true,
+          error: null,
+        })
       }),
     )
     track(() =>
       subscribeToSpeechEnd(() => {
         setState({ conversationId: null, preparing: false, speaking: false })
+      }),
+    )
+    track(() =>
+      subscribeToSpeechError(({ message }) => {
+        // Keep the reason on screen: a silent failure leaves the user guessing.
+        setState({
+          conversationId: null,
+          preparing: false,
+          speaking: false,
+          error: message,
+        })
       }),
     )
 

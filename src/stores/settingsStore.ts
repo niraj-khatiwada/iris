@@ -64,6 +64,12 @@ type SettingsState = {
    * stored without reading the Keychain.
    */
   apiKeyHint: string | null
+  /**
+   * Bumped whenever the key is saved or removed. Anything derived from the key — the model
+   * catalogue, capability probes — watches this so a new provider is re-checked immediately
+   * instead of leaving the previous provider's results on screen.
+   */
+  apiKeyRevision: number
   autoSpeak: boolean
   autoSendVoice: boolean
   /** Toggle in the composer: enable thinking mode before answering. */
@@ -81,6 +87,8 @@ type SettingsState = {
   overlayShortcuts: OverlayShortcuts
   setTheme: (theme: ThemeMode) => void
   setApiKeyState: (state: { present: boolean; hint: string | null }) => void
+  /** Signals that the credential changed, so key-derived results must be refetched. */
+  markApiKeyChanged: () => void
   setBaseUrl: (baseUrl: string) => void
   setApiFormat: (apiFormat: ApiFormat) => void
   setModel: (model: string) => void
@@ -104,6 +112,7 @@ export const useSettingsStore = create<SettingsState>()(
       model: DEFAULT_MODEL,
       apiKeyPresent: false,
       apiKeyHint: null,
+      apiKeyRevision: 0,
       autoSpeak: true,
       autoSendVoice: true,
       deepThink: false,
@@ -116,6 +125,9 @@ export const useSettingsStore = create<SettingsState>()(
       setTheme: (theme) => set({ theme }),
       setApiKeyState: ({ present, hint }) =>
         set({ apiKeyPresent: present, apiKeyHint: hint }),
+      // Called only after an actual save or removal, so opening the panel does not invalidate.
+      markApiKeyChanged: () =>
+        set((state) => ({ apiKeyRevision: state.apiKeyRevision + 1 })),
       setBaseUrl: (baseUrl) => set({ baseUrl }),
       setApiFormat: (apiFormat) => set({ apiFormat }),
       setModel: (model) => set({ model }),

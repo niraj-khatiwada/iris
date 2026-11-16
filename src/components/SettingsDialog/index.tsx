@@ -514,6 +514,8 @@ function ApiKeyField({ query }: { query: string }) {
   const apiKeyPresent = useSettingsStore((state) => state.apiKeyPresent)
   const apiKeyHint = useSettingsStore((state) => state.apiKeyHint)
   const setApiKeyState = useSettingsStore((state) => state.setApiKeyState)
+  const markApiKeyChanged = useSettingsStore((state) => state.markApiKeyChanged)
+  const setModel = useSettingsStore((state) => state.setModel)
   const [draft, setDraft] = useState('')
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -544,6 +546,10 @@ function ApiKeyField({ query }: { query: string }) {
     try {
       const { hint, present } = await saveApiKey(draft)
       setApiKeyState({ present, hint })
+      // A different key usually means a different provider: drop the old model so the catalogue
+      // refetches and an id from the previous provider is never sent to the new one.
+      setModel('')
+      markApiKeyChanged()
       setDraft('')
       setEditing(false)
     } catch (reason) {
@@ -563,6 +569,8 @@ function ApiKeyField({ query }: { query: string }) {
     try {
       const { hint, present } = await removeApiKey()
       setApiKeyState({ present, hint })
+      setModel('')
+      markApiKeyChanged()
       setDraft('')
       setEditing(false)
     } catch (reason) {
@@ -756,9 +764,17 @@ function CapabilitiesField({ query }: { query: string }) {
   const apiFormat = useSettingsStore((state) => state.apiFormat)
   const model = useSettingsStore((state) => state.model)
   const apiKeyPresent = useSettingsStore((state) => state.apiKeyPresent)
+  const apiKeyRevision = useSettingsStore((state) => state.apiKeyRevision)
   const [busy, setBusy] = useState(false)
   const [report, setReport] = useState<CapabilityReport | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  // A report describes one provider, model, and format; any of those changing invalidates it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset when the target changes
+  useEffect(() => {
+    setReport(null)
+    setError(null)
+  }, [apiKeyRevision, baseUrl, apiFormat, model])
 
   const run = async () => {
     if (busy) {
@@ -843,6 +859,8 @@ function ModelField({ query }: { query: string }) {
   const baseUrl = useSettingsStore((state) => state.baseUrl)
   const apiKeyPresent = useSettingsStore((state) => state.apiKeyPresent)
   const apiFormat = useSettingsStore((state) => state.apiFormat)
+  // A new key means a new provider: refetch rather than trust the previous catalogue.
+  const apiKeyRevision = useSettingsStore((state) => state.apiKeyRevision)
   const setApiFormat = useSettingsStore((state) => state.setApiFormat)
   const [models, setModels] = useState<ModelEntry[]>([])
   const [busy, setBusy] = useState(false)
@@ -871,9 +889,11 @@ function ModelField({ query }: { query: string }) {
     [setApiFormat],
   )
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: apiKeyRevision forces a refetch on a new key
   const load = useCallback(async () => {
     // Without a key the catalogue cannot be fetched, and a read would prompt for Keychain access.
     if (!isTauri() || !apiKeyPresent) {
+      setModels([])
       return
     }
 
@@ -896,11 +916,14 @@ function ModelField({ query }: { query: string }) {
       // from the model on every load silently reverted a manual choice whenever the panel
       // remounted (for example after switching settings tabs).
     } catch (reason) {
+      // A failed fetch must not leave the previous provider's list on screen, which would look
+      // like the new key returned those models.
+      setModels([])
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
       setBusy(false)
     }
-  }, [apiKeyPresent, baseUrl, setModel])
+  }, [apiKeyPresent, apiKeyRevision, baseUrl, setModel])
 
   // Load as soon as the panel opens; Refresh only re-runs it.
   useEffect(() => {
@@ -1029,8 +1052,16 @@ function VoicePanel({ query }: { query: string }) {
   const asrUrl = useSettingsStore((state) => state.asrUrl)
   const setAsrUrl = useSettingsStore((state) => state.setAsrUrl)
   const baseUrl = useSettingsStore((state) => state.baseUrl)
+  const apiKeyRevision = useSettingsStore((state) => state.apiKeyRevision)
   const [ttsResult, setTtsResult] = useState<EndpointTest | null>(null)
   const [asrResult, setAsrResult] = useState<EndpointTest | null>(null)
+
+  // Test results describe one key and base URL, so a credential change invalidates them.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset when the target changes
+  useEffect(() => {
+    setTtsResult(null)
+    setAsrResult(null)
+  }, [apiKeyRevision, baseUrl])
 
   return (
     <>

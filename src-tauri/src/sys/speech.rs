@@ -19,6 +19,14 @@ struct SpeechEventPayload {
     conversation_id: String,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SpeechErrorPayload {
+    conversation_id: String,
+    /// The reason to show the user, e.g. an HTTP status from the TTS endpoint.
+    message: String,
+}
+
 struct ActiveSpeech {
     child: Child,
     path: std::path::PathBuf,
@@ -108,7 +116,13 @@ pub async fn speak(
     let url = tts_url.trim().to_string();
     if url.is_empty() {
         log::warn!("No TTS endpoint is configured; skipping read-aloud");
-        abort(&app, &state, &conversation_id, epoch);
+        fail(
+            &app,
+            &state,
+            &conversation_id,
+            epoch,
+            "Read-aloud needs a speech URL in Settings.".to_string(),
+        );
         return;
     }
     let client = match reqwest::Client::builder()
@@ -117,8 +131,13 @@ pub async fn speak(
     {
         Ok(client) => client,
         Err(error) => {
-            log::warn!("Could not create the TTS client: {error}");
-            abort(&app, &state, &conversation_id, epoch);
+            fail(
+                &app,
+                &state,
+                &conversation_id,
+                epoch,
+                format!("Could not create the speech client: {error}"),
+            );
             return;
         }
     };
@@ -137,8 +156,13 @@ pub async fn speak(
     {
         Ok(response) => response,
         Err(error) => {
-            log::warn!("TTS request failed: {error}");
-            abort(&app, &state, &conversation_id, epoch);
+            fail(
+                &app,
+                &state,
+                &conversation_id,
+                epoch,
+                format!("Could not reach the speech endpoint: {error}"),
+            );
             return;
         }
     };
@@ -146,16 +170,36 @@ pub async fn speak(
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        log::warn!("TTS request failed ({status}): {body}");
-        abort(&app, &state, &conversation_id, epoch);
+        // Surface the provider's own reason: a 401 or 404 here points at the key or the URL.
+        let detail = serde_json::from_str::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("error")
+                    .and_then(|error| error.get("message"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+            })
+            .unwrap_or_else(|| body.chars().take(160).collect());
+        let message = if detail.trim().is_empty() {
+            format!("Read-aloud failed ({status}).")
+        } else {
+            format!("Read-aloud failed ({status}): {detail}")
+        };
+        fail(&app, &state, &conversation_id, epoch, message);
         return;
     }
 
     let pcm = match response.bytes().await {
         Ok(bytes) => bytes,
         Err(error) => {
-            log::warn!("Could not read the TTS audio: {error}");
-            abort(&app, &state, &conversation_id, epoch);
+            fail(
+                &app,
+                &state,
+                &conversation_id,
+                epoch,
+                format!("Could not read the speech audio: {error}"),
+            );
             return;
         }
     };
@@ -252,6 +296,23 @@ fn abort(app: &AppHandle, state: &SpeechState, conversation_id: &str, epoch: u64
             },
         );
     }
+}
+
+/// Like `abort`, but also tells the UI why read-aloud failed, so it is never a silent no-op.
+fn fail(app: &AppHandle, state: &SpeechState, conversation_id: &str, epoch: u64, message: String) {
+    if !state.is_current(epoch) {
+        return;
+    }
+
+    log::warn!("Read-aloud failed: {message}");
+    abort(app, state, conversation_id, epoch);
+    let _ = app.emit(
+        event::SPEECH_ERROR,
+        SpeechErrorPayload {
+            conversation_id: conversation_id.to_string(),
+            message,
+        },
+    );
 }
 
 fn play(app: &AppHandle, path: std::path::PathBuf, conversation_id: String, epoch: u64) {

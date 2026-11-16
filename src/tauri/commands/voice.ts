@@ -109,3 +109,17 @@ export function subscribeToSpeechEnd(
     handler(event.payload),
   )
 }
+
+export type SpeechErrorPayload = {
+  conversationId: string
+  message: string
+}
+
+/** Read-aloud failed before playing; carries the reason so the UI can show it. */
+export function subscribeToSpeechError(
+  handler: (payload: SpeechErrorPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<SpeechErrorPayload>('speech:error', (event) =>
+    handler(event.payload),
+  )
+}
