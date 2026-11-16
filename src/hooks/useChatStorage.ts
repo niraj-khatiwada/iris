@@ -11,6 +11,13 @@ import {
 import type { Conversation } from '@/types/chat'
 import { isTauri } from '@/utils/tauri'
 
+let suspended = false
+
+/** Stops the SQLite mirror while Iris resets its data, so a focus hydrate cannot undo the wipe. */
+export function suspendChatStorage() {
+  suspended = true
+}
+
 /**
  * Mirrors the localStorage-backed chat state into SQLite. SQLite is the durable copy; localStorage
  * stays as the fast cross-window cache and crash fallback.
@@ -50,7 +57,7 @@ export function useChatStorage() {
 
     const flush = async () => {
       flushTimer = null
-      if (!ready || syncing) {
+      if (!ready || syncing || suspended) {
         return
       }
 
@@ -87,7 +94,7 @@ export function useChatStorage() {
     }
 
     const schedule = (conversations: Conversation[]) => {
-      if (!ready || syncing) {
+      if (!ready || syncing || suspended) {
         return
       }
 
@@ -111,7 +118,7 @@ export function useChatStorage() {
     }
 
     const hydrate = async () => {
-      if (disposed || syncing) {
+      if (disposed || syncing || suspended) {
         return
       }
       if (useChatStore.getState().streamingRequestId) {

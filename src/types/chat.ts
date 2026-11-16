@@ -16,6 +16,8 @@ export type Conversation = {
   title: string
   createdAt: number
   updatedAt: number
+  /** Set when the conversation is moved to the archive; archived chats are read-only. */
+  archivedAt?: number
   messages: ChatMessage[]
 }
 

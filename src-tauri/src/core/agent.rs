@@ -67,6 +67,11 @@ impl SummaryCache {
             .map(|entry| (entry.covered, entry.summary.clone()))
     }
 
+    /// Drops all compressed summaries, e.g. when the user resets Iris.
+    pub fn clear(&self) {
+        self.lock().clear();
+    }
+
     fn set(&self, conversation_id: &str, covered: usize, summary: String) {
         let mut cache = self.lock();
         // Conversations are unbounded; drop everything rather than grow without limit.

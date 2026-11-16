@@ -1,5 +1,9 @@
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
+use serde::{Deserialize, Serialize};
 use tauri::{
     AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, Position, Size,
     WebviewWindow,
@@ -14,6 +18,64 @@ const OVERLAY_WIDTH: f64 = 792.0;
 const OVERLAY_MIN_HEIGHT: f64 = 100.0;
 const OVERLAY_MAX_HEIGHT: f64 = 720.0;
 const BOTTOM_MARGIN: f64 = 96.0;
+const POSITION_FILE: &str = "overlay-position.json";
+const POSITION_WRITE_INTERVAL: Duration = Duration::from_millis(350);
+
+/// The overlay's last position. The bottom edge is kept fixed while the panel grows or shrinks,
+/// which is how the quick chat feels anchored to where it was dropped.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+struct OverlayBounds {
+    x: i32,
+    bottom: i32,
+}
+
+/// Window position is native state, not conversation data, so it lives in Rust and survives
+/// restarts through `overlay-position.json` in the app data directory.
+#[derive(Default)]
+pub struct OverlayPosition {
+    saved: Mutex<Option<OverlayBounds>>,
+    last_write: Mutex<Option<Instant>>,
+    /// Programmatic placements fire Moved events too; ignore those so they cannot overwrite the
+    /// restored position before it is applied.
+    suppress_until: Mutex<Option<Instant>>,
+}
+
+impl OverlayPosition {
+    pub fn load(app: &AppHandle) -> Self {
+        let saved = position_path(app)
+            .and_then(|path| std::fs::read(path).ok())
+            .and_then(|bytes| serde_json::from_slice::<OverlayBounds>(&bytes).ok());
+
+        if let Some(bounds) = saved {
+            log::debug!(
+                "Restored the Iris overlay position at {} {}",
+                bounds.x,
+                bounds.bottom
+            );
+        }
+
+        Self {
+            saved: Mutex::new(saved),
+            last_write: Mutex::new(None),
+            suppress_until: Mutex::new(None),
+        }
+    }
+
+    fn suppress(&self) {
+        *self
+            .suppress_until
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+            Some(Instant::now() + Duration::from_millis(300));
+    }
+
+    fn is_suppressed(&self) -> bool {
+        self.suppress_until
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .is_some_and(|until| Instant::now() < until)
+    }
+}
 
 #[cfg(target_os = "macos")]
 mod panel {
@@ -157,6 +219,7 @@ pub fn show(app: &AppHandle) -> Result<(), String> {
 
 pub fn hide(app: &AppHandle) -> Result<(), String> {
     log::debug!("Hiding Iris overlay");
+    persist_position(app);
     if let Some(canvas) = app.get_webview_window(CANVAS_LABEL) {
         #[cfg(target_os = "macos")]
         {
@@ -324,6 +387,107 @@ fn elevate(window: &WebviewWindow, interactive: bool) {
     }
 }
 
+/// Persists the position recorded by the last Moved event.
+pub fn persist_position(app: &AppHandle) {
+    let Some(state) = app.try_state::<OverlayPosition>() else {
+        return;
+    };
+    let bounds = *state
+        .saved
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(bounds) = bounds {
+        write_position(app, bounds);
+    }
+}
+
+/// Records a native window move. Writes are throttled, and `hide`/exit flush the final value.
+pub fn record_move(app: &AppHandle, position: PhysicalPosition<i32>, size: PhysicalSize<u32>) {
+    if !OVERLAY_READY.load(Ordering::SeqCst) {
+        return;
+    }
+
+    let Some(state) = app.try_state::<OverlayPosition>() else {
+        return;
+    };
+
+    if state.is_suppressed() {
+        return;
+    }
+
+    let bounds = OverlayBounds {
+        x: position.x,
+        bottom: position.y + size.height as i32,
+    };
+    *state
+        .saved
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(bounds);
+
+    let mut last_write = state
+        .last_write
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if last_write.is_some_and(|instant| instant.elapsed() < POSITION_WRITE_INTERVAL) {
+        return;
+    }
+    *last_write = Some(Instant::now());
+    drop(last_write);
+
+    write_position(app, bounds);
+}
+
+/// Drops the saved position, e.g. when Iris is reset, so the next show recentres the overlay.
+pub fn reset_position(app: &AppHandle) {
+    if let Some(state) = app.try_state::<OverlayPosition>() {
+        *state
+            .saved
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+        *state
+            .last_write
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+        *state
+            .suppress_until
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+    }
+
+    if let Some(path) = position_path(app) {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+fn position_path(app: &AppHandle) -> Option<PathBuf> {
+    app.path()
+        .app_data_dir()
+        .ok()
+        .map(|directory| directory.join(POSITION_FILE))
+}
+
+fn write_position(app: &AppHandle, bounds: OverlayBounds) {
+    let Some(path) = position_path(app) else {
+        return;
+    };
+
+    if let Some(parent) = path.parent() {
+        if let Err(error) = std::fs::create_dir_all(parent) {
+            log::warn!("Could not create the Iris data directory: {error}");
+            return;
+        }
+    }
+
+    match serde_json::to_vec(&bounds) {
+        Ok(json) => {
+            if let Err(error) = std::fs::write(&path, json) {
+                log::warn!("Could not save the Iris overlay position: {error}");
+            }
+        }
+        Err(error) => log::warn!("Could not encode the Iris overlay position: {error}"),
+    }
+}
+
 /// Grows or shrinks the window with the panel, keeping its bottom edge fixed.
 pub fn resize(app: &AppHandle, height: f64) -> Result<(), String> {
     let window = overlay_window(app)?;
@@ -335,19 +499,14 @@ pub fn resize(app: &AppHandle, height: f64) -> Result<(), String> {
     position(&window, Some(height))
 }
 
-/// Bottom-centres the overlay on the screen it is on. `logical_height` is used right after a
-/// resize, before the window has reported its new outer size.
+/// Places the overlay at its saved position, or bottom-centres it on the screen it is on.
+/// `logical_height` is used right after a resize, before the window has reported its new size.
 fn position(window: &WebviewWindow, logical_height: Option<f64>) -> Result<(), String> {
-    let monitor = window
+    let scale = window
         .current_monitor()
         .map_err(|error| error.to_string())?
-        .or_else(|| window.primary_monitor().ok().flatten());
-
-    let Some(monitor) = monitor else {
-        return Ok(());
-    };
-
-    let scale = monitor.scale_factor();
+        .map(|monitor| monitor.scale_factor())
+        .unwrap_or(1.0);
     let (width, height) = match logical_height {
         Some(height) => (
             (OVERLAY_WIDTH * scale).round() as i32,
@@ -359,6 +518,49 @@ fn position(window: &WebviewWindow, logical_height: Option<f64>) -> Result<(), S
         }
     };
 
+    let saved = window
+        .app_handle()
+        .try_state::<OverlayPosition>()
+        .and_then(|state| {
+            *state
+                .saved
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+        });
+
+    if let Some(bounds) = saved {
+        let monitors = window
+            .available_monitors()
+            .map_err(|error| error.to_string())?;
+        let monitor =
+            monitor_for_point(&monitors, bounds.x + width / 2, bounds.bottom - height / 2)
+                .or_else(|| window.current_monitor().ok().flatten())
+                .or_else(|| window.primary_monitor().ok().flatten());
+
+        if let Some(monitor) = monitor {
+            let monitor_size = monitor.size();
+            let monitor_position = monitor.position();
+            let min_x = monitor_position.x;
+            let max_x = (monitor_position.x + monitor_size.width as i32 - width).max(min_x);
+            let min_y = monitor_position.y;
+            let max_y = (monitor_position.y + monitor_size.height as i32 - height).max(min_y);
+            let x = bounds.x.clamp(min_x, max_x);
+            let y = (bounds.bottom - height).clamp(min_y, max_y);
+
+            return place(window, x, y);
+        }
+    }
+
+    let monitor = window
+        .current_monitor()
+        .map_err(|error| error.to_string())?
+        .or_else(|| window.primary_monitor().ok().flatten());
+
+    let Some(monitor) = monitor else {
+        return Ok(());
+    };
+
+    let scale = monitor.scale_factor();
     let monitor_size = monitor.size();
     let monitor_position = monitor.position();
     let x = monitor_position.x + (monitor_size.width as i32 - width) / 2;
@@ -366,7 +568,31 @@ fn position(window: &WebviewWindow, logical_height: Option<f64>) -> Result<(), S
         - height
         - (BOTTOM_MARGIN * scale).round() as i32;
 
+    place(window, x, y)
+}
+
+/// Moves the window and suppresses the Moved events caused by this placement.
+fn place(window: &WebviewWindow, x: i32, y: i32) -> Result<(), String> {
+    if let Some(state) = window.app_handle().try_state::<OverlayPosition>() {
+        state.suppress();
+    }
+
     window
         .set_position(Position::Physical(PhysicalPosition::new(x, y)))
         .map_err(|error| error.to_string())
+}
+
+/// Finds the monitor containing a point, so a panel dragged to another display is clamped to it.
+fn monitor_for_point(monitors: &[tauri::Monitor], x: i32, y: i32) -> Option<tauri::Monitor> {
+    monitors
+        .iter()
+        .find(|monitor| {
+            let position = monitor.position();
+            let size = monitor.size();
+            x >= position.x
+                && y >= position.y
+                && x < position.x + size.width as i32
+                && y < position.y + size.height as i32
+        })
+        .cloned()
 }

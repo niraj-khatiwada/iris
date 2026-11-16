@@ -133,6 +133,7 @@ export function useVoiceInput() {
 }
 
 async function transcribe(audio: Blob) {
+  await useSettingsStore.persist.rehydrate()
   const { apiKey, baseUrl } = useSettingsStore.getState()
   if (!apiKey.trim()) {
     throw new Error('Add your DeepSeek API key in Settings.')

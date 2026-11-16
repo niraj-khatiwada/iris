@@ -187,10 +187,26 @@ Anthropic and Codex providers are planned later; keep provider-specific protocol
 
 ## Local data
 
-- Conversations are stored in SQLite at `Application Support/com.iris.app/iris.db`. The quick
+- Conversations are stored in SQLite at `Application Support/com.iris.desktop/iris.db`. The quick
   overlay and the history window share the database, and `useChatStorage` mirrors changes into it
   while keeping `localStorage` as a fast cross-window cache and crash fallback. Existing local
   conversations are migrated on first launch.
+- The bundle identifier is `com.iris.desktop` (reverse-DNS, no `.app` suffix). On first launch
+  after the rename from `com.iris.app`, `core/legacy.rs` copies the old Application Support and
+  WebKit folders into the new identifier so chats and settings survive.
+- Development builds use `com.iris.desktopdev` through `src-tauri/tauri.dev.conf.json`, merged by
+  `bun run tauri:dev` and `bun run tauri:build:debug`. Dev chats and settings therefore live in
+  separate `Application Support` and WebKit folders and never clash with the installed app.
+- Settings → Storage has two separate actions: **Clear** deletes only conversations, while
+  **Reset Iris** wipes conversations, compressed summaries, speech audio, settings, the API key,
+  and the pre-rename data copies, then restarts the app. The SQLite file is vacuumed and its WAL
+  truncated so cleared messages are not recoverable from the database files.
+- The quick overlay can be dragged by its header or input-row background. Its frame is saved to
+  `overlay-position.json` in the app data directory, restored on launch, and cleared by Reset Iris.
+  The bottom edge stays fixed while the panel grows or shrinks.
+- Deleting a conversation archives it (`archivedAt`). The sidebar shows a collapsible Archives
+  section while anything is archived; archived chats open read-only and can be restored or
+  permanently deleted. They never accept new messages or renames.
 - New quick chats archive the previous quick conversation under a new id, so old messages stay in
   History instead of being discarded.
 - Settings and the DeepSeek API key still live in `localStorage` until the settings/secret-storage
@@ -213,10 +229,10 @@ Anthropic and Codex providers are planned later; keep provider-specific protocol
 
 Chat history is stored in Rust with `rusqlite`, not by reaching into SQL from the webview:
 
-- `conversations` — id, title, created_at, updated_at
+- `conversations` — id, title, created_at, updated_at, archived_at
 - `messages` — id, conversation_id, role, content, created_at, status, error
 
-The database lives at `Application Support/com.iris.app/iris.db`. Conversations are saved
+The database lives at `Application Support/com.iris.desktop/iris.db`. Conversations are saved
 individually after a short debounce; `localStorage` remains the immediate cross-window cache and
 is merged by `updatedAt` on launch/focus. Attachments, FTS5 search, settings, and Keychain-backed
 secrets are still planned. Store screenshots and other large attachments as files under

@@ -7,7 +7,7 @@ import {
   ScrollShadow,
   TextField,
 } from '@heroui/react'
-import { MessageSquare, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
+import { Archive, MessageSquare, MoreHorizontal, Pencil } from 'lucide-react'
 import { useState } from 'react'
 
 import { useChatStore } from '@/stores/chatStore'
@@ -18,9 +18,11 @@ function ConversationList() {
   const conversations = useChatStore((state) => state.conversations)
   const activeId = useChatStore((state) => state.activeConversationId)
   const selectConversation = useChatStore((state) => state.selectConversation)
-  const deleteConversation = useChatStore((state) => state.deleteConversation)
+  const archiveConversation = useChatStore((state) => state.archiveConversation)
   const renameConversation = useChatStore((state) => state.renameConversation)
-  const groups = groupConversations(conversations)
+  const groups = groupConversations(
+    conversations.filter((conversation) => !conversation.archivedAt),
+  )
   const [renaming, setRenaming] = useState<{
     id: string
     title: string
@@ -53,7 +55,7 @@ function ConversationList() {
                         <Button
                           fullWidth
                           className={cn(
-                            'h-9 justify-start gap-2 pr-9 pl-2 text-left',
+                            'h-9 justify-start gap-2 pr-9 pl-3 text-left',
                             isActive && 'bg-surface-secondary/80',
                           )}
                           variant={isActive ? 'secondary' : 'ghost'}
@@ -86,8 +88,8 @@ function ConversationList() {
                                 if (key === 'rename') {
                                   setRenaming(conversation)
                                   setRenameValue(conversation.title)
-                                } else if (key === 'delete') {
-                                  deleteConversation(conversation.id)
+                                } else if (key === 'archive') {
+                                  archiveConversation(conversation.id)
                                 }
                               }}
                             >
@@ -100,13 +102,12 @@ function ConversationList() {
                                 <Label>Rename</Label>
                               </Dropdown.Item>
                               <Dropdown.Item
-                                id="delete"
+                                id="archive"
                                 className="rounded-md"
-                                textValue="Delete"
-                                variant="danger"
+                                textValue="Archive"
                               >
-                                <Trash2 className="size-3.5 text-danger" />
-                                <Label>Delete</Label>
+                                <Archive className="size-3.5 text-muted" />
+                                <Label>Archive</Label>
                               </Dropdown.Item>
                             </Dropdown.Menu>
                           </Dropdown.Popover>

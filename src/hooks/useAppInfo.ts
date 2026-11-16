@@ -7,7 +7,7 @@ import { isTauri } from '@/utils/tauri'
 const browserInfo: AppInfo = {
   name: 'Iris',
   version: __appVersion,
-  identifier: 'com.iris.app',
+  identifier: 'com.iris.desktop',
   platform: 'browser',
   arch: '—',
 }

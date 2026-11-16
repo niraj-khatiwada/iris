@@ -28,11 +28,22 @@ import { type ReactNode, useEffect, useState } from 'react'
 import { useDynamicIslandNotice } from '@/components/dynamic-island/notifications'
 import IrisBlob from '@/components/IrisBlob'
 import ShortcutRecorder from '@/components/ShortcutRecorder'
-import { THEME_LABELS, TTS_VOICES } from '@/constants'
+import {
+  CHAT_STORAGE_KEY,
+  DEFAULT_BASE_URL,
+  DEFAULT_MODEL,
+  DEFAULT_OPEN_SHORTCUT,
+  DEFAULT_TTS_VOICE,
+  SETTINGS_STORAGE_KEY,
+  THEME_LABELS,
+  TTS_VOICES,
+} from '@/constants'
 import { useAppInfo } from '@/hooks/useAppInfo'
+import { suspendChatStorage } from '@/hooks/useChatStorage'
 import { useChatStore } from '@/stores/chatStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useUIStore } from '@/stores/uiStore'
+import { resetAppData, restartApp } from '@/tauri/commands/app'
 import { setOpenShortcut as applyOpenShortcut } from '@/tauri/commands/shortcut'
 import type { ThemeMode } from '@/types/settings'
 import { formatShortcut } from '@/utils/shortcut'
@@ -571,6 +582,73 @@ function StoragePanel({ query }: { query: string }) {
           }}
         >
           Clear
+        </Button>
+      </SettingRow>
+
+      <SettingRow
+        title="Reset Iris"
+        description="Delete every conversation, setting, and the API key, then start fresh."
+        query={query}
+        search={['reset', 'erase', 'purge', 'all data', 'factory', 'api key']}
+      >
+        <Button
+          size="sm"
+          variant="danger-soft"
+          onPress={async () => {
+            const message =
+              'Reset Iris? This deletes every conversation, all settings, and your API key. Iris will restart.'
+            const confirmed = isTauri()
+              ? await ask(message, {
+                  title: 'Reset Iris',
+                  kind: 'warning',
+                  okLabel: 'Reset',
+                  cancelLabel: 'Cancel',
+                })
+              : window.confirm(message)
+
+            if (!confirmed) {
+              return
+            }
+
+            // Stop the SQLite mirror first: a focus hydrate could otherwise reload the
+            // conversations that are about to be erased.
+            suspendChatStorage()
+            useChatStore.getState().clearAll()
+            // Keep the API key out of any write that lands between this reset and the restart.
+            useSettingsStore.setState({
+              theme: 'dark',
+              apiKey: '',
+              baseUrl: DEFAULT_BASE_URL,
+              model: DEFAULT_MODEL,
+              autoSpeak: true,
+              autoSendVoice: true,
+              deepThink: false,
+              webSearch: false,
+              ttsVoice: DEFAULT_TTS_VOICE,
+              openShortcut: DEFAULT_OPEN_SHORTCUT,
+            })
+            localStorage.removeItem(CHAT_STORAGE_KEY)
+            localStorage.removeItem(SETTINGS_STORAGE_KEY)
+
+            try {
+              if (isTauri()) {
+                await resetAppData()
+                await restartApp()
+              } else {
+                window.location.reload()
+              }
+            } catch (error) {
+              notify({
+                id: 'reset-failed',
+                title: 'Could not reset Iris',
+                subtitle:
+                  error instanceof Error ? error.message : String(error),
+                tone: 'error',
+              })
+            }
+          }}
+        >
+          Reset
         </Button>
       </SettingRow>
     </SettingsSection>

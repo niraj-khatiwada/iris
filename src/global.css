@@ -17,6 +17,9 @@
     --accent: var(--primary);
     --accent-foreground: oklch(0.16 0.004 250);
     --radius: 0.75rem;
+    /* Native macOS controls use the arrow cursor; HeroUI defaults these to pointer/not-allowed. */
+    --cursor-interactive: default;
+    --cursor-disabled: default;
   }
 
   .dark,
@@ -509,4 +512,25 @@ input:focus-visible {
   box-shadow: none !important;
   --tw-ring-shadow: 0 0 #0000 !important;
   --tw-ring-offset-shadow: 0 0 #0000 !important;
+}
+
+/* Native macOS controls keep the arrow cursor; only real links show the pointer. Tailwind
+   preflight and HeroUI set a pointer on buttons, so override both the base layer and any
+   `cursor-pointer` utility without touching explicit resize/text cursors. */
+@layer base {
+  button,
+  [role="button"] {
+    cursor: default;
+  }
+}
+
+[class*="cursor-pointer"] {
+  cursor: default !important;
+}
+
+a[href],
+a[href] *,
+[data-link],
+[data-link] * {
+  cursor: pointer !important;
 }

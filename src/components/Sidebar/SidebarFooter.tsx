@@ -18,7 +18,7 @@ function SidebarFooter({ open }: { open: boolean }) {
   }
 
   return (
-    <div className="flex items-center justify-start gap-1 border-t border-border/50 px-3 py-2">
+    <div className="flex items-center justify-end gap-1 border-t border-border/50 px-3 py-2">
       <ThemeSwitcher />
       <SettingsButton onPress={openSettings} />
     </div>

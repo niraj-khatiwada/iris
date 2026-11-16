@@ -1,5 +1,6 @@
 import { Button, TextArea, Tooltip } from '@heroui/react'
 import { invoke } from '@tauri-apps/api/core'
+import { emit } from '@tauri-apps/api/event'
 import {
   ArrowUp,
   Check,
@@ -33,6 +34,7 @@ import {
 } from '@/constants/blob'
 import { useChatStorage } from '@/hooks/useChatStorage'
 import { useOverlayWindow } from '@/hooks/useOverlayWindow'
+import { useSettingsSync } from '@/hooks/useSettingsSync'
 import { useSpeechPlayback } from '@/hooks/useSpeechPlayback'
 import { useVoiceInput } from '@/hooks/useVoiceInput'
 import { useChatStore } from '@/stores/chatStore'
@@ -90,6 +92,7 @@ function Overlay() {
   const autoSendVoice = useSettingsStore((state) => state.autoSendVoice)
   const voice = useVoiceInput()
   useChatStorage()
+  useSettingsSync()
   const { speaking, preparing } = useSpeechPlayback(QUICK_CONVERSATION_ID)
   const [value, setValue] = useState('')
   const [revealed, setRevealed] = useState(false)
@@ -115,12 +118,16 @@ function Overlay() {
   const showResponse = !streaming && hasResponse && revealed
   const responseReady = !streaming && hasResponse && !revealed
   const voiceActive = voice.status !== 'idle'
+  const errorMessage =
+    assistant?.status === 'error' ? (assistant.error ?? '') : ''
+  const apiKeyMissing = /api key/i.test(errorMessage)
   // The blob keeps morphing while a reply streams and while its audio is being prepared.
   const morphing = streaming || preparing
   const active =
     streaming || preparing || hasResponse || voiceActive || speaking
-  const status =
-    assistant?.status === 'error'
+  const status = apiKeyMissing
+    ? 'API key is required'
+    : assistant?.status === 'error'
       ? 'Something went wrong'
       : speaking
         ? 'Speaking'
@@ -132,6 +139,14 @@ function Overlay() {
               : 'Responding…'
             : 'Ready'
   const view = voiceActive ? 'voice' : 'main'
+
+  const openSettings = useCallback(async () => {
+    if (!isTauri()) {
+      return
+    }
+    await emit('settings:open')
+    await invoke('show_main_window')
+  }, [])
 
   const newChat = useCallback(() => {
     if (isTauri()) {
@@ -207,7 +222,8 @@ function Overlay() {
     [],
   )
 
-  // Pressing "/" returns focus to the quick input, and Cmd/Ctrl+N starts a new chat.
+  // Pressing "/" returns focus to the quick input, Cmd/Ctrl+N starts a new chat, and Cmd/Ctrl+,
+  // opens Settings in the history window.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const modifier = event.metaKey || event.ctrlKey
@@ -215,6 +231,12 @@ function Overlay() {
       if (modifier && event.key.toLowerCase() === 'n') {
         event.preventDefault()
         newChat()
+        return
+      }
+
+      if (modifier && event.key === ',') {
+        event.preventDefault()
+        void openSettings()
         return
       }
 
@@ -234,7 +256,7 @@ function Overlay() {
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [inputRef, newChat])
+  }, [inputRef, newChat, openSettings])
 
   // The native window can be hidden by the shortcut, which never reaches the React tree.
   useEffect(() => {
@@ -381,7 +403,10 @@ function Overlay() {
                 />
               ) : (
                 <>
-                  <header className="flex items-center gap-2 px-4 pt-2.5 pb-1">
+                  <header
+                    className="flex items-center gap-2 px-4 pt-2.5 pb-1"
+                    data-tauri-drag-region="deep"
+                  >
                     <Tooltip delay={500}>
                       <button
                         type="button"
@@ -583,6 +608,7 @@ function Overlay() {
                         ? 'border-t border-white/[0.06] pt-1.5 pb-2.5'
                         : 'pt-1 pb-2.5',
                     )}
+                    data-tauri-drag-region="deep"
                   >
                     <div className="pb-1.5">
                       <ChatToggles />

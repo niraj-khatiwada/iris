@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Iris",
   "version": "0.1.0",
-  "identifier": "com.iris.app",
+  "identifier": "com.iris.desktop",
   "build": {
     "beforeDevCommand": "bun run vite:dev",
     "devUrl": "http://localhost:3002",

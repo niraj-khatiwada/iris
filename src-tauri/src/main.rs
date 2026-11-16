@@ -18,6 +18,9 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 static QUITTING: AtomicBool = AtomicBool::new(false);
 
 fn main() {
+    // Must run before the runtime (and its webviews) opens the identifier-keyed data folders.
+    crate::core::legacy::migrate_legacy_identifier();
+
     let builder = tauri::Builder::default()
         // A second launch summons the quick chat instead of starting another app.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -52,6 +55,7 @@ fn main() {
         .setup(|app| {
             app.manage(GenerationState::default());
             app.manage(crate::core::agent::SummaryCache::default());
+            app.manage(crate::sys::overlay::OverlayPosition::load(app.handle()));
             app.manage(crate::sys::speech::SpeechState::default());
             let storage =
                 crate::core::storage::Storage::open(app.handle()).map_err(std::io::Error::other)?;
@@ -137,6 +141,14 @@ fn main() {
         })
         // Closing the history window hides it; Iris keeps running in the overlay.
         .on_window_event(|window, event| {
+            if window.label() == crate::sys::overlay::OVERLAY_LABEL {
+                if let tauri::WindowEvent::Moved(position) = event {
+                    if let Ok(size) = window.outer_size() {
+                        crate::sys::overlay::record_move(window.app_handle(), *position, size);
+                    }
+                }
+            }
+
             if window.label() != "main" {
                 return;
             }
@@ -150,6 +162,7 @@ fn main() {
             tauri_commands::app::get_app_info,
             tauri_commands::app::show_main_window,
             tauri_commands::app::restart_app,
+            tauri_commands::app::reset_app_data,
             tauri_commands::chat::send_message,
             tauri_commands::chat::cancel_generation,
             tauri_commands::overlay::overlay_ready,
@@ -188,6 +201,7 @@ fn main() {
 
             if let tauri::RunEvent::Exit = &event {
                 crate::sys::speech::stop(app);
+                crate::sys::overlay::persist_position(app);
             }
 
             #[cfg(target_os = "macos")]

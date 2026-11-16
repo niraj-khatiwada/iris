@@ -13,3 +13,8 @@ export function showMainWindow() {
 export function restartApp() {
   return invoke<void>('restart_app')
 }
+
+/** Wipes backend-owned Iris data: conversations, summaries, speech audio, and old data copies. */
+export function resetAppData() {
+  return invoke<void>('reset_app_data')
+}

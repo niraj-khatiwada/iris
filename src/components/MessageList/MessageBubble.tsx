@@ -1,7 +1,4 @@
-import { Avatar } from '@heroui/react'
-
 import CopyButton from '@/components/CopyButton'
-import IrisBlob from '@/components/IrisBlob'
 import Markdown from '@/components/Markdown'
 import type { ChatMessage } from '@/types/chat'
 import { formatMessageTime } from '@/utils/format'
@@ -12,26 +9,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   const isEmptyStream = message.status === 'streaming' && !message.content
 
   return (
-    <article className={cn('flex gap-3', isUser && 'flex-row-reverse')}>
-      <div className="mt-1 shrink-0">
-        {isUser ? (
-          <Avatar color="default" size="sm">
-            <Avatar.Fallback className="text-[9px]">You</Avatar.Fallback>
-          </Avatar>
-        ) : (
-          <IrisBlob
-            emotion={
-              message.status === 'error'
-                ? 'sad'
-                : message.status === 'streaming'
-                  ? 'thinking'
-                  : 'neutral'
-            }
-            size={26}
-          />
-        )}
-      </div>
-
+    <article className={cn('flex', isUser && 'justify-end')}>
       <div
         className={cn(
           'flex min-w-0 max-w-[min(88%,46rem)] flex-col',

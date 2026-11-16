@@ -1,3 +1,4 @@
+import ArchivedComposer from '@/components/ArchivedComposer'
 import ChatHeader from '@/components/ChatHeader'
 import Composer from '@/components/Composer'
 import MessageList from '@/components/MessageList'
@@ -6,14 +7,21 @@ import Sidebar from '@/components/Sidebar'
 import { useChatStorage } from '@/hooks/useChatStorage'
 import { useHistorySync } from '@/hooks/useHistorySync'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
+import { useSettingsSync } from '@/hooks/useSettingsSync'
 import { useShortcutSync } from '@/hooks/useShortcutSync'
 import { useThemeSync } from '@/hooks/useThemeSync'
+import { useChatStore } from '@/stores/chatStore'
 
 function ChatWorkspace() {
+  const activeConversation = useChatStore((state) =>
+    state.conversations.find((item) => item.id === state.activeConversationId),
+  )
+
   useThemeSync()
   useKeyboardShortcuts()
   useHistorySync()
   useChatStorage()
+  useSettingsSync()
   useShortcutSync()
 
   return (
@@ -22,7 +30,11 @@ function ChatWorkspace() {
       <main className="flex min-w-0 flex-1 flex-col">
         <ChatHeader />
         <MessageList />
-        <Composer />
+        {activeConversation?.archivedAt ? (
+          <ArchivedComposer conversation={activeConversation} />
+        ) : (
+          <Composer />
+        )}
       </main>
       <SettingsDialog />
     </div>

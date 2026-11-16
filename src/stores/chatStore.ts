@@ -23,7 +23,9 @@ type ChatState = {
   hydrateConversations: (conversations: Conversation[]) => void
   resetQuickConversation: () => void
   selectConversation: (id: string) => void
-  deleteConversation: (id: string) => void
+  archiveConversation: (id: string) => void
+  restoreConversation: (id: string) => void
+  deleteArchivedConversation: (id: string) => void
   renameConversation: (id: string, title: string) => void
   clearAll: () => void
   sendMessage: (content: string, conversationId?: string) => Promise<void>
@@ -96,7 +98,7 @@ export const useChatStore = create<ChatState>()(
         const current = state.conversations.find(
           (conversation) => conversation.id === state.activeConversationId,
         )
-        if (current && current.messages.length === 0) {
+        if (current && !current.archivedAt && current.messages.length === 0) {
           return current.id
         }
 
@@ -165,7 +167,8 @@ export const useChatStore = create<ChatState>()(
               (conversation) => conversation.id === state.activeConversationId,
             )
               ? state.activeConversationId
-              : (normalized[0]?.id ?? null)
+              : (normalized.find((conversation) => !conversation.archivedAt)
+                  ?.id ?? null)
 
           return { conversations: normalized, activeConversationId }
         }),
@@ -215,14 +218,134 @@ export const useChatStore = create<ChatState>()(
         })
       },
 
-      deleteConversation: (id) =>
+      archiveConversation: (id) => {
+        const wasStreaming = get().streamingConversationId === id
+        if (wasStreaming) {
+          cancelActiveRun()
+        }
+
+        const now = Date.now()
         set((state) => {
+          const archive = (
+            conversation: Conversation,
+            archivedId = conversation.id,
+          ): Conversation => ({
+            ...conversation,
+            id: archivedId,
+            archivedAt: now,
+            updatedAt: now,
+            messages: conversation.messages.map((message) =>
+              message.status === 'streaming'
+                ? { ...message, status: 'complete' as const }
+                : message,
+            ),
+          })
+
+          // The overlay always uses `iris:quick`; keep its content but start it fresh.
+          if (id === QUICK_CONVERSATION_ID) {
+            const quick = state.conversations.find(
+              (conversation) => conversation.id === QUICK_CONVERSATION_ID,
+            )
+            if (!quick) {
+              return state
+            }
+
+            const fresh: Conversation = {
+              id: QUICK_CONVERSATION_ID,
+              title: QUICK_CONVERSATION_TITLE,
+              createdAt: now,
+              updatedAt: now,
+              messages: [],
+            }
+
+            return {
+              conversations: [
+                fresh,
+                archive(quick, newId()),
+                ...state.conversations.filter(
+                  (conversation) => conversation.id !== QUICK_CONVERSATION_ID,
+                ),
+              ],
+              activeConversationId:
+                state.activeConversationId === QUICK_CONVERSATION_ID
+                  ? fresh.id
+                  : state.activeConversationId,
+              ...(wasStreaming
+                ? {
+                    streamingRequestId: null,
+                    streamingConversationId: null,
+                    streamingMessageId: null,
+                  }
+                : {}),
+            }
+          }
+
+          const conversations = state.conversations.map((conversation) =>
+            conversation.id === id ? archive(conversation) : conversation,
+          )
+          const activeConversationId =
+            state.activeConversationId === id
+              ? (conversations.find((conversation) => !conversation.archivedAt)
+                  ?.id ?? null)
+              : state.activeConversationId
+
+          return {
+            conversations,
+            activeConversationId,
+            ...(wasStreaming
+              ? {
+                  streamingRequestId: null,
+                  streamingConversationId: null,
+                  streamingMessageId: null,
+                }
+              : {}),
+          }
+        })
+      },
+
+      restoreConversation: (id) =>
+        set((state) => {
+          if (
+            !state.conversations.some(
+              (conversation) =>
+                conversation.id === id && conversation.archivedAt,
+            )
+          ) {
+            return state
+          }
+
+          return {
+            conversations: state.conversations.map((conversation) =>
+              conversation.id === id
+                ? {
+                    ...conversation,
+                    archivedAt: undefined,
+                    updatedAt: Date.now(),
+                  }
+                : conversation,
+            ),
+            activeConversationId: id,
+          }
+        }),
+
+      deleteArchivedConversation: (id) =>
+        set((state) => {
+          if (
+            !state.conversations.some(
+              (conversation) =>
+                conversation.id === id && conversation.archivedAt,
+            )
+          ) {
+            return state
+          }
+
           const conversations = state.conversations.filter(
             (conversation) => conversation.id !== id,
           )
           const activeConversationId =
             state.activeConversationId === id
-              ? (conversations[0]?.id ?? null)
+              ? (conversations.find((conversation) => !conversation.archivedAt)
+                  ?.id ?? null)
               : state.activeConversationId
 
           return { conversations, activeConversationId }
@@ -231,7 +354,7 @@ export const useChatStore = create<ChatState>()(
       renameConversation: (id, title) =>
         set((state) => ({
           conversations: state.conversations.map((conversation) =>
-            conversation.id === id
+            conversation.id === id && !conversation.archivedAt
               ? { ...conversation, title: title.trim() || 'New conversation' }
               : conversation,
           ),
@@ -273,7 +396,8 @@ export const useChatStore = create<ChatState>()(
         const conversation = get().conversations.find(
           (item) => item.id === conversationId,
         )
-        if (!conversation) {
+        if (!conversation || conversation.archivedAt) {
+          // Archived conversations are read-only.
           return
         }
 
@@ -309,6 +433,8 @@ export const useChatStore = create<ChatState>()(
             role: message.role,
             content: message.content,
           }))
+        // Another window (Settings) may have saved a new API key after this store hydrated.
+        await useSettingsStore.persist.rehydrate()
         const settings = useSettingsStore.getState()
 
         set((current) => ({

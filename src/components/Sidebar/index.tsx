@@ -1,6 +1,7 @@
 import { Button } from '@heroui/react'
 import { PanelLeftClose, PanelLeftOpen, Plus } from 'lucide-react'
 
+import ArchiveList from '@/components/Sidebar/ArchiveList'
 import ConversationList from '@/components/Sidebar/ConversationList'
 import ConversationRail from '@/components/Sidebar/ConversationRail'
 import SidebarFooter from '@/components/Sidebar/SidebarFooter'
@@ -60,21 +61,28 @@ function Sidebar() {
         </div>
       )}
 
-      <div className={cn('px-3 pt-2', !open && 'flex justify-center px-2')}>
+      <div className={cn('px-2 pt-2', !open && 'flex justify-center')}>
         <Button
           fullWidth={open}
           isIconOnly={!open}
           aria-label="New conversation"
-          className={cn(open && 'justify-start gap-2')}
+          className={cn(open && 'justify-start gap-2 pl-3 pr-3 text-[13px]')}
           variant="secondary"
           onPress={() => createConversation()}
         >
-          <Plus className="size-4" />
+          <Plus className="size-3.5" />
           {open ? <span>New chat</span> : null}
         </Button>
       </div>
 
-      {open ? <ConversationList /> : <ConversationRail />}
+      {open ? (
+        <>
+          <ConversationList />
+          <ArchiveList />
+        </>
+      ) : (
+        <ConversationRail />
+      )}
 
       <SidebarFooter open={open} />
     </aside>

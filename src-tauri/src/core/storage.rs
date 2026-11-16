@@ -24,6 +24,8 @@ pub struct StoredConversation {
     pub title: String,
     pub created_at: i64,
     pub updated_at: i64,
+    #[serde(default)]
+    pub archived_at: Option<i64>,
     pub messages: Vec<StoredMessage>,
 }
 
@@ -56,7 +58,8 @@ impl Storage {
                     id TEXT PRIMARY KEY,
                     title TEXT NOT NULL,
                     created_at INTEGER NOT NULL,
-                    updated_at INTEGER NOT NULL
+                    updated_at INTEGER NOT NULL,
+                    archived_at INTEGER
                 );
 
                 CREATE TABLE IF NOT EXISTS messages (
@@ -76,6 +79,25 @@ impl Storage {
             )
             .map_err(|error| format!("Could not prepare the Iris database: {error}"))?;
 
+        // Older databases predate archiving.
+        let has_archived_at = connection
+            .prepare("PRAGMA table_info(conversations)")
+            .and_then(|mut statement| {
+                let columns = statement
+                    .query_map([], |row| row.get::<_, String>(1))?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(columns.iter().any(|column| column == "archived_at"))
+            })
+            .map_err(|error| error.to_string())?;
+        if !has_archived_at {
+            connection
+                .execute(
+                    "ALTER TABLE conversations ADD COLUMN archived_at INTEGER",
+                    [],
+                )
+                .map_err(|error| format!("Could not add conversation archiving: {error}"))?;
+        }
+
         Ok(Self {
             connection: Mutex::new(connection),
         })
@@ -89,7 +111,7 @@ impl Storage {
 
         let mut statement = connection
             .prepare(
-                "SELECT id, title, created_at, updated_at
+                "SELECT id, title, created_at, updated_at, archived_at
                  FROM conversations
                  ORDER BY updated_at DESC",
             )
@@ -102,6 +124,7 @@ impl Storage {
                     title: row.get(1)?,
                     created_at: row.get(2)?,
                     updated_at: row.get(3)?,
+                    archived_at: row.get(4)?,
                     messages: Vec::new(),
                 })
             })
@@ -152,10 +175,16 @@ impl Storage {
     }
 
     pub fn clear(&self) -> Result<(), String> {
-        self.connection
+        let connection = self
+            .connection
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        connection
             .execute("DELETE FROM conversations", [])
+            .map_err(|error| error.to_string())?;
+        // Rebuild the file and drop old WAL frames so a cleared conversation is not recoverable.
+        connection
+            .execute_batch("VACUUM; PRAGMA wal_checkpoint(TRUNCATE);")
             .map_err(|error| error.to_string())?;
         Ok(())
     }
@@ -167,17 +196,19 @@ fn save_in_transaction(
 ) -> Result<(), String> {
     transaction
         .execute(
-            "INSERT INTO conversations (id, title, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4)
+            "INSERT INTO conversations (id, title, created_at, updated_at, archived_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 created_at = excluded.created_at,
-                updated_at = excluded.updated_at",
+                updated_at = excluded.updated_at,
+                archived_at = excluded.archived_at",
             params![
                 conversation.id,
                 conversation.title,
                 conversation.created_at,
-                conversation.updated_at
+                conversation.updated_at,
+                conversation.archived_at
             ],
         )
         .map_err(|error| error.to_string())?;
