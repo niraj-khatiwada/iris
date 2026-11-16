@@ -12,8 +12,21 @@ use crate::tauri_commands::keychain;
 pub struct CapabilityReport {
     pub text: bool,
     pub image: bool,
-    /// Human-readable summary, e.g. "Text and images are supported."
+    /// Accepts the format's reasoning/thinking control.
+    pub thinking: bool,
+    /// Accepts the format's server-side web search tool.
+    pub web_search: bool,
+    /// Human-readable summary.
     pub message: String,
+}
+
+/// A probe varies one request field; the model either accepts it or rejects it.
+#[derive(Clone, Copy, PartialEq)]
+enum Probe {
+    Text,
+    Image,
+    Thinking,
+    WebSearch,
 }
 
 /// An 8×8 solid red PNG, built here so the probe needs no asset and no network beyond the API.
@@ -95,12 +108,20 @@ fn base64_encode(bytes: &[u8]) -> String {
     STANDARD.encode(bytes)
 }
 
-/// Builds a one-turn probe body for the given wire format.
-fn probe_body(format: &str, model: &str, with_image: bool) -> Value {
-    let prompt = if with_image {
-        "Reply with the single word: red"
-    } else {
-        "Reply with the single word: ok"
+/// Builds a one-turn probe body for the given wire format and capability.
+///
+/// The extras match what `core/agent.rs` sends, so a pass here means the real requests will work:
+/// Anthropic uses `thinking: adaptive` and the `web_search_20250305` server tool, OpenAI uses
+/// `reasoning_effort` and `web_search_options`.
+fn probe_body(format: &str, model: &str, probe: Probe) -> Value {
+    let with_image = probe == Probe::Image;
+    // Search and thinking probes need a prompt that cannot be answered from memory, plus room to
+    // answer; the plain probes only need a byte of output.
+    let (prompt, max_tokens) = match probe {
+        Probe::Image => ("Reply with the single word: red", 16),
+        Probe::Text => ("Reply with the single word: ok", 16),
+        Probe::Thinking => ("A farmer has 17 sheep, all but 9 run away. How many remain?", 600),
+        Probe::WebSearch => ("What is the current price of Bitcoin today?", 600),
     };
 
     if format == "openai" {
@@ -115,12 +136,21 @@ fn probe_body(format: &str, model: &str, with_image: bool) -> Value {
             json!(prompt)
         };
 
-        return json!({
+        let mut body = json!({
             "model": model,
-            "max_tokens": 16,
+            "max_tokens": max_tokens,
             "messages": [{ "role": "user", "content": content }],
             "stream": false
         });
+
+        match probe {
+            // Same value the chat runtime sends, so a pass here means real requests will work.
+            Probe::Thinking => body["reasoning_effort"] = json!("medium"),
+            Probe::WebSearch => body["web_search_options"] = json!({}),
+            _ => {}
+        }
+
+        return body;
     }
 
     let content = if with_image {
@@ -136,21 +166,95 @@ fn probe_body(format: &str, model: &str, with_image: bool) -> Value {
         json!(prompt)
     };
 
-    json!({
+    let mut body = json!({
         "model": model,
-        "max_tokens": 16,
+        "max_tokens": max_tokens,
         "messages": [{ "role": "user", "content": content }],
         "stream": false
-    })
+    });
+
+    match probe {
+        Probe::Thinking => body["thinking"] = json!({ "type": "adaptive" }),
+        Probe::WebSearch => {
+            body["tools"] = json!([{ "type": "web_search_20250305", "name": "web_search" }])
+        }
+        _ => {}
+    }
+
+    body
 }
 
+/// Did the reply actually reason? Many providers accept the parameter and then ignore it, so an
+/// HTTP 200 proves nothing; only content or token counts count as evidence.
+fn reasoned(format: &str, body: &Value) -> bool {
+    if format == "openai" {
+        let message = body
+            .get("choices")
+            .and_then(Value::as_array)
+            .and_then(|choices| choices.first())
+            .and_then(|choice| choice.get("message"));
+        let text = message
+            .and_then(|message| message.get("reasoning_content"))
+            .and_then(Value::as_str)
+            .is_some_and(|text| !text.trim().is_empty());
+        let tokens = body["usage"]["completion_tokens_details"]["reasoning_tokens"]
+            .as_u64()
+            .unwrap_or(0);
+        return text || tokens > 0;
+    }
+
+    let block = body
+        .get("content")
+        .and_then(Value::as_array)
+        .is_some_and(|blocks| {
+            blocks.iter().any(|block| {
+                block.get("type").and_then(Value::as_str) == Some("thinking")
+                    && block
+                        .get("thinking")
+                        .and_then(Value::as_str)
+                        .is_some_and(|text| !text.trim().is_empty())
+            })
+        });
+    let tokens = body["usage"]["output_tokens_details"]["thinking_tokens"]
+        .as_u64()
+        .unwrap_or(0);
+    block || tokens > 0
+}
+
+/// Did the reply actually consult the web? Requires a server-side search result or citation, not
+/// merely an accepted `tools` field.
+fn searched(format: &str, body: &Value) -> bool {
+    if format == "openai" {
+        return body
+            .get("choices")
+            .and_then(Value::as_array)
+            .and_then(|choices| choices.first())
+            .and_then(|choice| choice.get("message"))
+            .and_then(|message| message.get("annotations"))
+            .and_then(Value::as_array)
+            .is_some_and(|annotations| !annotations.is_empty());
+    }
+
+    body.get("content")
+        .and_then(Value::as_array)
+        .is_some_and(|blocks| {
+            blocks.iter().any(|block| {
+                matches!(
+                    block.get("type").and_then(Value::as_str),
+                    Some("web_search_tool_result") | Some("server_tool_use")
+                )
+            })
+        })
+}
+
+/// Runs one probe and returns the parsed reply, or `None` when the request itself failed.
 async fn probe(
     base_url: &str,
     format: &str,
     model: &str,
     api_key: &str,
-    with_image: bool,
-) -> bool {
+    probe: Probe,
+) -> Option<Value> {
     let base = base_url.trim_end_matches('/');
     let url = if format == "openai" {
         format!("{base}/v1/chat/completions")
@@ -158,17 +262,15 @@ async fn probe(
         format!("{base}/v1/messages")
     };
 
-    let Ok(client) = reqwest::Client::builder()
-        .timeout(Duration::from_secs(60))
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(90))
         .build()
-    else {
-        return false;
-    };
+        .ok()?;
 
     let mut request = client
         .post(url)
         .header("content-type", "application/json")
-        .json(&probe_body(format, model, with_image));
+        .json(&probe_body(format, model, probe));
 
     request = if format == "openai" {
         request.bearer_auth(api_key)
@@ -178,13 +280,14 @@ async fn probe(
             .header("anthropic-version", "2023-06-01")
     };
 
-    match request.send().await {
-        Ok(response) => response.status().is_success(),
-        Err(_) => false,
+    let response = request.send().await.ok()?;
+    if !response.status().is_success() {
+        return None;
     }
+    response.json::<Value>().await.ok()
 }
 
-/// Checks which content types the configured provider accepts for the selected model.
+/// Checks which content types and options the configured provider accepts for the model.
 #[tauri::command]
 pub async fn test_capabilities(
     base_url: String,
@@ -206,30 +309,69 @@ pub async fn test_capabilities(
         "anthropic"
     };
 
-    let text = probe(&base_url, format, &model, &api_key, false).await;
+    let text = probe(&base_url, format, &model, &api_key, Probe::Text)
+        .await
+        .is_some();
     if !text {
         return Ok(CapabilityReport {
             text: false,
             image: false,
+            thinking: false,
+            web_search: false,
             message: "Text requests failed. Check the key, base URL, format, and model.".to_string(),
         });
     }
 
-    let image = probe(&base_url, format, &model, &api_key, true).await;
+    // Each extra is a separate request so one rejection cannot be confused with another.
+    let image = probe(&base_url, format, &model, &api_key, Probe::Image).await;
+    let thinking = probe(&base_url, format, &model, &api_key, Probe::Thinking)
+        .await
+        .is_some_and(|body| reasoned(format, &body));
+    let web_search = probe(&base_url, format, &model, &api_key, Probe::WebSearch)
+        .await
+        .is_some_and(|body| searched(format, &body));
+
+    let mut supported = vec!["Text"];
+    if image.is_some() {
+        supported.push("images");
+    }
+    if thinking {
+        supported.push("thinking");
+    }
+    if web_search {
+        supported.push("web search");
+    }
+    let missing = [
+        (image.is_none(), "images"),
+        (!thinking, "thinking"),
+        (!web_search, "web search"),
+    ]
+    .into_iter()
+    .filter_map(|(absent, name)| absent.then_some(name))
+    .collect::<Vec<_>>();
+
+    let message = if missing.is_empty() {
+        format!("This model supports {}.", supported.join(", "))
+    } else {
+        format!(
+            "This model supports {}. Not supported: {}.",
+            supported.join(", "),
+            missing.join(", ")
+        )
+    };
+
     Ok(CapabilityReport {
-        text: true,
-        image,
-        message: if image {
-            "Text and images are supported.".to_string()
-        } else {
-            "Text is supported; this model rejected images.".to_string()
-        },
+        text,
+        image: image.is_some(),
+        thinking,
+        web_search,
+        message,
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{probe_body, sample_png};
+    use super::{probe_body, reasoned, sample_png, searched, Probe};
 
     #[test]
     fn the_sample_image_is_a_png() {
@@ -243,8 +385,8 @@ mod tests {
     }
 
     #[test]
-    fn the_untested_format_with_an_image_becomes_content_parts() {
-        let body = probe_body("openai", "m", true);
+    fn the_openai_image_probe_becomes_content_parts() {
+        let body = probe_body("openai", "m", Probe::Image);
         assert_eq!(body["messages"][0]["content"][1]["type"], "image_url");
         assert!(body["messages"][0]["content"][1]["image_url"]["url"]
             .as_str()
@@ -254,15 +396,95 @@ mod tests {
 
     #[test]
     fn the_anthropic_probe_uses_base64_source_blocks() {
-        let body = probe_body("anthropic", "m", true);
+        let body = probe_body("anthropic", "m", Probe::Image);
         assert_eq!(body["messages"][0]["content"][0]["type"], "image");
         assert_eq!(
             body["messages"][0]["content"][0]["source"]["media_type"],
             "image/png"
         );
         // Text-only probes stay plain strings for maximum compatibility.
-        let plain = probe_body("anthropic", "m", false);
+        let plain = probe_body("anthropic", "m", Probe::Text);
         assert!(plain["messages"][0]["content"].is_string());
+    }
+
+    /// Each format's thinking and web-search controls match what the chat runtime sends.
+    #[test]
+    fn the_probes_use_the_format_specific_optional_fields() {
+        let anthropic_thinking = probe_body("anthropic", "m", Probe::Thinking);
+        assert_eq!(anthropic_thinking["thinking"]["type"], "adaptive");
+        assert!(anthropic_thinking.get("reasoning_effort").is_none());
+
+        let anthropic_search = probe_body("anthropic", "m", Probe::WebSearch);
+        assert_eq!(anthropic_search["tools"][0]["name"], "web_search");
+
+        let openai_thinking = probe_body("openai", "m", Probe::Thinking);
+        assert_eq!(openai_thinking["reasoning_effort"], "medium");
+        assert!(openai_thinking.get("thinking").is_none());
+
+        let openai_search = probe_body("openai", "m", Probe::WebSearch);
+        assert!(openai_search.get("web_search_options").is_some());
+
+        // A plain text probe carries none of the optional fields.
+        let plain = probe_body("openai", "m", Probe::Text);
+        assert!(plain.get("reasoning_effort").is_none());
+        assert!(plain.get("web_search_options").is_none());
+    }
+
+    /// A 200 with no reasoning content means the provider accepted and ignored the parameter, which
+    /// is common: the report must say "not supported" rather than trust the status code.
+    #[test]
+    fn a_reply_without_reasoning_is_not_evidence_of_thinking() {
+        let ignored = serde_json::json!({
+            "content": [{ "type": "text", "text": "4" }],
+            "usage": { "output_tokens_details": { "thinking_tokens": 0 } }
+        });
+        assert!(!reasoned("anthropic", &ignored));
+
+        let reasoned_anthropic = serde_json::json!({
+            "content": [{ "type": "thinking", "thinking": "9 remain" }],
+            "usage": { "output_tokens_details": { "thinking_tokens": 42 } }
+        });
+        assert!(reasoned("anthropic", &reasoned_anthropic));
+
+        let ignored_openai = serde_json::json!({
+            "choices": [{ "message": { "content": "4", "reasoning_content": "" } }],
+            "usage": { "completion_tokens_details": { "reasoning_tokens": 0 } }
+        });
+        assert!(!reasoned("openai", &ignored_openai));
+
+        let reasoned_openai = serde_json::json!({
+            "choices": [{ "message": { "content": "4", "reasoning_content": "9 remain" } }],
+            "usage": { "completion_tokens_details": { "reasoning_tokens": 56 } }
+        });
+        assert!(reasoned("openai", &reasoned_openai));
+    }
+
+    /// The same for search: the tool being accepted says nothing unless a result or citation came
+    /// back.
+    #[test]
+    fn an_accepted_tool_is_not_evidence_of_search() {
+        let ignored = serde_json::json!({
+            "content": [{ "type": "text", "text": "I can't search the web." }]
+        });
+        assert!(!searched("anthropic", &ignored));
+
+        let searched_anthropic = serde_json::json!({
+            "content": [
+                { "type": "server_tool_use", "name": "web_search" },
+                { "type": "web_search_tool_result" }
+            ]
+        });
+        assert!(searched("anthropic", &searched_anthropic));
+
+        let ignored_openai = serde_json::json!({
+            "choices": [{ "message": { "content": "I can't search." } }]
+        });
+        assert!(!searched("openai", &ignored_openai));
+
+        let searched_openai = serde_json::json!({
+            "choices": [{ "message": { "content": "It is $90k.", "annotations": [{ "type": "url_citation" }] } }]
+        });
+        assert!(searched("openai", &searched_openai));
     }
 }
 
@@ -287,7 +509,10 @@ mod live_tests {
         ))
         .expect("the probe should run");
 
-        eprintln!("text={} image={} ({})", report.text, report.image, report.message);
+        eprintln!(
+            "text={} image={} thinking={} web_search={} ({})",
+            report.text, report.image, report.thinking, report.web_search, report.message
+        );
         assert!(report.text, "the provider should accept text");
     }
 }

@@ -72,6 +72,8 @@ type SettingsState = {
   apiKeyRevision: number
   autoSpeak: boolean
   autoSendVoice: boolean
+  /** Show the reply in the quick overlay as soon as it arrives, without pressing Show response. */
+  revealResponse: boolean
   /** Toggle in the composer: enable thinking mode before answering. */
   deepThink: boolean
   /** Toggle in the composer: let Iris search the web when it needs to. */
@@ -93,6 +95,7 @@ type SettingsState = {
   setApiFormat: (apiFormat: ApiFormat) => void
   setModel: (model: string) => void
   setAutoSpeak: (autoSpeak: boolean) => void
+  setRevealResponse: (revealResponse: boolean) => void
   setAutoSendVoice: (autoSendVoice: boolean) => void
   setDeepThink: (deepThink: boolean) => void
   setWebSearch: (webSearch: boolean) => void
@@ -114,6 +117,7 @@ export const useSettingsStore = create<SettingsState>()(
       apiKeyHint: null,
       apiKeyRevision: 0,
       autoSpeak: true,
+      revealResponse: true,
       autoSendVoice: true,
       deepThink: false,
       webSearch: false,
@@ -132,6 +136,7 @@ export const useSettingsStore = create<SettingsState>()(
       setApiFormat: (apiFormat) => set({ apiFormat }),
       setModel: (model) => set({ model }),
       setAutoSpeak: (autoSpeak) => set({ autoSpeak }),
+      setRevealResponse: (revealResponse) => set({ revealResponse }),
       setAutoSendVoice: (autoSendVoice) => set({ autoSendVoice }),
       setDeepThink: (deepThink) => set({ deepThink }),
       setWebSearch: (webSearch) => set({ webSearch }),
@@ -146,7 +151,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: SETTINGS_STORAGE_KEY,
-      version: 10,
+      version: 11,
       merge: (persisted, current) => {
         const saved = (persisted ?? {}) as Partial<SettingsState> & {
           apiKey?: unknown
@@ -185,6 +190,8 @@ export const useSettingsStore = create<SettingsState>()(
           apiKeyHint:
             typeof rest.apiKeyHint === 'string' ? rest.apiKeyHint : null,
           autoSpeak: rest.autoSpeak ?? true,
+          // New behaviour defaults on, so an older stored shape gains it without user action.
+          revealResponse: rest.revealResponse ?? true,
           autoSendVoice: rest.autoSendVoice ?? true,
           deepThink: rest.deepThink ?? false,
           webSearch: rest.webSearch ?? false,

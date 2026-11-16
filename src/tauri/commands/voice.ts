@@ -55,6 +55,8 @@ export function listModels(baseUrl: string) {
 export type CapabilityReport = {
   text: boolean
   image: boolean
+  thinking: boolean
+  webSearch: boolean
   message: string
 }
 

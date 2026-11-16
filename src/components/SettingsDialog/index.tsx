@@ -308,54 +308,69 @@ function SettingsPanel({
 function GeneralPanel({ query }: { query: string }) {
   const theme = useSettingsStore((state) => state.theme)
   const setTheme = useSettingsStore((state) => state.setTheme)
+  const revealResponse = useSettingsStore((state) => state.revealResponse)
+  const setRevealResponse = useSettingsStore((state) => state.setRevealResponse)
 
   return (
-    <SettingsSection title="Appearance">
-      <SettingRow
-        title="Theme"
-        description="Follow the system, or always use light or dark."
-        query={query}
-        search={['appearance', 'theme', 'light', 'dark', 'system']}
-      >
-        <Tabs
-          className="w-fit"
-          selectedKey={theme}
-          onSelectionChange={(key) => {
-            if (key === 'light' || key === 'dark' || key === 'system') {
-              setTheme(key)
-            }
-          }}
+    <>
+      <SettingsSection title="Appearance">
+        <SettingRow
+          title="Theme"
+          description="Follow the system, or always use light or dark."
+          query={query}
+          search={['appearance', 'theme', 'light', 'dark', 'system']}
         >
-          <Tabs.ListContainer className="w-fit rounded-none bg-transparent p-0">
-            <Tabs.List
-              aria-label="Theme"
-              className="w-fit gap-0.5 rounded-full border border-border/50 bg-surface/40 p-0.5"
-            >
-              {themeModes.map((mode) => {
-                const Icon = THEME_ICONS[mode]
+          <Tabs
+            className="w-fit"
+            selectedKey={theme}
+            onSelectionChange={(key) => {
+              if (key === 'light' || key === 'dark' || key === 'system') {
+                setTheme(key)
+              }
+            }}
+          >
+            <Tabs.ListContainer className="w-fit rounded-none bg-transparent p-0">
+              <Tabs.List
+                aria-label="Theme"
+                className="w-fit gap-0.5 rounded-full border border-border/50 bg-surface/40 p-0.5"
+              >
+                {themeModes.map((mode) => {
+                  const Icon = THEME_ICONS[mode]
 
-                return (
-                  <Tabs.Tab
-                    key={mode}
-                    aria-label={THEME_LABELS[mode]}
-                    className="h-7 w-9 rounded-full px-0 text-muted data-[selected=true]:text-foreground"
-                    id={mode}
-                  >
-                    <Icon className="size-3.5" />
-                    <Tabs.Indicator className="rounded-full bg-foreground/10 shadow-none" />
-                  </Tabs.Tab>
-                )
-              })}
-            </Tabs.List>
-          </Tabs.ListContainer>
-          {themeModes.map((mode) => (
-            <Tabs.Panel key={mode} className="sr-only" id={mode}>
-              {THEME_LABELS[mode]} theme
-            </Tabs.Panel>
-          ))}
-        </Tabs>
-      </SettingRow>
-    </SettingsSection>
+                  return (
+                    <Tabs.Tab
+                      key={mode}
+                      aria-label={THEME_LABELS[mode]}
+                      className="h-7 w-9 rounded-full px-0 text-muted data-[selected=true]:text-foreground"
+                      id={mode}
+                    >
+                      <Icon className="size-3.5" />
+                      <Tabs.Indicator className="rounded-full bg-foreground/10 shadow-none" />
+                    </Tabs.Tab>
+                  )
+                })}
+              </Tabs.List>
+            </Tabs.ListContainer>
+            {themeModes.map((mode) => (
+              <Tabs.Panel key={mode} className="sr-only" id={mode}>
+                {THEME_LABELS[mode]} theme
+              </Tabs.Panel>
+            ))}
+          </Tabs>
+        </SettingRow>
+      </SettingsSection>
+
+      <SettingsSection title="Iris Overlay">
+        <SwitchRow
+          isSelected={revealResponse}
+          title="Reveal response by default"
+          description="Show the reply as soon as it arrives. Turn this off to keep it hidden until you press Show response, for example when you only want to hear it read aloud."
+          query={query}
+          search={['overlay', 'response', 'reveal', 'show', 'hidden', 'voice']}
+          onChange={setRevealResponse}
+        />
+      </SettingsSection>
+    </>
   )
 }
 
@@ -755,9 +770,21 @@ const API_FORMATS: ReadonlyArray<{ id: ApiFormat; label: string }> = [
   { id: 'openai', label: 'OpenAI' },
 ]
 
+/** The capability rows, in display order. */
+const CAPABILITY_ROWS: ReadonlyArray<{
+  key: 'text' | 'image' | 'thinking' | 'webSearch'
+  label: string
+}> = [
+  { key: 'text', label: 'Text' },
+  { key: 'image', label: 'Images' },
+  { key: 'thinking', label: 'Thinking' },
+  { key: 'webSearch', label: 'Web search' },
+]
+
 /**
  * Probes the provider with real requests, because most do not advertise what they accept in their
- * model catalogue. Knowing whether images work avoids sending a screenshot into a black hole.
+ * model catalogue. Knowing whether images and search work avoids sending requests that cannot
+ * succeed.
  */
 function CapabilitiesField({ query }: { query: string }) {
   const baseUrl = useSettingsStore((state) => state.baseUrl)
@@ -796,12 +823,14 @@ function CapabilitiesField({ query }: { query: string }) {
   return (
     <SettingField
       title="Capabilities"
-      description="Checks what this provider accepts for the selected model. Iris sends a tiny test message and image."
+      description="Checks what this provider accepts for the selected model: text, images, thinking, and web search. Iris sends a few tiny test requests."
       query={query}
       search={[
         'capabilities',
         'image',
         'vision',
+        'thinking',
+        'web search',
         'support',
         'test',
         'connection',
@@ -825,17 +854,17 @@ function CapabilitiesField({ query }: { query: string }) {
 
         {report ? (
           <div className="flex flex-col gap-1 text-[11px]">
-            <p className="text-muted">
-              <span className="text-foreground">Text</span> ·{' '}
-              {report.text ? 'supported' : 'not supported'}
-            </p>
-            <p className="text-muted">
-              <span className="text-foreground">Images</span> ·{' '}
-              {report.image ? 'supported' : 'not supported'}
-            </p>
+            {CAPABILITY_ROWS.map(({ key, label }) => (
+              <p className="text-muted" key={key}>
+                <span className="text-foreground">{label}</span> ·{' '}
+                {report[key] ? 'supported' : 'not supported'}
+              </p>
+            ))}
             <p
               className={
-                report.text && report.image ? 'text-muted' : 'text-danger'
+                CAPABILITY_ROWS.every(({ key }) => report[key])
+                  ? 'text-muted'
+                  : 'text-danger'
               }
             >
               {report.message}

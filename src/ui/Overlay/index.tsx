@@ -3,9 +3,9 @@ import { invoke } from '@tauri-apps/api/core'
 import { emit, listen } from '@tauri-apps/api/event'
 import {
   Check,
+  ChevronDown,
   ChevronUp,
   Copy,
-  Eye,
   Mic,
   Plus,
   Scan,
@@ -132,8 +132,11 @@ function Overlay() {
   const speaking = useSpeechStore((state) => state.speaking)
   const preparing = useSpeechStore((state) => state.preparing)
   const speechError = useSpeechStore((state) => state.error)
+  const revealResponse = useSettingsStore((state) => state.revealResponse)
   const [value, setValue] = useState('')
-  const [revealed, setRevealed] = useState(false)
+  // A new reply starts revealed or hidden depending on the setting; Hide/Show still override it
+  // for the reply currently on screen.
+  const [revealed, setRevealed] = useState(revealResponse)
   const [ignoredResponseId, setIgnoredResponseId] = useState<string | null>(
     null,
   )
@@ -213,10 +216,10 @@ function Overlay() {
     resetQuickConversation()
     clearImages()
     setValue('')
-    setRevealed(false)
+    setRevealed(revealResponse)
     setIgnoredResponseId(null)
     requestAnimationFrame(() => inputRef.current?.focus())
-  }, [clearImages, inputRef, resetQuickConversation])
+  }, [clearImages, inputRef, resetQuickConversation, revealResponse])
 
   useEffect(() => {
     ensureQuickConversation()
@@ -521,7 +524,7 @@ function Overlay() {
     const attachments = images.attachments
     setValue('')
     images.clear()
-    setRevealed(false)
+    setRevealed(revealResponse)
     setIgnoredResponseId(null)
     ensureQuickConversation()
     void sendMessage(text, QUICK_CONVERSATION_ID, attachments)
@@ -554,7 +557,7 @@ function Overlay() {
 
       setValue('')
       images.clear()
-      setRevealed(false)
+      setRevealed(revealResponse)
       setIgnoredResponseId(null)
       ensureQuickConversation()
       void sendMessage(text, QUICK_CONVERSATION_ID, attachments)
@@ -764,7 +767,7 @@ function Overlay() {
                             variant="ghost"
                             onPress={() => setRevealed(true)}
                           >
-                            <Eye className="size-3.5" />
+                            <ChevronUp className="size-3.5" />
                           </Button>
                           <Tooltip.Content>Show response</Tooltip.Content>
                         </Tooltip>
@@ -778,7 +781,7 @@ function Overlay() {
                             variant="ghost"
                             onPress={() => setRevealed(false)}
                           >
-                            <ChevronUp className="size-3.5" />
+                            <ChevronDown className="size-3.5" />
                           </Button>
                           <Tooltip.Content>Hide response</Tooltip.Content>
                         </Tooltip>
