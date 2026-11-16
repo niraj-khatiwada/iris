@@ -182,6 +182,7 @@ fn main() {
             tauri_commands::storage::save_conversations,
             tauri_commands::storage::delete_conversation,
             tauri_commands::storage::clear_conversations,
+            tauri_commands::theme::set_main_window_theme,
             tauri_commands::voice::stop_speaking,
             tauri_commands::voice::transcribe_audio,
         ])

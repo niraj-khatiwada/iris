@@ -248,7 +248,7 @@
 }
 
 /* -------------------------------------------------------------------------------------------------
- * The quick-chat overlay window. Transparent around the panel, always dark.
+ * The quick-chat overlay window. Transparent around the panel; it follows the macOS appearance.
  * ----------------------------------------------------------------------------------------------- */
 
 html[data-window="overlay"],
@@ -304,17 +304,24 @@ html[data-window="canvas"] body {
 
 .liquid-glass {
   --glass-tint: rgba(7, 10, 14, 0.78);
+  --glass-sheen: rgba(255, 255, 255, 0.09);
+  --glass-sheen-soft: rgba(255, 255, 255, 0.05);
+  --glass-edge: rgba(255, 255, 255, 0.15);
+  --glass-inner: rgba(255, 255, 255, 0.24);
+  --glass-inner-soft: rgba(255, 255, 255, 0.05);
+  --glass-glow: rgba(255, 255, 255, 0.045);
+  --glass-shadow: rgba(0, 0, 0, 0.82);
+  --glass-shadow-glow: rgba(255, 255, 255, 0.12);
+  --glass-conic: rgba(255, 255, 255, 0.07);
+  --glass-conic-soft: rgba(255, 255, 255, 0.05);
+  --glass-conic-faint: rgba(255, 255, 255, 0.04);
   position: relative;
   isolation: isolate;
   background:
-    radial-gradient(
-      120% 150% at 12% 0%,
-      rgba(255, 255, 255, 0.09),
-      transparent 44%
-    ),
+    radial-gradient(120% 150% at 12% 0%, var(--glass-sheen), transparent 44%),
     radial-gradient(
       100% 130% at 100% 8%,
-      rgba(255, 255, 255, 0.05),
+      var(--glass-sheen-soft),
       transparent 46%
     ),
     linear-gradient(
@@ -324,15 +331,46 @@ html[data-window="canvas"] body {
       rgba(255, 255, 255, 0.07)
     ),
     var(--glass-tint);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid var(--glass-edge);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.24),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.05),
-    inset 0 0 34px rgba(255, 255, 255, 0.045),
-    0 8px 18px -10px rgba(0, 0, 0, 0.82),
-    0 0 14px -6px rgba(255, 255, 255, 0.12);
+    inset 0 1px 0 var(--glass-inner),
+    inset 0 -1px 0 var(--glass-inner-soft),
+    inset 0 0 34px var(--glass-glow),
+    0 8px 18px -10px var(--glass-shadow),
+    0 0 14px -6px var(--glass-shadow-glow);
   backdrop-filter: blur(44px) saturate(170%);
   -webkit-backdrop-filter: blur(44px) saturate(170%);
+}
+
+/* Light mode keeps the same glass construction over a bright tint instead of a dark one. */
+.light .liquid-glass,
+[data-theme="light"] .liquid-glass {
+  --glass-tint: rgba(248, 249, 251, 0.72);
+  --glass-sheen: rgba(255, 255, 255, 0.85);
+  --glass-sheen-soft: rgba(255, 255, 255, 0.5);
+  --glass-edge: rgba(15, 20, 28, 0.1);
+  --glass-inner: rgba(255, 255, 255, 0.9);
+  --glass-inner-soft: rgba(15, 20, 28, 0.04);
+  --glass-glow: rgba(255, 255, 255, 0.5);
+  --glass-shadow: rgba(15, 23, 42, 0.22);
+  --glass-shadow-glow: rgba(15, 23, 42, 0.06);
+  --glass-conic: rgba(255, 255, 255, 0.55);
+  --glass-conic-soft: rgba(255, 255, 255, 0.4);
+  --glass-conic-faint: rgba(255, 255, 255, 0.3);
+  background:
+    radial-gradient(120% 150% at 12% 0%, var(--glass-sheen), transparent 44%),
+    radial-gradient(
+      100% 130% at 100% 8%,
+      var(--glass-sheen-soft),
+      transparent 46%
+    ),
+    linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.9),
+      rgba(255, 255, 255, 0.55) 40%,
+      rgba(244, 246, 250, 0.8)
+    ),
+    var(--glass-tint);
 }
 
 .liquid-glass::before {
@@ -345,11 +383,11 @@ html[data-window="canvas"] body {
   background: conic-gradient(
     from 120deg at 50% 50%,
     transparent 0deg,
-    rgba(255, 255, 255, 0.07) 42deg,
+    var(--glass-conic) 42deg,
     transparent 96deg,
-    rgba(255, 255, 255, 0.05) 164deg,
+    var(--glass-conic-soft) 164deg,
     transparent 230deg,
-    rgba(255, 255, 255, 0.04) 296deg,
+    var(--glass-conic-faint) 296deg,
     transparent 360deg
   );
   background-size: 200% 200%;

@@ -75,7 +75,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: SETTINGS_STORAGE_KEY,
-      version: 5,
+      version: 6,
       migrate: (persisted) => {
         const saved = persisted as Partial<SettingsState>
         const openShortcut =
@@ -96,6 +96,11 @@ export const useSettingsStore = create<SettingsState>()(
           if (typeof value === 'string' && value.includes('+')) {
             overlayShortcuts[action] = value
           }
+        }
+
+        // Web search moved from ⌘W to ⌘S; carry the untouched old default over.
+        if (overlayShortcuts.webSearch === 'CommandOrControl+KeyW') {
+          overlayShortcuts.webSearch = DEFAULT_OVERLAY_SHORTCUTS.webSearch
         }
 
         return {

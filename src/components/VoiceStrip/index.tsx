@@ -38,7 +38,7 @@ function VoiceStrip({
 
       <div className="min-w-0 flex-1">
         {mode === 'transcribing' ? (
-          <div className="flex items-center gap-2 text-[11px] text-white/45">
+          <div className="flex items-center gap-2 text-[11px] text-muted">
             <LoaderCircle className="size-3 animate-spin" />
             Transcribing…
           </div>
@@ -52,7 +52,7 @@ function VoiceStrip({
       </span>
 
       {speaking ? (
-        <span className="text-[10px] tracking-[0.12em] text-white/35 uppercase">
+        <span className="text-[10px] tracking-[0.12em] text-muted uppercase">
           Speaking
         </span>
       ) : null}
@@ -66,7 +66,7 @@ function VoiceStrip({
               ? 'Stop listening'
               : 'Stop speaking'
         }
-        className="size-8 min-w-8 rounded-full border border-white/10 bg-white/[0.06] text-white/65 hover:bg-white/[0.12] hover:text-white"
+        className="size-8 min-w-8 rounded-full border border-foreground/10 bg-foreground/[0.06] text-foreground/65 hover:bg-foreground/[0.12] hover:text-foreground"
         size="sm"
         variant="ghost"
         onPress={onStop}

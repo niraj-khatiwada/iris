@@ -1,13 +1,14 @@
 import ReactDOM from 'react-dom/client'
 
-import { applyTheme } from '@/utils/theme'
+import { watchSystemTheme } from '@/utils/theme'
 
 import './global.css'
 import Overlay from './ui/Overlay'
 
-// The overlay is its own window: always dark, always transparent around the panel.
+// The overlay is its own window: it follows the macOS appearance, not the in-app theme setting,
+// and stays transparent around the panel.
 document.documentElement.dataset.window = 'overlay'
-applyTheme('dark')
+watchSystemTheme()
 
 const rootElement = document.getElementById('app')
 

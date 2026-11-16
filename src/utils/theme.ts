@@ -22,6 +22,19 @@ export function applyTheme(mode: ThemeMode) {
   root.style.colorScheme = theme
 }
 
+/**
+ * Follows the macOS appearance for windows that ignore the app theme, like the quick overlay.
+ * Applies the current system theme immediately and returns an unsubscribe for appearance changes.
+ */
+export function watchSystemTheme() {
+  const media = window.matchMedia('(prefers-color-scheme: dark)')
+  const apply = () => applyTheme('system')
+
+  apply()
+  media.addEventListener('change', apply)
+  return () => media.removeEventListener('change', apply)
+}
+
 /** Reads the persisted theme without hydrating the whole settings store. */
 export function getStoredTheme(): ThemeMode {
   try {

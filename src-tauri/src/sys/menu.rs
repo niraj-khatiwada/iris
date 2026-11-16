@@ -1,8 +1,8 @@
 use tauri::menu::MenuItemKind;
 use tauri::AppHandle;
 
-/// Cmd+W is an overlay shortcut for web search, but the macOS default menu binds Close Window to
-/// it. Remove the empty File menu and the Window > Close item so the key reaches the webview.
+/// macOS binds Close Window to Cmd+W by default, which would dismiss Iris while it is on screen.
+/// Remove the empty File menu and the Window > Close item so the key never closes a window.
 #[cfg(target_os = "macos")]
 pub fn remove_close_window_items(app: &AppHandle) {
     let Some(menu) = app.menu() else {

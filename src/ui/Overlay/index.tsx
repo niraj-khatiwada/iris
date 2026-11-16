@@ -584,7 +584,7 @@ function Overlay() {
         ref={panelRef}
         animate={{ height: contentHeight ?? 'auto' }}
         className={cn(
-          'iris-panel liquid-glass w-[760px] max-w-full overflow-hidden rounded-[28px] text-white',
+          'iris-panel liquid-glass w-[760px] max-w-full overflow-hidden rounded-[28px] text-foreground',
           active && 'iris-panel--active',
         )}
         initial={false}
@@ -601,7 +601,7 @@ function Overlay() {
                 initial={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.2, ease: 'easeOut' }}
               >
-                <p className="max-w-[90%] rounded-full border border-red-400/20 bg-red-950/85 px-3 py-1.5 text-center text-[11px] leading-4 text-red-200 shadow-lg backdrop-blur-xl">
+                <p className="max-w-[90%] rounded-full border border-danger/25 bg-danger/15 px-3 py-1.5 text-center text-[11px] leading-4 text-danger shadow-lg backdrop-blur-xl">
                   {overlayError}
                 </p>
               </motion.div>
@@ -676,11 +676,11 @@ function Overlay() {
                       </Tooltip.Content>
                     </Tooltip>
 
-                    <span className="text-[10px] font-semibold tracking-[0.16em] text-white/55">
+                    <span className="text-[10px] font-semibold tracking-[0.16em] text-foreground/55">
                       IRIS
                     </span>
                     {errorLabel ? (
-                      <span className="truncate text-[11px] text-red-300/85">
+                      <span className="truncate text-[11px] text-danger/90">
                         {errorLabel}
                       </span>
                     ) : null}
@@ -699,7 +699,7 @@ function Overlay() {
                         <Button
                           isIconOnly
                           aria-label="Stop speaking"
-                          className="-ml-1.5 size-6 min-w-6 shrink-0 text-white/45"
+                          className="-ml-1.5 size-6 min-w-6 shrink-0 text-foreground/45"
                           size="sm"
                           variant="ghost"
                           onPress={() => {
@@ -718,7 +718,7 @@ function Overlay() {
                           <Button
                             isIconOnly
                             aria-label={copied ? 'Copied' : 'Copy response'}
-                            className="size-7 min-w-7 text-white/45"
+                            className="size-7 min-w-7 text-foreground/45"
                             size="sm"
                             variant="ghost"
                             onPress={copyResponse}
@@ -740,7 +740,7 @@ function Overlay() {
                           <Button
                             isIconOnly
                             aria-label="Stop responding"
-                            className="size-7 min-w-7 text-white/45"
+                            className="size-7 min-w-7 text-foreground/45"
                             size="sm"
                             variant="ghost"
                             onPress={cancel}
@@ -756,7 +756,7 @@ function Overlay() {
                           <Button
                             isIconOnly
                             aria-label="Show response"
-                            className="size-7 min-w-7 text-white/45"
+                            className="size-7 min-w-7 text-foreground/45"
                             size="sm"
                             variant="ghost"
                             onPress={() => setRevealed(true)}
@@ -770,7 +770,7 @@ function Overlay() {
                           <Button
                             isIconOnly
                             aria-label="Hide response"
-                            className="size-7 min-w-7 text-white/45"
+                            className="size-7 min-w-7 text-foreground/45"
                             size="sm"
                             variant="ghost"
                             onPress={() => setRevealed(false)}
@@ -793,7 +793,7 @@ function Overlay() {
                               'size-7 min-w-7',
                               capturing
                                 ? 'bg-primary/15 text-primary'
-                                : 'text-white/45',
+                                : 'text-foreground/45',
                             )}
                             size="sm"
                             variant="ghost"
@@ -811,7 +811,7 @@ function Overlay() {
                         <Button
                           isIconOnly
                           aria-label="New quick chat"
-                          className="size-7 min-w-7 text-white/45"
+                          className="size-7 min-w-7 text-foreground/45"
                           size="sm"
                           variant="ghost"
                           onPress={newChat}
@@ -825,7 +825,7 @@ function Overlay() {
                         <Button
                           isIconOnly
                           aria-label="Hide Iris"
-                          className="size-7 min-w-7 text-white/45"
+                          className="size-7 min-w-7 text-foreground/45"
                           size="sm"
                           variant="ghost"
                           onPress={hide}
@@ -843,7 +843,7 @@ function Overlay() {
                       className="iris-response max-h-[320px] overflow-y-auto px-5 pb-2 pt-1.5"
                     >
                       {assistant?.status === 'error' ? (
-                        <p className="text-[13px] leading-6 text-red-300/90">
+                        <p className="text-[13px] leading-6 text-danger">
                           {assistant.error ??
                             'Iris could not finish that response. Try again in a moment.'}
                         </p>
@@ -857,9 +857,9 @@ function Overlay() {
                     className={cn(
                       'px-3',
                       hasResponse
-                        ? 'border-t border-white/[0.06] pt-1.5 pb-2.5'
+                        ? 'border-t border-foreground/[0.06] pt-1.5 pb-2.5'
                         : 'pt-1 pb-2.5',
-                      images.dragging && 'bg-white/[0.03]',
+                      images.dragging && 'bg-foreground/[0.03]',
                     )}
                     data-tauri-drag-region="deep"
                     {...images.dragHandlers}
@@ -879,7 +879,7 @@ function Overlay() {
                       <TextArea
                         ref={inputRef}
                         aria-label="Ask Iris"
-                        className="max-h-[120px] min-h-10 w-full resize-none border-0 bg-transparent px-1 py-2 text-[15px] leading-6 text-white shadow-none placeholder:text-white/35 focus-visible:ring-0"
+                        className="max-h-[120px] min-h-10 w-full resize-none border-0 bg-transparent px-1 py-2 text-[15px] leading-6 text-foreground shadow-none placeholder:text-foreground/35 focus-visible:ring-0"
                         placeholder={
                           hasResponse
                             ? 'Ask a follow-up…'
@@ -905,7 +905,7 @@ function Overlay() {
                           <Button
                             isIconOnly
                             aria-label="Voice input"
-                            className="text-white/45"
+                            className="text-foreground/45"
                             isDisabled={streaming}
                             size="sm"
                             variant="ghost"

@@ -96,7 +96,7 @@ export const useThingStore = create<ThingState>()(
 - The palette uses one primary color (`--primary`) for the AI blob, success feedback, and HeroUI's accent. Surfaces stay neutral glass; do not reintroduce colored auroras, colored glass tints, or broad gradients.
 - The main window uses an overlay title bar. The sidebar and chat headers sit at the very top and carry `data-tauri-drag-region`; the sidebar header keeps its left side empty for the macOS traffic lights.
 - The dynamic island is hidden for now. Keep the top centre free of app chrome until it returns.
-- Pressing `/` focuses the composer when focus is not already in a text field. The quick overlay and the history window both support this. The overlay's local shortcuts are configurable in Settings → Shortcuts: **Capture screen** (`⌘C`), **New chat** (`⌘N`), **DeepThink** (`⌘D`), and **Web search** (`⌘W`). `Cmd+,` still opens Settings. `sys/menu.rs` removes macOS's Close Window (`⌘W`) menu accelerator, and the overlay intercepts the Copy event when Capture is bound to `⌘C`, so the menu does not swallow either shortcut.
+- Pressing `/` focuses the composer when focus is not already in a text field. The quick overlay and the history window both support this. The overlay's local shortcuts are configurable in Settings → Shortcuts: **Capture screen** (`⌘C`), **New chat** (`⌘N`), **DeepThink** (`⌘D`), and **Web search** (`⌘S`). `Cmd+,` still opens Settings. `sys/menu.rs` removes macOS's Close Window (`⌘W`) menu accelerator, and the overlay intercepts the Copy event when Capture is bound to `⌘C`, so the menu does not swallow either shortcut.
 - **The quick overlay is the primary interface.** Keep it to one bottom input, Iris's status, and a single response block. No sidebar, no message bubbles, no user-message echo, no chat transcript.
 - The Iris blob is the only status indicator. Primary green plus the `IRIS` label means ready (no `Ready` text, no status dot). Amber means a request is in flight; blue means read-aloud is preparing or playing (the wave is blue while speaking); red means an error. No spinner, play badge, or progress labels: only color and error text.
 - Processing is voice-first: show the blob/ring/wave effect and only **Cancel**; never render the reply while streaming or by default after completion. The small **Show response** control reveals it on demand.
@@ -104,7 +104,10 @@ export const useThingStore = create<ThingState>()(
 - Do not auto-dismiss on focus loss. The overlay stays until Escape, the close button, the shortcut, History, or Quit.
 - The full-screen canvas is click-through and non-focusable. Do not put buttons or interactive UI on it; the input panel is a separate window above it.
 - Animate state changes with `motion` springs; do not swap layouts abruptly. The native window height follows the animated panel height through the ResizeObserver.
-- The overlay is always dark, single-card glass; it sits above other windows and on every workspace. It must **not** dismiss on focus loss: hide only on Escape, the close button, the shortcut, or an explicit action.
+- The overlay is dark by default but follows the macOS appearance (not the in-app theme setting):
+  light glass with dark ink when the system is in light mode. It sits above other windows and on
+  every workspace. It must **not** dismiss on focus loss: hide only on Escape, the close button,
+  the shortcut, or an explicit action.
 - The history window is secondary. It exists for old conversations and the Dynamic Island; do not redesign it until asked.
 - The chat UI is provisional: **do not add new screens or redesign the chat** until the user provides the new UI direction.
 - The assistant's identity is the AI blob (`src/components/IrisBlob`, powered by `src/components/AiBotAvatar`), not a generic avatar. Use its emotion/activity API (`listening`, `speaking`, `thinking`, `happy`, `sad`) rather than adding a static avatar.
