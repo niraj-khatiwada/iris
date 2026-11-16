@@ -21,3 +21,9 @@ pub const OVERLAY_HIDDEN: &str = "overlay:hidden";
 
 /// The capture window received a fresh screenshot and waits for a region selection.
 pub const CAPTURE_START: &str = "capture:start";
+
+/// The capture panel was closed without attaching, discarding the in-progress selection.
+pub const CAPTURE_CLOSED: &str = "capture:closed";
+
+/// The overlay was shown or brought forward; the webview should focus its input.
+pub const OVERLAY_FOCUSED: &str = "overlay:focused";

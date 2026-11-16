@@ -56,6 +56,7 @@ fn main() {
             app.manage(GenerationState::default());
             app.manage(crate::core::agent::SummaryCache::default());
             app.manage(crate::sys::overlay::OverlayPosition::load(app.handle()));
+            crate::sys::menu::remove_close_window_items(app.handle());
             app.manage(crate::sys::speech::SpeechState::default());
             let storage =
                 crate::core::storage::Storage::open(app.handle()).map_err(std::io::Error::other)?;

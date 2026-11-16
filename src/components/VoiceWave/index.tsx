@@ -18,6 +18,8 @@ type VoiceWaveProps = {
   active?: boolean
   compact?: boolean
   className?: string
+  /** Blue while Iris is reading aloud; primary for the microphone. */
+  tone?: 'primary' | 'speaking'
 }
 
 /**
@@ -29,6 +31,7 @@ function VoiceWave({
   active = true,
   compact = false,
   className,
+  tone = 'primary',
 }: VoiceWaveProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const [count, setCount] = useState(0)
@@ -150,7 +153,8 @@ function VoiceWave({
         <span
           key={index}
           className={cn(
-            'w-0.5 shrink-0 origin-center rounded-full bg-primary/85',
+            'w-0.5 shrink-0 origin-center rounded-full',
+            tone === 'speaking' ? 'bg-sky-400/85' : 'bg-primary/85',
             compact ? 'h-[3px]' : 'h-1',
           )}
         />

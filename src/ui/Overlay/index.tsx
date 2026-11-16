@@ -2,7 +2,6 @@ import { Button, TextArea, Tooltip } from '@heroui/react'
 import { invoke } from '@tauri-apps/api/core'
 import { emit, listen } from '@tauri-apps/api/event'
 import {
-  ArrowUp,
   Check,
   ChevronUp,
   Copy,
@@ -24,8 +23,9 @@ import {
 
 import AttachmentStrip from '@/components/AttachmentStrip'
 import ChatToggles from '@/components/ChatToggles'
-import IrisBlob from '@/components/IrisBlob'
+import IrisBlob, { type IrisTone } from '@/components/IrisBlob'
 import Markdown from '@/components/Markdown'
+import SendButton from '@/components/SendButton'
 import VoiceStrip from '@/components/VoiceStrip'
 import VoiceWave from '@/components/VoiceWave'
 import { QUICK_CONVERSATION_ID } from '@/constants'
@@ -44,12 +44,14 @@ import { useChatStore } from '@/stores/chatStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { subscribeToOverlayHidden } from '@/tauri/commands/overlay'
 import {
+  closeScreenCapture,
   getScreenCapturePermission,
   requestScreenCapturePermission,
   startScreenCapture,
 } from '@/tauri/commands/screen'
 import { stopSpeaking } from '@/tauri/commands/voice'
 import { newId } from '@/utils/id'
+import { matchesShortcut } from '@/utils/shortcut'
 import { cn } from '@/utils/tailwind'
 import { isTauri } from '@/utils/tauri'
 
@@ -66,6 +68,22 @@ const contentSpring = {
   damping: 40,
   mass: 0.6,
 } as const
+
+function isPlainCommandC(shortcut: string) {
+  const parts = shortcut
+    .toLowerCase()
+    .split('+')
+    .map((part) => part.trim())
+    .filter(Boolean)
+
+  return (
+    parts.length === 2 &&
+    ['commandorcontrol', 'command', 'cmd', 'meta', 'super'].includes(
+      parts[0],
+    ) &&
+    parts[1] === 'keyc'
+  )
+}
 
 function isTypingTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) {
@@ -99,6 +117,11 @@ function Overlay() {
 
   const { panelRef, inputRef, hide } = useOverlayWindow()
   const autoSendVoice = useSettingsStore((state) => state.autoSendVoice)
+  const overlayShortcuts = useSettingsStore((state) => state.overlayShortcuts)
+  const deepThink = useSettingsStore((state) => state.deepThink)
+  const webSearch = useSettingsStore((state) => state.webSearch)
+  const setDeepThink = useSettingsStore((state) => state.setDeepThink)
+  const setWebSearch = useSettingsStore((state) => state.setWebSearch)
   const voice = useVoiceInput()
   const images = useImageAttachments()
   useChatStorage()
@@ -112,10 +135,27 @@ function Overlay() {
   const [copied, setCopied] = useState(false)
   const [errorVisible, setErrorVisible] = useState(false)
   const [captureError, setCaptureError] = useState<string | null>(null)
+  const [capturing, setCapturing] = useState(false)
   const [sendingTick, setSendingTick] = useState(0)
   const [contentHeight, setContentHeight] = useState<number | null>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const copyTimer = useRef<number | null>(null)
+  const finishVoiceRef = useRef<(forceSend?: boolean) => void>(() => {})
+  const startCaptureRef = useRef<() => void>(() => {})
+  const captureGuard = useRef(0)
+  const captureShortcutIsCopy = isPlainCommandC(overlayShortcuts.capture)
+  const triggerCapture = useCallback(() => {
+    const now = Date.now()
+    if (now - captureGuard.current < 600) {
+      return
+    }
+    captureGuard.current = now
+    startCaptureRef.current()
+  }, [])
+  const voiceStatusRef = useRef(voice.status)
+  const cancelVoiceRef = useRef(voice.cancel)
+  voiceStatusRef.current = voice.status
+  cancelVoiceRef.current = voice.cancel
 
   const lastMessage = conversation?.messages[conversation.messages.length - 1]
   const assistant = lastMessage?.role === 'assistant' ? lastMessage : undefined
@@ -125,7 +165,6 @@ function Overlay() {
       !isIgnored &&
       (assistant.content || assistant.status === 'error'),
   )
-  const isThinking = streaming && !assistant?.content
   const showResponse = !streaming && hasResponse && revealed
   const responseReady = !streaming && hasResponse && !revealed
   const voiceActive = voice.status !== 'idle'
@@ -135,21 +174,21 @@ function Overlay() {
   const apiKeyMissing = /api key/i.test(errorMessage)
   // The blob keeps morphing while a reply streams and while its audio is being prepared.
   const morphing = streaming || preparing
+  const tone: IrisTone =
+    assistant?.status === 'error'
+      ? 'error'
+      : preparing || speaking
+        ? 'speaking'
+        : streaming
+          ? 'pending'
+          : 'primary'
   const active =
     streaming || preparing || hasResponse || voiceActive || speaking
-  const status = apiKeyMissing
+  const errorLabel = apiKeyMissing
     ? 'API key is required'
     : assistant?.status === 'error'
       ? 'Something went wrong'
-      : speaking
-        ? 'Speaking'
-        : preparing
-          ? 'Reading aloud…'
-          : streaming
-            ? isThinking
-              ? 'Sending request…'
-              : 'Responding…'
-            : 'Ready'
+      : null
   const view = voiceActive ? 'voice' : 'main'
 
   const openSettings = useCallback(async () => {
@@ -237,15 +276,38 @@ function Overlay() {
     [],
   )
 
-  // Pressing "/" returns focus to the quick input, Cmd/Ctrl+N starts a new chat, and Cmd/Ctrl+,
-  // opens Settings in the history window.
+  // Overlay-local shortcuts: "/" focuses the input, Cmd+, opens Settings, and the four
+  // configurable bindings drive capture, new chat, DeepThink, and web search.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const modifier = event.metaKey || event.ctrlKey
 
-      if (modifier && event.key.toLowerCase() === 'n') {
+      // The voice strip owns Enter/Escape and ignores the action shortcuts.
+      if (voiceActive) {
+        return
+      }
+
+      if (matchesShortcut(event, overlayShortcuts.newChat)) {
         event.preventDefault()
         newChat()
+        return
+      }
+
+      if (matchesShortcut(event, overlayShortcuts.capture)) {
+        event.preventDefault()
+        triggerCapture()
+        return
+      }
+
+      if (matchesShortcut(event, overlayShortcuts.deepThink)) {
+        event.preventDefault()
+        setDeepThink(!deepThink)
+        return
+      }
+
+      if (matchesShortcut(event, overlayShortcuts.webSearch)) {
+        event.preventDefault()
+        setWebSearch(!webSearch)
         return
       }
 
@@ -271,7 +333,37 @@ function Overlay() {
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [inputRef, newChat, openSettings])
+  }, [
+    deepThink,
+    inputRef,
+    newChat,
+    openSettings,
+    overlayShortcuts,
+    setDeepThink,
+    setWebSearch,
+    triggerCapture,
+    voiceActive,
+    webSearch,
+  ])
+
+  // Cmd+C is the macOS Copy menu accelerator; catch the resulting copy event so the overlay can
+  // still use it for screen capture when that binding is selected.
+  useEffect(() => {
+    if (!captureShortcutIsCopy) {
+      return
+    }
+
+    const onCopy = (event: ClipboardEvent) => {
+      if (voiceActive) {
+        return
+      }
+      event.preventDefault()
+      triggerCapture()
+    }
+
+    document.addEventListener('copy', onCopy)
+    return () => document.removeEventListener('copy', onCopy)
+  }, [captureShortcutIsCopy, triggerCapture, voiceActive])
 
   // A finished screen capture arrives as an annotated JPEG for the current draft.
   useEffect(() => {
@@ -281,29 +373,73 @@ function Overlay() {
 
     const addAttachment = images.addAttachment
     let disposed = false
-    let off: (() => void) | undefined
+    const cleanups: Array<() => void> = []
 
-    void listen<{ dataUrl: string }>('capture:attached', (event) => {
-      addAttachment({
-        id: newId(),
-        name: 'Screen capture',
-        mediaType: 'image/jpeg',
-        dataUrl: event.payload.dataUrl,
+    const track = (
+      subscribe: (
+        handler: (payload: { dataUrl: string }) => void,
+      ) => Promise<() => void>,
+    ) => {
+      void subscribe((payload) => {
+        addAttachment({
+          id: newId(),
+          name: 'Screen capture',
+          mediaType: 'image/jpeg',
+          dataUrl: payload.dataUrl,
+        })
+        setCapturing(false)
+        requestAnimationFrame(() => inputRef.current?.focus())
+      }).then((off) => {
+        if (disposed) {
+          off()
+        } else {
+          cleanups.push(off)
+        }
       })
-      requestAnimationFrame(() => inputRef.current?.focus())
-    }).then((unlisten) => {
+    }
+
+    track((handler) =>
+      listen<{ dataUrl: string }>('capture:attached', (event) =>
+        handler(event.payload),
+      ),
+    )
+
+    void listen('capture:closed', () => setCapturing(false)).then((off) => {
       if (disposed) {
-        unlisten()
+        off()
       } else {
-        off = unlisten
+        cleanups.push(off)
       }
     })
 
     return () => {
       disposed = true
-      off?.()
+      for (const cleanup of cleanups) {
+        cleanup()
+      }
     }
   }, [images.addAttachment, inputRef])
+
+  // While the voice strip is open, Enter sends and Escape cancels it instead of hiding Iris.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Enter' && voiceStatusRef.current === 'recording') {
+        event.preventDefault()
+        event.stopPropagation()
+        finishVoiceRef.current(true)
+        return
+      }
+
+      if (event.key === 'Escape' && voiceStatusRef.current !== 'idle') {
+        event.preventDefault()
+        event.stopPropagation()
+        cancelVoiceRef.current()
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [])
 
   // The native window can be hidden by the shortcut, which never reaches the React tree.
   useEffect(() => {
@@ -332,6 +468,15 @@ function Overlay() {
       return
     }
 
+    if (capturing) {
+      try {
+        await closeScreenCapture()
+      } finally {
+        setCapturing(false)
+      }
+      return
+    }
+
     setCaptureError(null)
     try {
       const allowed = await getScreenCapturePermission()
@@ -346,6 +491,7 @@ function Overlay() {
       }
 
       await startScreenCapture()
+      setCapturing(true)
     } catch (error) {
       setCaptureError(error instanceof Error ? error.message : String(error))
     }
@@ -375,13 +521,13 @@ function Overlay() {
     void stopStreaming()
   }
 
-  const finishVoice = async () => {
+  const finishVoice = async (forceSend = false) => {
     const text = await voice.stop()
     if (!text) {
       return
     }
 
-    if (autoSendVoice) {
+    if (autoSendVoice || forceSend) {
       setValue('')
       setRevealed(false)
       setIgnoredResponseId(null)
@@ -391,6 +537,14 @@ function Overlay() {
       setValue(text)
       requestAnimationFrame(() => inputRef.current?.focus())
     }
+  }
+
+  finishVoiceRef.current = (forceSend) => {
+    void finishVoice(forceSend)
+  }
+
+  startCaptureRef.current = () => {
+    void startCapture()
   }
 
   const openHistory = () => {
@@ -514,6 +668,7 @@ function Overlay() {
                               : 'blob'
                           }
                           size={24}
+                          tone={tone}
                         />
                       </button>
                       <Tooltip.Content>
@@ -524,21 +679,19 @@ function Overlay() {
                     <span className="text-[10px] font-semibold tracking-[0.16em] text-white/55">
                       IRIS
                     </span>
-                    <span
-                      className={cn(
-                        'size-1.5 rounded-full',
-                        assistant?.status === 'error'
-                          ? 'bg-red-400'
-                          : 'bg-primary',
-                        streaming && 'animate-pulse',
-                      )}
-                    />
-                    <span className="truncate text-[11px] text-white/35">
-                      {status}
-                    </span>
+                    {errorLabel ? (
+                      <span className="truncate text-[11px] text-red-300/85">
+                        {errorLabel}
+                      </span>
+                    ) : null}
 
                     {speaking ? (
-                      <VoiceWave active compact className="w-24 shrink-0" />
+                      <VoiceWave
+                        active
+                        compact
+                        className="w-24 shrink-0"
+                        tone="speaking"
+                      />
                     ) : null}
 
                     {!streaming && (speaking || preparing) ? (
@@ -628,19 +781,29 @@ function Overlay() {
                         </Tooltip>
                       ) : null}
 
-                      {!streaming && !preparing && !voiceActive ? (
+                      {capturing ||
+                      (!streaming && !preparing && !voiceActive) ? (
                         <Tooltip delay={500}>
                           <Button
                             isIconOnly
-                            aria-label="Capture screen"
-                            className="size-7 min-w-7 text-white/45"
+                            aria-label={
+                              capturing ? 'Stop capture' : 'Capture screen'
+                            }
+                            className={cn(
+                              'size-7 min-w-7',
+                              capturing
+                                ? 'bg-primary/15 text-primary'
+                                : 'text-white/45',
+                            )}
                             size="sm"
                             variant="ghost"
                             onPress={() => void startCapture()}
                           >
                             <Scan className="size-3.5" />
                           </Button>
-                          <Tooltip.Content>Capture screen</Tooltip.Content>
+                          <Tooltip.Content>
+                            {capturing ? 'Stop capture' : 'Capture screen'}
+                          </Tooltip.Content>
                         </Tooltip>
                       ) : null}
 
@@ -753,19 +916,13 @@ function Overlay() {
                           <Tooltip.Content>Voice input</Tooltip.Content>
                         </Tooltip>
 
-                        <Button
-                          isIconOnly
-                          aria-label="Send message"
+                        <SendButton
                           isDisabled={
                             streaming ||
                             (!value.trim() && images.attachments.length === 0)
                           }
-                          size="sm"
-                          variant="primary"
                           onPress={submit}
-                        >
-                          <ArrowUp className="size-4" />
-                        </Button>
+                        />
                       </div>
                     </div>
                   </div>

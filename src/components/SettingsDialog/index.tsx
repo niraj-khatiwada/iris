@@ -41,7 +41,10 @@ import {
 import { useAppInfo } from '@/hooks/useAppInfo'
 import { suspendChatStorage } from '@/hooks/useChatStorage'
 import { useChatStore } from '@/stores/chatStore'
-import { useSettingsStore } from '@/stores/settingsStore'
+import {
+  type OverlayShortcutAction,
+  useSettingsStore,
+} from '@/stores/settingsStore'
 import { useUIStore } from '@/stores/uiStore'
 import { resetAppData, restartApp } from '@/tauri/commands/app'
 import { setOpenShortcut as applyOpenShortcut } from '@/tauri/commands/shortcut'
@@ -341,16 +344,72 @@ function GeneralPanel({ query }: { query: string }) {
   )
 }
 
+const OVERLAY_SHORTCUT_ROWS: Array<{
+  id: OverlayShortcutAction
+  title: string
+  description: string
+  search: string[]
+}> = [
+  {
+    id: 'capture',
+    title: 'Capture screen',
+    description: 'Freeze the screen and select a region.',
+    search: ['capture', 'screen', 'screenshot', 'region', 'shortcut'],
+  },
+  {
+    id: 'newChat',
+    title: 'New chat',
+    description: 'Archive the current quick chat and start fresh.',
+    search: ['new', 'chat', 'conversation', 'shortcut'],
+  },
+  {
+    id: 'deepThink',
+    title: 'DeepThink',
+    description: 'Toggle DeepThink for the next message.',
+    search: ['deep', 'think', 'reasoning', 'shortcut'],
+  },
+  {
+    id: 'webSearch',
+    title: 'Web search',
+    description: 'Toggle web search for the next message.',
+    search: ['web', 'search', 'shortcut'],
+  },
+]
+
 function ShortcutsPanel({ query }: { query: string }) {
   const openShortcut = useSettingsStore((state) => state.openShortcut)
   const setOpenShortcut = useSettingsStore((state) => state.setOpenShortcut)
+  const overlayShortcuts = useSettingsStore((state) => state.overlayShortcuts)
+  const setOverlayShortcut = useSettingsStore(
+    (state) => state.setOverlayShortcut,
+  )
   const [recording, setRecording] = useState(false)
+  const [recordingAction, setRecordingAction] =
+    useState<OverlayShortcutAction | null>(null)
 
   const recordShortcut = async (shortcut: string) => {
     if (isTauri()) {
       await applyOpenShortcut(shortcut)
     }
     setOpenShortcut(shortcut)
+  }
+
+  const recordOverlayShortcut = async (shortcut: string) => {
+    if (!recordingAction) {
+      return
+    }
+
+    const conflict = [
+      openShortcut,
+      ...Object.entries(overlayShortcuts)
+        .filter(([action]) => action !== recordingAction)
+        .map(([, value]) => value),
+    ].find((value) => value.toLowerCase() === shortcut.toLowerCase())
+    if (conflict) {
+      throw new Error('That shortcut is already in use.')
+    }
+
+    setOverlayShortcut(recordingAction, shortcut)
   }
 
   return (
@@ -381,12 +440,43 @@ function ShortcutsPanel({ query }: { query: string }) {
             <Keyboard className="size-3.5 shrink-0 text-muted" />
           </Button>
         </SettingRow>
+
+        {OVERLAY_SHORTCUT_ROWS.map((action) => (
+          <SettingRow
+            key={action.id}
+            title={action.title}
+            description={action.description}
+            query={query}
+            search={action.search}
+          >
+            <Button
+              className="min-w-40 justify-between gap-3"
+              variant="secondary"
+              onPress={() => setRecordingAction(action.id)}
+            >
+              <span className="font-medium">
+                {formatShortcut(overlayShortcuts[action.id])}
+              </span>
+              <Keyboard className="size-3.5 shrink-0 text-muted" />
+            </Button>
+          </SettingRow>
+        ))}
       </SettingsSection>
 
       <ShortcutRecorder
         open={recording}
         onOpenChange={setRecording}
         onRecord={recordShortcut}
+      />
+
+      <ShortcutRecorder
+        open={recordingAction !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRecordingAction(null)
+          }
+        }}
+        onRecord={recordOverlayShortcut}
       />
     </>
   )

@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { UnlistenFn } from '@tauri-apps/api/event'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useCallback, useEffect, useRef } from 'react'
 
@@ -110,6 +110,32 @@ export function useOverlayWindow() {
       unlisten?.()
     }
   }, [hide])
+
+  // Rust emits this whenever the overlay is shown or brought forward. Focusing here also covers
+  // the case where the panel becomes key without a Tauri focus-change event.
+  useEffect(() => {
+    if (!isTauri()) {
+      return
+    }
+
+    let disposed = false
+    let unlisten: UnlistenFn | undefined
+
+    void listen('overlay:focused', () => {
+      requestAnimationFrame(() => inputRef.current?.focus())
+    }).then((off) => {
+      if (disposed) {
+        off()
+      } else {
+        unlisten = off
+      }
+    })
+
+    return () => {
+      disposed = true
+      unlisten?.()
+    }
+  }, [])
 
   return { panelRef, inputRef, hide }
 }

@@ -1,9 +1,10 @@
 import { Button, TextArea, Tooltip } from '@heroui/react'
-import { ArrowUp, Mic, Square } from 'lucide-react'
+import { Mic, Square } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import AttachmentStrip from '@/components/AttachmentStrip'
 import ChatToggles from '@/components/ChatToggles'
+import SendButton from '@/components/SendButton'
 import { useImageAttachments } from '@/hooks/useImageAttachments'
 import { useChatStore } from '@/stores/chatStore'
 import { useUIStore } from '@/stores/uiStore'
@@ -73,14 +74,14 @@ function Composer() {
         />
 
         <div className="flex items-end gap-2 px-1.5">
-          <div className="pb-1.5">
+          <div className="pb-2">
             <ChatToggles />
           </div>
 
           <TextArea
             ref={textareaRef}
             aria-label="Message Iris"
-            className="max-h-44 min-h-11 w-full resize-none border-0 bg-transparent px-1 py-2 text-[15px] leading-6 shadow-none focus-visible:ring-0"
+            className="max-h-44 min-h-11 w-full resize-none border-0 bg-transparent px-1 py-2.5 text-[15px] leading-6 shadow-none focus-visible:ring-0"
             placeholder="Message Iris…"
             rows={1}
             value={value}
@@ -127,15 +128,10 @@ function Composer() {
                 <Tooltip.Content>Stop</Tooltip.Content>
               </Tooltip>
             ) : (
-              <Button
-                isIconOnly
-                aria-label="Send message"
+              <SendButton
                 isDisabled={!value.trim() && images.attachments.length === 0}
-                size="sm"
                 onPress={submit}
-              >
-                <ArrowUp className="size-4" />
-              </Button>
+              />
             )}
           </div>
         </div>

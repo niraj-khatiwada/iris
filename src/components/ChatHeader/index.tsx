@@ -2,7 +2,6 @@ import IrisBlob from '@/components/IrisBlob'
 import { useChatStore } from '@/stores/chatStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { formatConversationTime } from '@/utils/format'
-import { cn } from '@/utils/tailwind'
 
 function ChatHeader() {
   const conversation = useChatStore((state) =>
@@ -16,7 +15,11 @@ function ChatHeader() {
       data-tauri-drag-region
       className="flex h-14 shrink-0 items-center gap-3 border-b border-border/40 px-5"
     >
-      <IrisBlob emotion={streaming ? 'thinking' : 'neutral'} size={26} />
+      <IrisBlob
+        emotion={streaming ? 'thinking' : 'neutral'}
+        size={26}
+        tone={streaming ? 'pending' : 'primary'}
+      />
 
       <div data-tauri-drag-region className="min-w-0 flex-1">
         <h1 className="truncate text-[13px] font-semibold tracking-tight">
@@ -34,13 +37,7 @@ function ChatHeader() {
       </div>
 
       <div className="flex items-center gap-2">
-        <span className="hidden items-center gap-1.5 rounded-full border border-border/60 bg-surface/40 px-2.5 py-1 text-[10px] text-muted sm:flex">
-          <span
-            className={cn(
-              'size-1.5 rounded-full bg-primary',
-              streaming && 'animate-pulse',
-            )}
-          />
+        <span className="hidden items-center rounded-full border border-border/60 bg-surface/40 px-2.5 py-1 text-[10px] text-muted sm:flex">
           {model}
         </span>
       </div>

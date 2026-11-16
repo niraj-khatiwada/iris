@@ -38,7 +38,7 @@ pub fn setup(app: &AppHandle) -> Result<(), String> {
     panel
         .add_style_mask(StyleMask::empty().nonactivating_panel().into())
         .map_err(|error| error.to_string())?;
-    panel.set_level(28);
+    panel.set_level(26);
     panel.set_collection_behavior(
         CollectionBehavior::new()
             .can_join_all_spaces()
@@ -108,6 +108,22 @@ pub fn show(app: &AppHandle, monitor: &tauri::Monitor, image: &str) -> Result<()
     // The capture webview is created at startup, so the listener is already mounted.
     let _ = app.emit(event::CAPTURE_START, serde_json::json!({ "image": image }));
     Ok(())
+}
+
+/// Whether the capture panel is currently covering the screen.
+pub fn is_visible(app: &AppHandle) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        use tauri_nspanel::ManagerExt;
+
+        if let Ok(panel) = app.get_webview_panel(CAPTURE_LABEL) {
+            return panel.is_visible();
+        }
+    }
+
+    window(app)
+        .and_then(|window| window.is_visible().ok())
+        .unwrap_or(false)
 }
 
 pub fn hide(app: &AppHandle) -> Result<(), String> {

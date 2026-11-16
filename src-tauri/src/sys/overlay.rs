@@ -218,6 +218,32 @@ pub fn show(app: &AppHandle) -> Result<(), String> {
         window.set_focus().map_err(|error| error.to_string())?;
     }
 
+    let _ = app.emit(crate::utils::event::OVERLAY_FOCUSED, ());
+    Ok(())
+}
+
+/// Shows the overlay above the capture panel without taking key focus, so the capture selection
+/// still receives the first drag while Iris remains visible and clickable.
+pub fn show_passive(app: &AppHandle) -> Result<(), String> {
+    if !OVERLAY_READY.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+
+    let window = overlay_window(app)?;
+
+    #[cfg(target_os = "macos")]
+    {
+        use tauri_nspanel::ManagerExt;
+
+        if let Ok(panel) = app.get_webview_panel(OVERLAY_LABEL) {
+            panel.show();
+            return Ok(());
+        }
+    }
+
+    window.show().map_err(|error| error.to_string())?;
+    let _ = window.set_always_on_top(true);
+    let _ = window.set_visible_on_all_workspaces(true);
     Ok(())
 }
 
@@ -277,7 +303,16 @@ pub fn toggle(app: &AppHandle) -> Result<(), String> {
         .is_visible()
         .map_err(|error| error.to_string())?;
 
-    if visible {
+    if !visible {
+        return show(app);
+    }
+
+    // A visible but unfocused overlay is brought forward instead of dismissed. Pressing the
+    // summon shortcut again while it is key closes it.
+    let focused = overlay_window(app)?
+        .is_focused()
+        .map_err(|error| error.to_string())?;
+    if focused {
         hide(app)
     } else {
         show(app)

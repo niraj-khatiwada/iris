@@ -46,6 +46,13 @@ export const QUICK_CONVERSATION_ID = 'iris:quick'
 export const QUICK_CONVERSATION_TITLE = 'Quick chat'
 export const CHAT_STORAGE_KEY = 'iris.chat'
 export const SETTINGS_STORAGE_KEY = 'iris.settings'
+/** Overlay-local shortcuts, recorded and matched in the quick chat only. */
+export const DEFAULT_OVERLAY_SHORTCUTS = {
+  capture: 'CommandOrControl+KeyC',
+  newChat: 'CommandOrControl+KeyN',
+  deepThink: 'CommandOrControl+KeyD',
+  webSearch: 'CommandOrControl+KeyW',
+} as const
 export const THEME_LABELS: Record<ThemeMode, string> = {
   light: 'Light',
   dark: 'Dark',

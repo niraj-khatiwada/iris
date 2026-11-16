@@ -197,6 +197,9 @@ Anthropic and Codex providers are planned later; keep provider-specific protocol
 - Development builds use `com.iris.desktopdev` through `src-tauri/tauri.dev.conf.json`, merged by
   `bun run tauri:dev` and `bun run tauri:build:debug`. Dev chats and settings therefore live in
   separate `Application Support` and WebKit folders and never clash with the installed app.
+- The quick overlay has configurable local shortcuts in Settings → Shortcuts: Capture screen
+  (`⌘C`), New chat (`⌘N`), DeepThink (`⌘D`), and Web search (`⌘W`). They are overlay-only and never
+  register with the OS.
 - Settings → Storage has two separate actions: **Clear** deletes only conversations, while
   **Reset Iris** wipes conversations, compressed summaries, speech audio, settings, the API key,
   and the pre-rename data copies, then restarts the app. The SQLite file is vacuumed and its WAL
@@ -224,8 +227,7 @@ Anthropic and Codex providers are planned later; keep provider-specific protocol
   stroke; **Attach** or **Enter** sends the flattened JPEG into the overlay draft like any other image. Escape
   or Cancel returns to the overlay.
 - Automatic read-aloud has a preparing phase: `speech:preparing` arrives when the reply ends and its
-  audio starts downloading, so the overlay shows `Reading aloud…` (with the blob still morphing)
-  instead of `Ready`. Playback then emits `speech:start`, and `speech:end` covers completion, Stop,
+  audio starts downloading, so the blob and its wave turn blue while it waits. Playback then emits `speech:start`, and `speech:end` covers completion, Stop,
   or a TTS failure.
 - Long conversations are summarized automatically. `core/agent.rs` keeps the newest turns
   verbatim and folds older ones into a compact summary (one extra non-streaming DeepSeek call per

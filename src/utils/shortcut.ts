@@ -141,3 +141,50 @@ function keyFromCode(code: string): string | null {
   }
   return null
 }
+
+/**
+ * Matches a keydown against a shortcut recorded by `shortcutFromEvent` (Tauri syntax). Used for
+ * the overlay-local shortcuts, which never register with the OS.
+ */
+export function matchesShortcut(
+  event: KeyboardEvent,
+  shortcut: string,
+): boolean {
+  if (event.repeat) {
+    return false
+  }
+
+  const parts = shortcut
+    .split('+')
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean)
+  if (parts.length === 0) {
+    return false
+  }
+
+  const key = parts[parts.length - 1]
+  const modifiers = new Set(parts.slice(0, -1))
+  const wantsMeta =
+    modifiers.has('commandorcontrol') ||
+    modifiers.has('commandorctrl') ||
+    modifiers.has('cmdorctrl') ||
+    modifiers.has('cmdorcontrol') ||
+    modifiers.has('command') ||
+    modifiers.has('cmd') ||
+    modifiers.has('super') ||
+    modifiers.has('meta')
+  const wantsControl = modifiers.has('control') || modifiers.has('ctrl')
+  const wantsAlt = modifiers.has('alt') || modifiers.has('option')
+  const wantsShift = modifiers.has('shift')
+
+  if (
+    event.metaKey !== wantsMeta ||
+    event.ctrlKey !== wantsControl ||
+    event.altKey !== wantsAlt ||
+    event.shiftKey !== wantsShift
+  ) {
+    return false
+  }
+
+  return keyFromCode(event.code)?.toLowerCase() === key
+}

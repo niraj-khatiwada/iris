@@ -1,14 +1,22 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
-/// Hides the quick overlay, grabs the display, and opens the region/annotation window.
-/// AppKit window calls must stay on the main thread; only the blocking screencapture runs off it.
+/// Hides the overlay for the screenshot, then opens the capture panel below the overlay so Iris
+/// stays visible and usable above the frozen screen. AppKit window calls must stay on the main
+/// thread; only the blocking screencapture runs off it.
 #[tauri::command]
 pub async fn start_screen_capture(app: AppHandle) -> Result<(), String> {
     if !crate::sys::screen::has_permission() {
         return Err("Screen Recording permission is required.".to_string());
+    }
+
+    let visible_app = app.clone();
+    let capture_visible =
+        on_main(&app, move || crate::sys::capture::is_visible(&visible_app)).unwrap_or(false);
+    if capture_visible {
+        return Ok(());
     }
 
     let prepare_app = app.clone();
@@ -59,6 +67,14 @@ pub async fn start_screen_capture(app: AppHandle) -> Result<(), String> {
         return Err(error);
     }
 
+    // Show Iris above the capture panel without stealing its key focus.
+    let overlay_app = app.clone();
+    if let Err(error) = on_main(&app, move || {
+        crate::sys::overlay::show_passive(&overlay_app)
+    }) {
+        log::warn!("Could not show the overlay above the capture panel: {error}");
+    }
+
     Ok(())
 }
 
@@ -66,6 +82,7 @@ pub async fn start_screen_capture(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn close_screen_capture(app: AppHandle) -> Result<(), String> {
     crate::sys::capture::hide(&app)?;
+    let _ = app.emit(crate::utils::event::CAPTURE_CLOSED, ());
     crate::sys::overlay::show(&app)
 }
 
