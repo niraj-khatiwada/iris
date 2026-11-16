@@ -26,13 +26,16 @@ export function sendMessage(request: {
   requestId: string
   conversationId: string
   messages: AgentMessage[]
-  apiKey: string
   baseUrl: string
   model: string
   autoSpeak: boolean
   deepThink: boolean
   webSearch: boolean
   ttsVoice: string
+  /** Wire format the provider speaks. */
+  apiFormat: string
+  /** Full TTS endpoint, so providers can host speech generation anywhere. */
+  ttsUrl: string
 }) {
   return invoke<void>('send_message', { request })
 }

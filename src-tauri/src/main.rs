@@ -164,8 +164,13 @@ fn main() {
             tauri_commands::app::show_main_window,
             tauri_commands::app::restart_app,
             tauri_commands::app::reset_app_data,
+            tauri_commands::capabilities::test_capabilities,
             tauri_commands::chat::send_message,
             tauri_commands::chat::cancel_generation,
+            tauri_commands::keychain::has_api_key,
+            tauri_commands::keychain::remove_api_key,
+            tauri_commands::keychain::save_api_key,
+            tauri_commands::models::list_models,
             tauri_commands::overlay::overlay_ready,
             tauri_commands::overlay::show_overlay,
             tauri_commands::overlay::hide_overlay,
@@ -185,6 +190,8 @@ fn main() {
             tauri_commands::theme::set_main_window_theme,
             tauri_commands::voice::stop_speaking,
             tauri_commands::voice::transcribe_audio,
+            tauri_commands::voice_test::test_asr_url,
+            tauri_commands::voice_test::test_tts_url,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Iris")

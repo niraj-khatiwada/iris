@@ -16,6 +16,9 @@
     --primary: oklch(0.8149 0.1194 158.1);
     --accent: var(--primary);
     --accent-foreground: oklch(0.16 0.004 250);
+    /* Soft accent fills stay tinted, but their text stays neutral: green is for status and the
+       blob, never for copy like "New chat" or the user's own message. */
+    --accent-soft-foreground: var(--foreground);
     --radius: 0.75rem;
     /* Native macOS controls use the arrow cursor; HeroUI defaults these to pointer/not-allowed. */
     --cursor-interactive: default;
@@ -27,6 +30,7 @@
     --primary: oklch(0.8149 0.1194 158.1);
     --accent: var(--primary);
     --accent-foreground: oklch(0.16 0.004 250);
+    --accent-soft-foreground: var(--foreground);
   }
 
   html,

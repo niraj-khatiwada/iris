@@ -69,6 +69,7 @@ pub fn reset_app_data(app: AppHandle, storage: State<'_, Storage>) -> Result<(),
 
     crate::core::legacy::remove_legacy_data();
     crate::sys::overlay::reset_position(&app);
+    crate::tauri_commands::keychain::remove_api_key()?;
 
     Ok(())
 }

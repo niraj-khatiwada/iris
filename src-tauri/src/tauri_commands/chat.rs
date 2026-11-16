@@ -14,6 +14,11 @@ pub struct ChatAttachmentInput {
     pub data: String,
 }
 
+/// Anthropic is the historical default; a provider that speaks OpenAI sets this explicitly.
+fn default_api_format() -> String {
+    "anthropic".to_string()
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatMessageInput {
@@ -30,8 +35,10 @@ pub struct SendMessageRequest {
     pub request_id: String,
     pub conversation_id: String,
     pub messages: Vec<ChatMessageInput>,
-    pub api_key: String,
     pub base_url: String,
+    /// `anthropic` or `openai`: the wire format this provider speaks.
+    #[serde(default = "default_api_format")]
+    pub api_format: String,
     pub model: String,
     pub auto_speak: bool,
     /// Enables DeepSeek's DeepThink before the reply.
@@ -41,6 +48,9 @@ pub struct SendMessageRequest {
     #[serde(default)]
     pub web_search: bool,
     pub tts_voice: String,
+    /// Full TTS endpoint, so providers can host speech generation anywhere.
+    #[serde(default)]
+    pub tts_url: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -130,14 +140,12 @@ pub fn send_message(
         return Err("There is nothing to send yet.".to_string());
     }
 
-    let api_key = request.api_key.trim().to_string();
-    if api_key.is_empty() {
-        return Err("Add your DeepSeek API key in Settings.".to_string());
-    }
+    // The key lives in the Keychain and is read here, never sent from the webview.
+    let api_key = crate::tauri_commands::keychain::api_key()?;
 
     let base_url = request.base_url.trim().to_string();
     if base_url.is_empty() {
-        return Err("Add a DeepSeek API base URL in Settings.".to_string());
+        return Err("Add an API base URL in Settings.".to_string());
     }
 
     let model = request.model.trim().to_string();
@@ -154,11 +162,13 @@ pub fn send_message(
     let config = AgentConfig {
         api_key,
         base_url,
+        api_format: request.api_format.clone(),
         model,
         auto_speak: request.auto_speak,
         deep_think: request.deep_think,
         web_search: request.web_search,
         tts_voice,
+        tts_url: request.tts_url.clone(),
     };
 
     crate::sys::speech::stop(&app);

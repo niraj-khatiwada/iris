@@ -10,21 +10,19 @@ pub fn stop_speaking(app: AppHandle) {
     crate::sys::speech::stop(&app);
 }
 
-/// Sends a recorded WAV to the DeepSeek ASR endpoint and returns the transcript.
+/// Sends a recorded WAV to the configured ASR endpoint and returns the transcript.
 #[tauri::command]
 pub async fn transcribe_audio(
-    api_key: String,
-    base_url: String,
+    asr_url: String,
     audio_base64: String,
 ) -> Result<String, String> {
-    let api_key = api_key.trim().to_string();
-    if api_key.is_empty() {
-        return Err("Add your DeepSeek API key in Settings.".to_string());
-    }
+    // The key lives in the Keychain and is read here, never sent from the webview.
+    let api_key = crate::tauri_commands::keychain::api_key()?;
 
-    let base_url = base_url.trim().trim_end_matches('/').to_string();
-    if base_url.is_empty() {
-        return Err("Add the API base URL in Settings.".to_string());
+    // The full endpoint comes from Settings, so providers can host transcription elsewhere.
+    let asr_url = asr_url.trim().to_string();
+    if asr_url.is_empty() {
+        return Err("Add a voice transcription URL in Settings.".to_string());
     }
 
     let audio = STANDARD
@@ -48,7 +46,7 @@ pub async fn transcribe_audio(
         .build()
         .map_err(|error| format!("Could not create the voice client: {error}"))?;
     let response = client
-        .post(format!("{base_url}/v1/tools/asr"))
+        .post(asr_url)
         .bearer_auth(api_key)
         .multipart(form)
         .send()

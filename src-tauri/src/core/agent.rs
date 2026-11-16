@@ -1,4 +1,4 @@
-//! DeepSeek chat runtime.
+//! Chat runtime: provider-neutral, with the DeepSeek protocol as the current default.
 //!
 //! The demo uses DeepSeek's Anthropic-compatible Messages API, with a separate TTS endpoint for
 //! read-aloud. The UI never shows the reply by default, so tokens are still streamed into the
@@ -30,6 +30,8 @@ const CONTEXT_BUDGET_CHARS: usize = 60_000;
 const RECENT_BUDGET_CHARS: usize = 24_000;
 /// The earlier turns folded into one summary request at a time.
 const SUMMARY_INPUT_CHARS: usize = 40_000;
+/// Anthropic's Messages API requires `max_tokens`; a reply sized for speech fits comfortably.
+const MAX_OUTPUT_TOKENS: u32 = 8_192;
 
 const SUMMARY_SYSTEM_PROMPT: &str =
     "You compress conversation history for a voice assistant. Write a compact summary in \
@@ -95,11 +97,15 @@ impl SummaryCache {
 pub struct AgentConfig {
     pub api_key: String,
     pub base_url: String,
+    /// `anthropic` or `openai`: the two wire formats Iris supports.
+    pub api_format: String,
     pub model: String,
     pub auto_speak: bool,
     pub deep_think: bool,
     pub web_search: bool,
     pub tts_voice: String,
+    /// Full TTS endpoint, so providers can host speech generation anywhere.
+    pub tts_url: String,
 }
 
 enum Outcome {
@@ -117,7 +123,7 @@ pub async fn stream_reply(
 ) {
     let request_id = request.request_id.clone();
     log::info!(
-        "Streaming DeepSeek reply for conversation {}",
+        "Streaming reply for conversation {}",
         request.conversation_id
     );
 
@@ -130,10 +136,10 @@ pub async fn stream_reply(
                 let speech_app = app.clone();
                 let conversation_id = request.conversation_id.clone();
                 let api_key = config.api_key;
-                let base_url = config.base_url;
+                let tts_url = config.tts_url.clone();
                 let voice = config.tts_voice;
                 tauri::async_runtime::spawn(async move {
-                    speech::speak(speech_app, conversation_id, api_key, base_url, voice, text)
+                    speech::speak(speech_app, conversation_id, api_key, tts_url, voice, text)
                         .await;
                 });
             }
@@ -146,7 +152,7 @@ pub async fn stream_reply(
             emit_error(
                 &app,
                 &request_id,
-                "DeepSeek returned an empty response.".to_string(),
+                "The model returned an empty response.".to_string(),
             );
             app.state::<GenerationState>().finish(&request_id);
         }
@@ -163,10 +169,13 @@ async fn run(
     config: &AgentConfig,
     cancelled: &AtomicBool,
 ) -> Result<Outcome, String> {
-    let url = format!(
-        "{}/anthropic/v1/messages",
-        config.base_url.trim_end_matches('/')
-    );
+    // Anthropic speaks `{base}/v1/messages`; OpenAI speaks `{base}/v1/chat/completions`.
+    let base = config.base_url.trim_end_matches('/');
+    let (url, openai_format) = if config.api_format == "openai" {
+        (format!("{base}/v1/chat/completions"), true)
+    } else {
+        (format!("{base}/v1/messages"), false)
+    };
     let Some(prepared) = prepare(app, request, config, cancelled).await? else {
         return Ok(Outcome::Cancelled);
     };
@@ -176,7 +185,7 @@ async fn run(
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(300))
         .build()
-        .map_err(|error| format!("Could not create the DeepSeek client: {error}"))?;
+        .map_err(|error| format!("Could not create the AI client: {error}"))?;
 
     let response = tokio::select! {
         response = client
@@ -187,7 +196,7 @@ async fn run(
             .send() => response,
         _ = wait_for_cancel(cancelled) => return Ok(Outcome::Cancelled),
     }
-    .map_err(|error| format!("Could not reach DeepSeek: {error}"))?;
+    .map_err(|error| format!("Could not reach the AI service: {error}"))?;
 
     if !response.status().is_success() {
         return Err(read_error(response).await);
@@ -217,7 +226,7 @@ async fn run(
         let Some(chunk) = chunk else {
             break;
         };
-        let chunk = chunk.map_err(|error| format!("DeepSeek stream failed: {error}"))?;
+        let chunk = chunk.map_err(|error| format!("The reply stream failed: {error}"))?;
 
         for data in decoder.push(&chunk) {
             let event: Value = match serde_json::from_str(&data) {
@@ -265,8 +274,33 @@ async fn run(
                         .get("error")
                         .and_then(|error| error.get("message"))
                         .and_then(Value::as_str)
-                        .unwrap_or("DeepSeek stream error");
+                        .unwrap_or("Stream error");
                     return Err(message.to_string());
+                }
+                // OpenAI streams events without a `type`; the text lives in `choices[].delta`.
+                None if openai_format => {
+                    if let Some(text) = event
+                        .get("choices")
+                        .and_then(Value::as_array)
+                        .and_then(|choices| choices.first())
+                        .and_then(|choice| choice.get("delta"))
+                        .and_then(|delta| delta.get("content"))
+                        .and_then(Value::as_str)
+                    {
+                        emit_token(app, &request.request_id, text);
+                        full_text.push_str(text);
+                    }
+                    // OpenAI has no `message_stop`; the terminator is a `finish_reason`.
+                    if event
+                        .get("choices")
+                        .and_then(Value::as_array)
+                        .and_then(|choices| choices.first())
+                        .and_then(|choice| choice.get("finish_reason"))
+                        .is_some_and(|reason| !reason.is_null())
+                    {
+                        stopped = true;
+                        break 'stream;
+                    }
                 }
                 _ => {}
             }
@@ -277,7 +311,7 @@ async fn run(
         return Ok(Outcome::Cancelled);
     }
     if !stopped {
-        return Err("DeepSeek ended the response unexpectedly.".to_string());
+        return Err("The response ended unexpectedly.".to_string());
     }
     if full_text.trim().is_empty() {
         return Ok(Outcome::Empty);
@@ -366,7 +400,7 @@ async fn prepare_with(
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(120))
         .build()
-        .map_err(|error| format!("Could not create the DeepSeek client: {error}"))?;
+        .map_err(|error| format!("Could not create the AI client: {error}"))?;
     let mut summary = if cached_covered > 0 {
         cached_summary
     } else {
@@ -520,18 +554,32 @@ async fn summarize_chunk(
         )
     };
 
-    let url = format!(
-        "{}/anthropic/v1/messages",
-        config.base_url.trim_end_matches('/')
-    );
-    let body = json!({
-        "model": config.model,
-        "system": SUMMARY_SYSTEM_PROMPT,
-        "messages": [{ "role": "user", "content": prompt }],
-        "max_tokens": 700,
-        "thinking": { "type": "disabled" },
-        "stream": false
-    });
+    let base = config.base_url.trim_end_matches('/');
+    let openai_format = config.api_format == "openai";
+    let url = if openai_format {
+        format!("{base}/v1/chat/completions")
+    } else {
+        format!("{base}/v1/messages")
+    };
+    let body = if openai_format {
+        json!({
+            "model": config.model,
+            "messages": [
+                { "role": "system", "content": SUMMARY_SYSTEM_PROMPT },
+                { "role": "user", "content": prompt }
+            ],
+            "stream": false
+        })
+    } else {
+        json!({
+            "model": config.model,
+            "system": SUMMARY_SYSTEM_PROMPT,
+            "messages": [{ "role": "user", "content": prompt }],
+            "max_tokens": 700,
+            "thinking": { "type": "disabled" },
+            "stream": false
+        })
+    };
 
     let response = tokio::select! {
         response = client
@@ -542,7 +590,7 @@ async fn summarize_chunk(
             .send() => response,
         _ = wait_for_cancel(cancelled) => return Ok(None),
     }
-    .map_err(|error| format!("Could not reach DeepSeek: {error}"))?;
+    .map_err(|error| format!("Could not reach the AI service: {error}"))?;
 
     if !response.status().is_success() {
         return Err(read_error(response).await);
@@ -551,51 +599,145 @@ async fn summarize_chunk(
     let body: Value = response
         .json()
         .await
-        .map_err(|error| format!("Could not read the DeepSeek summary: {error}"))?;
-    let summary = body
-        .get("content")
-        .and_then(Value::as_array)
-        .map(|blocks| {
-            blocks
-                .iter()
-                .filter_map(|block| block.get("text").and_then(Value::as_str))
-                .collect::<Vec<_>>()
-                .join("\n")
-        })
-        .unwrap_or_default();
+        .map_err(|error| format!("Could not read the conversation summary: {error}"))?;
+    let summary = if openai_format {
+        // OpenAI places the text in `choices[].message.content`.
+        body.get("choices")
+            .and_then(Value::as_array)
+            .and_then(|choices| choices.first())
+            .and_then(|choice| choice.get("message"))
+            .and_then(|message| message.get("content"))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_default()
+    } else {
+        body.get("content")
+            .and_then(Value::as_array)
+            .map(|blocks| {
+                blocks
+                    .iter()
+                    .filter_map(|block| block.get("text").and_then(Value::as_str))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .unwrap_or_default()
+    };
 
     if summary.trim().is_empty() {
-        return Err("DeepSeek returned an empty summary.".to_string());
+        return Err("The model returned an empty summary.".to_string());
     }
 
     Ok(Some(summary.trim().to_string()))
 }
 
-/// Builds the streaming request body. Both composer toggles only affect the request.
+/// Builds the streaming request body for the configured wire format. Both composer toggles only
+/// affect the request.
+///
+/// The Anthropic branch sends only standard Messages fields: vendor extensions like DeepSeek's
+/// `thinking: disabled`, `safety_check`, and `deepseek_read_url` tools are rejected by other
+/// Anthropic-compatible providers (verified: they return 400). Thinking and web search map to the
+/// standard `adaptive` thinking and `web_search` server tool instead.
 fn build_body(system: String, messages: Vec<Value>, config: &AgentConfig) -> Value {
-    let thinking = if config.deep_think {
-        "enabled"
-    } else {
-        "disabled"
-    };
-    let tools = if config.web_search {
-        json!([
-            { "type": "deepseek_read_url", "name": "deepseek_read_url" },
-            { "type": "deepseek_web_search", "name": "deepseek_web_search" }
-        ])
-    } else {
-        json!([{ "type": "deepseek_read_url", "name": "deepseek_read_url" }])
-    };
+    if config.api_format == "openai" {
+        return build_openai_body(system, messages, config);
+    }
 
-    json!({
+    let mut body = json!({
         "model": config.model,
+        // Required by the Messages API; omitting it is rejected with a 400.
+        "max_tokens": MAX_OUTPUT_TOKENS,
         "system": system,
         "messages": messages,
-        "thinking": { "type": thinking },
-        "safety_check": { "level": "high" },
-        "tools": tools,
         "stream": true
-    })
+    });
+
+    if config.deep_think {
+        body["thinking"] = json!({ "type": "adaptive" });
+    }
+
+    if config.web_search {
+        body["tools"] = json!([
+            { "type": "web_search_20250305", "name": "web_search" }
+        ]);
+    }
+
+    body
+}
+
+/// OpenAI Chat Completions: the system prompt is the first message and text lives in `content`
+/// strings, so the Anthropic content blocks are flattened to plain text.
+fn build_openai_body(system: String, messages: Vec<Value>, config: &AgentConfig) -> Value {
+    let mut out = Vec::with_capacity(messages.len() + 1);
+    if !system.trim().is_empty() {
+        out.push(json!({ "role": "system", "content": system }));
+    }
+    out.extend(messages.into_iter().map(flatten_to_openai));
+
+    let mut body = json!({
+        "model": config.model,
+        "messages": out,
+        "stream": true
+    });
+
+    if config.deep_think {
+        // OpenAI reasoning models take an effort hint rather than Anthropic's thinking block.
+        body["reasoning_effort"] = json!("medium");
+    }
+
+    body
+}
+
+/// Flattens an Anthropic-style turn into OpenAI's `{role, content}` shape.
+///
+/// Images must survive the conversion: OpenAI takes them as `image_url` parts, so a turn with
+/// attachments becomes a content array instead of a plain string.
+fn flatten_to_openai(message: Value) -> Value {
+    let role = message
+        .get("role")
+        .and_then(Value::as_str)
+        .unwrap_or("user");
+
+    let blocks = match message.get("content") {
+        Some(Value::Array(blocks)) => blocks.clone(),
+        Some(Value::String(text)) => return json!({ "role": role, "content": text }),
+        _ => return json!({ "role": role, "content": "" }),
+    };
+
+    let has_image = blocks
+        .iter()
+        .any(|block| block.get("type").and_then(Value::as_str) == Some("image"));
+
+    if !has_image {
+        // Text-only turns stay a simple string, which every compatible endpoint accepts.
+        let content = blocks
+            .iter()
+            .filter_map(|block| block.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n");
+        return json!({ "role": role, "content": content });
+    }
+
+    let parts: Vec<Value> = blocks
+        .iter()
+        .filter_map(|block| match block.get("type").and_then(Value::as_str) {
+            Some("text") => block
+                .get("text")
+                .and_then(Value::as_str)
+                .map(|text| json!({ "type": "text", "text": text })),
+            Some("image") => {
+                let source = block.get("source")?;
+                let media_type = source.get("media_type").and_then(Value::as_str)?;
+                let data = source.get("data").and_then(Value::as_str)?;
+                Some(json!({
+                    "type": "image_url",
+                    "image_url": { "url": format!("data:{media_type};base64,{data}") }
+                }))
+            }
+            _ => None,
+        })
+        .collect();
+
+    json!({ "role": role, "content": parts })
 }
 
 fn emit_token(app: &AppHandle, request_id: &str, token: &str) {
@@ -653,7 +795,7 @@ async fn read_error(response: reqwest::Response) -> String {
                 text
             }
         });
-    format!("DeepSeek error ({status}): {message}")
+    format!("AI service error ({status}): {message}")
 }
 
 /// Incremental SSE parser. Events are separated by a blank line; `data:` lines are JSON.
@@ -711,8 +853,8 @@ mod tests {
     use serde_json::Value;
 
     use super::{
-        build_body, chunk_end, prepare_with, split_index, to_api_messages, trim_to_user,
-        AgentConfig, SummaryCache, Turn, RECENT_BUDGET_CHARS,
+        build_body, chunk_end, flatten_to_openai, prepare_with, split_index, to_api_messages,
+        trim_to_user, AgentConfig, SummaryCache, Turn, RECENT_BUDGET_CHARS,
     };
     use crate::tauri_commands::chat::{ChatAttachmentInput, ChatMessageInput};
 
@@ -820,28 +962,69 @@ mod tests {
     }
 
     #[test]
+    fn openai_conversion_keeps_images() {
+        let turn = Turn {
+            role: "user".to_string(),
+            content: "What is this?".to_string(),
+            attachments: vec![ChatAttachmentInput {
+                media_type: "image/jpeg".to_string(),
+                data: "abc".to_string(),
+            }],
+        };
+
+        let messages = to_api_messages(&[turn]);
+        let converted = flatten_to_openai(messages[0].clone());
+        let parts = converted["content"].as_array().expect("content parts");
+        assert_eq!(parts[0]["type"], "image_url");
+        assert_eq!(
+            parts[0]["image_url"]["url"],
+            "data:image/jpeg;base64,abc"
+        );
+        assert_eq!(parts[1]["type"], "text");
+        assert_eq!(parts[1]["text"], "What is this?");
+    }
+
+    /// A turn with no attachments stays a plain string, which is the most compatible shape.
+    #[test]
+    fn openai_conversion_keeps_text_only_turns_simple() {
+        let turn = Turn {
+            role: "user".to_string(),
+            content: "hello".to_string(),
+            attachments: Vec::new(),
+        };
+
+        let messages = to_api_messages(&[turn]);
+        let converted = flatten_to_openai(messages[0].clone());
+        assert!(converted["content"].is_string());
+        assert_eq!(converted["content"], "hello");
+    }
+
+    #[test]
     fn toggles_shape_the_request() {
         let mut config = AgentConfig {
             api_key: "test-key".to_string(),
             base_url: "http://127.0.0.1".to_string(),
+            api_format: "anthropic".to_string(),
             model: "deepseek-flash".to_string(),
             auto_speak: false,
             deep_think: false,
             web_search: false,
             tts_voice: "stella".to_string(),
+            tts_url: String::new(),
         };
 
+        // Off: neither field is sent, so providers that reject them stay happy.
         let off = build_body("system".to_string(), vec![], &config);
-        assert_eq!(off["thinking"]["type"], "disabled");
-        assert_eq!(off["tools"].as_array().unwrap().len(), 1);
+        assert!(off.get("thinking").is_none());
+        assert!(off.get("tools").is_none());
 
         config.deep_think = true;
         config.web_search = true;
         let on = build_body("system".to_string(), vec![], &config);
-        assert_eq!(on["thinking"]["type"], "enabled");
+        assert_eq!(on["thinking"]["type"], "adaptive");
         let tools = on["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 2);
-        assert_eq!(tools[1]["name"], "deepseek_web_search");
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["name"], "web_search");
     }
 
     #[tokio::test]
@@ -851,11 +1034,13 @@ mod tests {
         let config = AgentConfig {
             api_key: "test-key".to_string(),
             base_url: server.base_url.clone(),
+            api_format: "anthropic".to_string(),
             model: "deepseek-flash".to_string(),
             auto_speak: false,
             deep_think: false,
             web_search: false,
             tts_voice: "stella".to_string(),
+            tts_url: String::new(),
         };
         let cancelled = AtomicBool::new(false);
 
@@ -941,5 +1126,74 @@ mod tests {
         let messages = to_api_messages(&turns(&[(true, 3), (false, 3)]));
         assert_eq!(messages[0]["content"], "xxx");
         assert_eq!(messages[1]["content"][0]["text"], "xxx");
+    }
+}
+
+#[cfg(test)]
+mod format_tests {
+    use super::*;
+
+    fn config(api_format: &str) -> AgentConfig {
+        AgentConfig {
+            api_key: "k".to_string(),
+            base_url: "https://example.test".to_string(),
+            api_format: api_format.to_string(),
+            model: "m".to_string(),
+            auto_speak: false,
+            deep_think: true,
+            web_search: true,
+            tts_voice: "stella".to_string(),
+            tts_url: String::new(),
+        }
+    }
+
+    /// Anthropic wants a top-level `system` and keeps content blocks as they are.
+    #[test]
+    fn the_anthropic_body_uses_only_standard_fields() {
+        let body = build_body("sys".to_string(), vec![], &config("anthropic"));
+        assert_eq!(body["system"], "sys");
+        // Required by the Messages API.
+        assert_eq!(body["max_tokens"], MAX_OUTPUT_TOKENS);
+        // DeepSeek-only extensions must not be sent to other providers.
+        assert!(body.get("safety_check").is_none());
+        // The fixture enables thinking and web search, which map to standard equivalents.
+        assert_eq!(body["thinking"]["type"], "adaptive");
+        assert_eq!(body["tools"][0]["name"], "web_search");
+        assert!(body.get("reasoning_effort").is_none());
+    }
+
+    /// With the toggles off the body carries no vendor or thinking fields at all.
+    #[test]
+    fn the_anthropic_body_omits_optional_fields_when_toggles_are_off() {
+        let mut off = config("anthropic");
+        off.deep_think = false;
+        off.web_search = false;
+
+        let body = build_body("sys".to_string(), vec![], &off);
+        assert!(body.get("thinking").is_none());
+        assert!(body.get("tools").is_none());
+        assert_eq!(body["max_tokens"], MAX_OUTPUT_TOKENS);
+    }
+
+    /// OpenAI wants the system prompt inside `messages` and no Anthropic-only fields.
+    #[test]
+    fn the_openai_body_moves_the_system_prompt_into_messages() {
+        let messages = vec![json!({
+            "role": "user",
+            "content": [
+                { "type": "text", "text": "hello" },
+                { "type": "text", "text": "world" }
+            ]
+        })];
+        let body = build_body("sys".to_string(), messages, &config("openai"));
+
+        assert!(body.get("system").is_none(), "OpenAI has no top-level system");
+        assert!(body.get("thinking").is_none(), "no Anthropic thinking block");
+        let out = body["messages"].as_array().expect("messages");
+        assert_eq!(out[0]["role"], "system");
+        assert_eq!(out[0]["content"], "sys");
+        // Anthropic blocks are flattened to one string, in order.
+        assert_eq!(out[1]["content"], "hello\nworld");
+        assert_eq!(body["stream"], true);
     }
 }

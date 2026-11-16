@@ -1,3 +1,4 @@
+import type { ApiFormat } from '@/constants'
 import {
   cancelGeneration,
   sendMessage,
@@ -13,13 +14,16 @@ import { isTauri } from '@/utils/tauri'
 export type AgentRunOptions = {
   conversationId: string
   messages: AgentMessage[]
-  apiKey: string
   baseUrl: string
   model: string
   autoSpeak: boolean
   deepThink: boolean
   webSearch: boolean
   ttsVoice: TtsVoice
+  /** Wire format the provider speaks. */
+  apiFormat: ApiFormat
+  /** Full TTS endpoint, resolved from the `{{base_url}}` template. */
+  ttsUrl: string
   onToken: (token: string) => void
   onDone: (result: { cancelled: boolean }) => void
   onError: (message: string) => void
@@ -101,13 +105,14 @@ export function startAgentRun(options: AgentRunOptions): string {
           requestId,
           conversationId: options.conversationId,
           messages: options.messages,
-          apiKey: options.apiKey,
           baseUrl: options.baseUrl,
           model: options.model,
           autoSpeak: options.autoSpeak,
           deepThink: options.deepThink,
           webSearch: options.webSearch,
           ttsVoice: options.ttsVoice,
+          apiFormat: options.apiFormat,
+          ttsUrl: options.ttsUrl,
         })
       } catch (error) {
         finish(

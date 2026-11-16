@@ -179,8 +179,9 @@ settings provide the API key, origin, and model; the default is `deepseek-flash`
 voice, wraps the raw PCM in a WAV, and plays it with macOS `afplay`. A new message, Cancel, New
 chat, or quitting stops the current speech.
 
-The API key is stored in the settings store for now, matching the demo and the current settings
-prototype. Move it to the macOS Keychain when settings are revamped. Do not commit a real key.
+The API key lives in the macOS Keychain, saved from Settings → AI. The webview never receives it:
+`send_message` and `transcribe_audio` read it inside Rust, and once saved Settings shows a "Key
+saved" badge with Replace and Remove instead of the key itself.
 
 Anthropic and Codex providers are planned later; keep provider-specific protocol code inside
 `core/agent.rs` so the frontend and event contract do not change.
@@ -213,8 +214,8 @@ Anthropic and Codex providers are planned later; keep provider-specific protocol
   outright instead of being archived.
 - New quick chats archive the previous quick conversation under a new id, so old messages stay in
   History instead of being discarded.
-- Settings and the DeepSeek API key still live in `localStorage` until the settings/secret-storage
-  revamp moves the key to the Keychain.
+- Settings live in `localStorage`; the DeepSeek API key lives in the macOS Keychain and is read
+  only inside Rust.
 - The composer has two request toggles, matching the DeepSeek demo: **DeepThink** sends
   `thinking: { type: "enabled" }`, and **Search** adds the `deepseek_web_search` tool (reading links
   is always available). Both are off by default and apply to the next message only.
@@ -245,10 +246,9 @@ Chat history is stored in Rust with `rusqlite`, not by reaching into SQL from th
 
 The database lives at `Application Support/com.iris.desktop/iris.db`. Conversations are saved
 individually after a short debounce; `localStorage` remains the immediate cross-window cache and
-is merged by `updatedAt` on launch/focus. Attachments, FTS5 search, settings, and Keychain-backed
-secrets are still planned. Store screenshots and other large attachments as files under
-Application Support, with their paths in SQLite. Keep API keys in the macOS Keychain, never in the
-database.
+is merged by `updatedAt` on launch/focus. Attachments and FTS5 search are still planned. Store
+screenshots and other large attachments as files under Application Support, with their paths in
+SQLite. Keep API keys in the macOS Keychain, never in the database.
 
 ## Notes
 

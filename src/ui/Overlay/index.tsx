@@ -281,7 +281,7 @@ function Overlay() {
   )
 
   // Overlay-local shortcuts: "/" focuses the input, Cmd+, opens Settings, and the five
-  // configurable bindings drive capture, new chat, DeepThink, web search, and voice input.
+  // configurable bindings drive capture, new chat, thinking mode, web search, and voice input.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const modifier = event.metaKey || event.ctrlKey

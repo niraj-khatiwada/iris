@@ -35,6 +35,16 @@ export const SUGGESTIONS = [
 export const APP_NAME = 'Iris'
 export const DEFAULT_BASE_URL = 'https://api.deepseek.com'
 export const DEFAULT_MODEL = 'deepseek-flash'
+export const DEFAULT_API_FORMAT: ApiFormat = 'anthropic'
+/**
+ * `{{base_url}}` is replaced with the Base URL from the AI section, so endpoint templates follow
+ * whichever provider is configured. A full URL works too if a provider hosts speech elsewhere.
+ */
+export const BASE_URL_TOKEN = '{{base_url}}'
+export const DEFAULT_TTS_URL = `${BASE_URL_TOKEN}/v1/tools/tts`
+export const DEFAULT_ASR_URL = `${BASE_URL_TOKEN}/v1/tools/asr`
+/** Wire format of the chat API. Providers offer one or the other; the request body differs. */
+export type ApiFormat = 'anthropic' | 'openai'
 export const DEFAULT_TTS_VOICE: TtsVoice = 'stella'
 export const DEFAULT_OPEN_SHORTCUT = 'commandorcontrol+space'
 export const TTS_VOICES: ReadonlyArray<{ id: TtsVoice; label: string }> = [

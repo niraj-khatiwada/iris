@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { startVoiceRecording, type VoiceRecording } from '@/services/recorder'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { stopSpeaking, transcribeAudio } from '@/tauri/commands/voice'
+import { resolveEndpoint } from '@/utils/endpoint'
 import { isTauri } from '@/utils/tauri'
 
 export type VoiceInputStatus = 'idle' | 'recording' | 'transcribing'
@@ -141,30 +142,21 @@ export function useVoiceInput() {
 
 async function transcribe(audio: Blob) {
   await useSettingsStore.persist.rehydrate()
-  const { apiKey, baseUrl } = useSettingsStore.getState()
-  if (!apiKey.trim()) {
-    throw new Error('Add your DeepSeek API key in Settings.')
-  }
+  const { asrUrl, baseUrl } = useSettingsStore.getState()
+  const endpoint = resolveEndpoint(asrUrl, baseUrl)
 
   if (isTauri()) {
+    // The Keychain key is added by Rust; the webview never sees it.
     return transcribeAudio({
-      apiKey,
-      baseUrl,
+      asrUrl: endpoint,
       audioBase64: await blobToBase64(audio),
     })
   }
 
-  // Browser preview: talk to the demo's ASR endpoint directly.
+  // Browser preview: talk to the configured endpoint directly.
   const form = new FormData()
   form.append('file', audio, 'recording.wav')
-  const response = await fetch(
-    `${baseUrl.trim().replace(/\/+$/, '')}/v1/tools/asr`,
-    {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}` },
-      body: form,
-    },
-  )
+  const response = await fetch(endpoint, { method: 'POST', body: form })
   const body = await response.text()
   if (!response.ok) {
     throw new Error(body || 'Voice transcription failed.')

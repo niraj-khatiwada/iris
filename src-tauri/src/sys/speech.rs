@@ -79,13 +79,13 @@ pub fn stop(app: &AppHandle) {
     }
 }
 
-/// Fetches the DeepSeek TTS stream and plays it automatically. The response is filtered by the
+/// Fetches the configured TTS audio and plays it automatically. The response is filtered by the
 /// service (`filter_markdown`) before it is spoken.
 pub async fn speak(
     app: AppHandle,
     conversation_id: String,
     api_key: String,
-    base_url: String,
+    tts_url: String,
     voice: String,
     text: String,
 ) {
@@ -104,7 +104,13 @@ pub async fn speak(
         },
     );
 
-    let url = format!("{}/v1/tools/tts", base_url.trim_end_matches('/'));
+    // The full endpoint comes from Settings, so providers can host speech elsewhere.
+    let url = tts_url.trim().to_string();
+    if url.is_empty() {
+        log::warn!("No TTS endpoint is configured; skipping read-aloud");
+        abort(&app, &state, &conversation_id, epoch);
+        return;
+    }
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(300))
         .build()

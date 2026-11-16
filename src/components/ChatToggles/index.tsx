@@ -5,7 +5,7 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { cn } from '@/utils/tailwind'
 
 /**
- * DeepThink and Search toggles shared by the quick overlay and the history composer.
+ * Thinking mode and Search toggles shared by the quick overlay and the history composer.
  * Both settings apply to the next request; they never rewrite the conversation.
  */
 function ChatToggles() {
@@ -41,7 +41,7 @@ function ChatToggles() {
       <Tooltip delay={500}>
         <Button
           isIconOnly
-          aria-label="DeepThink"
+          aria-label="Thinking mode"
           aria-pressed={deepThink}
           className={cn(
             'size-7 min-w-7 rounded-full',
@@ -55,8 +55,8 @@ function ChatToggles() {
         </Button>
         <Tooltip.Content>
           {deepThink
-            ? 'DeepThink on · thinks before answering'
-            : 'DeepThink off · answers directly'}
+            ? 'Thinking on · thinks before answering'
+            : 'Thinking off · answers directly'}
         </Tooltip.Content>
       </Tooltip>
     </div>

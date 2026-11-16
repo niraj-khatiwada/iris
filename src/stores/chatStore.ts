@@ -14,6 +14,7 @@ import type {
   ChatMessage,
   Conversation,
 } from '@/types/chat'
+import { resolveEndpoint } from '@/utils/endpoint'
 import { newId } from '@/utils/id'
 import { attachmentToAgent } from '@/utils/image'
 import { titleFromMessage } from '@/utils/string'
@@ -163,20 +164,21 @@ async function runAssistantReply({
     ),
   )
 
-  // Another window (Settings) may have saved a new API key after this store hydrated.
+  // Another window (Settings) may have changed the model or base URL since this store hydrated.
   await useSettingsStore.persist.rehydrate()
   const settings = useSettingsStore.getState()
 
   const requestId = startAgentRun({
     conversationId,
     messages: history,
-    apiKey: settings.apiKey,
     baseUrl: settings.baseUrl,
     model: settings.model,
     autoSpeak: settings.autoSpeak,
     deepThink: settings.deepThink,
     webSearch: settings.webSearch,
     ttsVoice: settings.ttsVoice,
+    apiFormat: settings.apiFormat,
+    ttsUrl: resolveEndpoint(settings.ttsUrl, settings.baseUrl),
     onToken: (token) => {
       if (get().streamingRequestId !== requestId) {
         return

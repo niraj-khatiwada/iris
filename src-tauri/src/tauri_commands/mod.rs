@@ -1,8 +1,12 @@
 pub mod app;
+pub mod capabilities;
 pub mod chat;
+pub mod keychain;
+pub mod models;
 pub mod overlay;
 pub mod screen;
 pub mod shortcut;
 pub mod storage;
 pub mod theme;
 pub mod voice;
+pub mod voice_test;
