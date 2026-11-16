@@ -52,6 +52,7 @@ export const DEFAULT_OVERLAY_SHORTCUTS = {
   newChat: 'CommandOrControl+KeyN',
   deepThink: 'CommandOrControl+KeyD',
   webSearch: 'CommandOrControl+KeyS',
+  voiceInput: 'CommandOrControl+KeyI',
 } as const
 export const THEME_LABELS: Record<ThemeMode, string> = {
   light: 'Light',

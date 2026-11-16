@@ -123,6 +123,7 @@ function Overlay() {
   const setDeepThink = useSettingsStore((state) => state.setDeepThink)
   const setWebSearch = useSettingsStore((state) => state.setWebSearch)
   const voice = useVoiceInput()
+  const voiceStart = voice.start
   const images = useImageAttachments()
   useChatStorage()
   useSettingsSync()
@@ -276,8 +277,8 @@ function Overlay() {
     [],
   )
 
-  // Overlay-local shortcuts: "/" focuses the input, Cmd+, opens Settings, and the four
-  // configurable bindings drive capture, new chat, DeepThink, and web search.
+  // Overlay-local shortcuts: "/" focuses the input, Cmd+, opens Settings, and the five
+  // configurable bindings drive capture, new chat, DeepThink, web search, and voice input.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const modifier = event.metaKey || event.ctrlKey
@@ -311,6 +312,14 @@ function Overlay() {
         return
       }
 
+      if (matchesShortcut(event, overlayShortcuts.voiceInput)) {
+        event.preventDefault()
+        if (!streaming) {
+          void voiceStart()
+        }
+        return
+      }
+
       if (modifier && event.key === ',') {
         event.preventDefault()
         void openSettings()
@@ -341,8 +350,10 @@ function Overlay() {
     overlayShortcuts,
     setDeepThink,
     setWebSearch,
+    streaming,
     triggerCapture,
     voiceActive,
+    voiceStart,
     webSearch,
   ])
 
@@ -521,22 +532,37 @@ function Overlay() {
     void stopStreaming()
   }
 
+  // Voice is a way to compose, not a separate message: whatever is already typed or attached
+  // rides along with the transcript so a dictation never drops the rest of the draft.
   const finishVoice = async (forceSend = false) => {
-    const text = await voice.stop()
-    if (!text) {
-      return
-    }
+    const transcript = (await voice.stop())?.trim() ?? ''
+    const attachments = images.attachments
+    const text = [value.trim(), transcript].filter(Boolean).join(' ')
 
     if (autoSendVoice || forceSend) {
+      // Auto-send waits for a transcript: a failed dictation must not send the draft on its own.
+      if (!transcript && !forceSend) {
+        return
+      }
+      if (!text && attachments.length === 0) {
+        return
+      }
+
       setValue('')
+      images.clear()
       setRevealed(false)
       setIgnoredResponseId(null)
       ensureQuickConversation()
-      void sendMessage(text, QUICK_CONVERSATION_ID)
-    } else {
-      setValue(text)
-      requestAnimationFrame(() => inputRef.current?.focus())
+      void sendMessage(text, QUICK_CONVERSATION_ID, attachments)
+      return
     }
+
+    if (!transcript) {
+      return
+    }
+
+    setValue(text)
+    requestAnimationFrame(() => inputRef.current?.focus())
   }
 
   finishVoiceRef.current = (forceSend) => {

@@ -1,6 +1,5 @@
 import IrisBlob from '@/components/IrisBlob'
 import { useChatStore } from '@/stores/chatStore'
-import { useSettingsStore } from '@/stores/settingsStore'
 import { formatConversationTime } from '@/utils/format'
 
 function ChatHeader() {
@@ -8,7 +7,6 @@ function ChatHeader() {
     state.conversations.find((item) => item.id === state.activeConversationId),
   )
   const streaming = useChatStore((state) => Boolean(state.streamingRequestId))
-  const model = useSettingsStore((state) => state.model)
 
   return (
     <header
@@ -34,12 +32,6 @@ function ChatHeader() {
                 ? `Updated ${formatConversationTime(conversation.updatedAt)}`
                 : 'Ready when you are'}
         </p>
-      </div>
-
-      <div className="flex items-center gap-2">
-        <span className="hidden items-center rounded-full border border-border/60 bg-surface/40 px-2.5 py-1 text-[10px] text-muted sm:flex">
-          {model}
-        </span>
       </div>
     </header>
   )

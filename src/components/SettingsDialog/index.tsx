@@ -203,7 +203,7 @@ function SettingsDialog() {
                 </SearchField.Group>
               </SearchField>
 
-              <nav className="flex flex-col gap-6">
+              <nav className="flex flex-col gap-4">
                 {groups.map((group) => {
                   const items = visibleCategories.filter(
                     (category) => category.group === group,
@@ -213,8 +213,8 @@ function SettingsDialog() {
                   }
 
                   return (
-                    <div key={group} className="space-y-1">
-                      <p className="px-3 pb-1 text-xs font-medium text-muted">
+                    <div key={group} className="space-y-0.5">
+                      <p className="px-2.5 pb-1 text-[11px] font-medium text-muted">
                         {group}
                       </p>
                       {items.map((category) => {
@@ -225,7 +225,7 @@ function SettingsDialog() {
                           <Button
                             key={category.id}
                             className={cn(
-                              'h-10 w-full justify-start gap-3 rounded-xl px-3 text-sm font-medium transition-colors',
+                              'h-8 w-full justify-start gap-2 rounded-lg px-2.5 text-[13px] font-medium transition-colors',
                               active
                                 ? 'border border-foreground/10 bg-foreground/10 text-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]'
                                 : 'border border-transparent text-muted hover:bg-foreground/5 hover:text-foreground',
@@ -234,7 +234,7 @@ function SettingsDialog() {
                             aria-current={active ? 'page' : undefined}
                             onPress={() => setSelected(category.id)}
                           >
-                            <Icon className="size-4 shrink-0" />
+                            <Icon className="size-3.5 shrink-0" />
                             {category.label}
                           </Button>
                         )
@@ -373,6 +373,12 @@ const OVERLAY_SHORTCUT_ROWS: Array<{
     title: 'Web search',
     description: 'Toggle web search for the next message.',
     search: ['web', 'search', 'shortcut'],
+  },
+  {
+    id: 'voiceInput',
+    title: 'Voice input',
+    description: 'Start voice input; Enter sends and Escape cancels.',
+    search: ['voice', 'input', 'microphone', 'dictate', 'speech', 'shortcut'],
   },
 ]
 

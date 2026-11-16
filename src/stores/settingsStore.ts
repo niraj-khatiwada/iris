@@ -14,6 +14,36 @@ import type { ThemeMode, TtsVoice } from '@/types/settings'
 export type OverlayShortcutAction = keyof typeof DEFAULT_OVERLAY_SHORTCUTS
 export type OverlayShortcuts = Record<OverlayShortcutAction, string>
 
+/**
+ * Rebuilds the shortcut map from whatever was persisted. Older builds stored a different set of
+ * actions, so a missing key must fall back to its default instead of reaching `formatShortcut`.
+ */
+function normalizeOverlayShortcuts(saved: unknown): OverlayShortcuts {
+  const value = (saved ?? {}) as Partial<Record<string, unknown>>
+  const shortcuts = { ...DEFAULT_OVERLAY_SHORTCUTS } as OverlayShortcuts
+
+  for (const action of Object.keys(
+    DEFAULT_OVERLAY_SHORTCUTS,
+  ) as OverlayShortcutAction[]) {
+    const shortcut = value[action]
+    if (typeof shortcut === 'string' && shortcut.includes('+')) {
+      shortcuts[action] = shortcut
+    }
+  }
+
+  // Web search moved from ⌘W to ⌘S; carry the untouched old default over.
+  if (shortcuts.webSearch === 'CommandOrControl+KeyW') {
+    shortcuts.webSearch = DEFAULT_OVERLAY_SHORTCUTS.webSearch
+  }
+
+  // Voice input moved from ⌘M to ⌘I; carry the untouched old default over.
+  if (shortcuts.voiceInput === 'CommandOrControl+KeyM') {
+    shortcuts.voiceInput = DEFAULT_OVERLAY_SHORTCUTS.voiceInput
+  }
+
+  return shortcuts
+}
+
 type SettingsState = {
   theme: ThemeMode
   /** Temporary: stored locally until the settings revamp moves secrets to the Keychain. */
@@ -75,7 +105,15 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: SETTINGS_STORAGE_KEY,
-      version: 6,
+      version: 8,
+      merge: (persisted, current) => {
+        const saved = (persisted ?? {}) as Partial<SettingsState>
+        return {
+          ...current,
+          ...saved,
+          overlayShortcuts: normalizeOverlayShortcuts(saved.overlayShortcuts),
+        }
+      },
       migrate: (persisted) => {
         const saved = persisted as Partial<SettingsState>
         const openShortcut =
@@ -83,25 +121,6 @@ export const useSettingsStore = create<SettingsState>()(
           saved.openShortcut.trim().length > 0
             ? saved.openShortcut
             : DEFAULT_OPEN_SHORTCUT
-        const savedShortcuts = saved.overlayShortcuts as
-          | Partial<OverlayShortcuts>
-          | undefined
-        const overlayShortcuts = {
-          ...DEFAULT_OVERLAY_SHORTCUTS,
-        } as OverlayShortcuts
-        for (const action of Object.keys(
-          DEFAULT_OVERLAY_SHORTCUTS,
-        ) as OverlayShortcutAction[]) {
-          const value = savedShortcuts?.[action]
-          if (typeof value === 'string' && value.includes('+')) {
-            overlayShortcuts[action] = value
-          }
-        }
-
-        // Web search moved from ⌘W to ⌘S; carry the untouched old default over.
-        if (overlayShortcuts.webSearch === 'CommandOrControl+KeyW') {
-          overlayShortcuts.webSearch = DEFAULT_OVERLAY_SHORTCUTS.webSearch
-        }
 
         return {
           ...saved,
@@ -117,7 +136,7 @@ export const useSettingsStore = create<SettingsState>()(
           webSearch: saved.webSearch ?? false,
           ttsVoice: saved.ttsVoice === 'tide' ? 'tide' : DEFAULT_TTS_VOICE,
           openShortcut,
-          overlayShortcuts,
+          overlayShortcuts: normalizeOverlayShortcuts(saved.overlayShortcuts),
         } as SettingsState
       },
     },

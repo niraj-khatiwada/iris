@@ -2,7 +2,7 @@ use tauri::menu::MenuItemKind;
 use tauri::AppHandle;
 
 /// macOS binds Close Window to Cmd+W by default, which would dismiss Iris while it is on screen.
-/// Remove the empty File menu and the Window > Close item so the key never closes a window.
+/// Remove the empty File menu and the Window > Close item so the key reaches the webview.
 #[cfg(target_os = "macos")]
 pub fn remove_close_window_items(app: &AppHandle) {
     let Some(menu) = app.menu() else {

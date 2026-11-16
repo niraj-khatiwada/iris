@@ -198,8 +198,8 @@ Anthropic and Codex providers are planned later; keep provider-specific protocol
   `bun run tauri:dev` and `bun run tauri:build:debug`. Dev chats and settings therefore live in
   separate `Application Support` and WebKit folders and never clash with the installed app.
 - The quick overlay has configurable local shortcuts in Settings → Shortcuts: Capture screen
-  (`⌘C`), New chat (`⌘N`), DeepThink (`⌘D`), and Web search (`⌘S`). They are overlay-only and never
-  register with the OS.
+  (`⌘C`), New chat (`⌘N`), DeepThink (`⌘D`), Web search (`⌘S`), and Voice input (`⌘I`). They are
+  overlay-only and never register with the OS.
 - Settings → Storage has two separate actions: **Clear** deletes only conversations, while
   **Reset Iris** wipes conversations, compressed summaries, speech audio, settings, the API key,
   and the pre-rename data copies, then restarts the app. The SQLite file is vacuumed and its WAL
