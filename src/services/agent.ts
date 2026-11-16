@@ -161,14 +161,16 @@ export function startAgentRun(options: AgentRunOptions): string {
 }
 
 function buildPreviewReply(messages: AgentMessage[]) {
-  const latest = [...messages]
+  const message = [...messages]
     .reverse()
-    .find((message) => message.role === 'user')
-    ?.content.trim()
+    .find((candidate) => candidate.role === 'user')
+  const latest = message?.content.trim()
+  const hasImage = Boolean(message?.attachments?.length)
 
   return [
     "You're running in **browser preview**.",
     latest ? `\n\nYou said: "${latest}"` : '',
+    hasImage ? '\n\nImage attached.' : '',
     '\n\nOpen the desktop app with `bun run tauri:dev` to use the native streaming backend.',
   ].join('')
 }

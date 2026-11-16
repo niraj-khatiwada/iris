@@ -24,8 +24,23 @@ function MessageBubble({ message }: { message: ChatMessage }) {
               : 'bg-surface/45 ring-1 ring-border/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-xl',
           )}
         >
+          {isUser && message.attachments?.length ? (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {message.attachments.map((attachment) => (
+                <img
+                  key={attachment.id}
+                  alt={attachment.name}
+                  className="max-h-64 max-w-[min(100%,24rem)] rounded-lg object-cover"
+                  src={attachment.dataUrl}
+                />
+              ))}
+            </div>
+          ) : null}
+
           {isUser ? (
-            <p className="whitespace-pre-wrap">{message.content}</p>
+            message.content ? (
+              <p className="whitespace-pre-wrap">{message.content}</p>
+            ) : null
           ) : isEmptyStream ? (
             <TypingDots />
           ) : (

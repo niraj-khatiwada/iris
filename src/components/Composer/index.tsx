@@ -2,9 +2,12 @@ import { Button, TextArea, Tooltip } from '@heroui/react'
 import { ArrowUp, Mic, Square } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
+import AttachmentStrip from '@/components/AttachmentStrip'
 import ChatToggles from '@/components/ChatToggles'
+import { useImageAttachments } from '@/hooks/useImageAttachments'
 import { useChatStore } from '@/stores/chatStore'
 import { useUIStore } from '@/stores/uiStore'
+import { cn } from '@/utils/tailwind'
 
 function Composer() {
   const [value, setValue] = useState('')
@@ -13,12 +16,22 @@ function Composer() {
   const stopStreaming = useChatStore((state) => state.stopStreaming)
   const streaming = useChatStore((state) => Boolean(state.streamingRequestId))
   const focusToken = useUIStore((state) => state.composerFocusToken)
+  const activeConversationId = useChatStore(
+    (state) => state.activeConversationId,
+  )
+  const images = useImageAttachments()
 
   useEffect(() => {
     if (focusToken > 0) {
       textareaRef.current?.focus()
     }
   }, [focusToken])
+
+  // Attachments are a draft for the conversation they were pasted into.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: clear when the conversation changes
+  useEffect(() => {
+    images.clear()
+  }, [activeConversationId])
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: resizing follows the controlled value
   useEffect(() => {
@@ -33,18 +46,32 @@ function Composer() {
 
   const submit = () => {
     const text = value.trim()
-    if (!text || streaming) {
+    if ((!text && images.attachments.length === 0) || streaming) {
       return
     }
 
+    const attachments = images.attachments
     setValue('')
-    void sendMessage(text)
+    images.clear()
+    void sendMessage(text, undefined, attachments)
     requestAnimationFrame(() => textareaRef.current?.focus())
   }
 
   return (
     <div className="mx-auto w-full max-w-3xl px-6 pb-6 pt-2">
-      <div className="glass-control rounded-3xl p-2 transition-colors focus-within:border-accent/40">
+      <div
+        className={cn(
+          'glass-control rounded-3xl p-2 transition-colors focus-within:border-accent/40',
+          images.dragging && 'border-accent/50',
+        )}
+        {...images.dragHandlers}
+      >
+        <AttachmentStrip
+          attachments={images.attachments}
+          className="px-2 pt-1.5"
+          onRemove={images.remove}
+        />
+
         <div className="flex items-end gap-2 px-1.5">
           <div className="pb-1.5">
             <ChatToggles />
@@ -103,7 +130,7 @@ function Composer() {
               <Button
                 isIconOnly
                 aria-label="Send message"
-                isDisabled={!value.trim()}
+                isDisabled={!value.trim() && images.attachments.length === 0}
                 size="sm"
                 onPress={submit}
               >

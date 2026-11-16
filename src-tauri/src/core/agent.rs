@@ -15,8 +15,8 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::sys::speech;
 use crate::tauri_commands::chat::{
-    ChatDonePayload, ChatErrorPayload, ChatMessageInput, ChatTokenPayload, GenerationState,
-    SendMessageRequest,
+    ChatAttachmentInput, ChatDonePayload, ChatErrorPayload, ChatMessageInput, ChatTokenPayload,
+    GenerationState, SendMessageRequest,
 };
 use crate::utils::event;
 
@@ -41,6 +41,7 @@ const SUMMARY_SYSTEM_PROMPT: &str =
 struct Turn {
     role: String,
     content: String,
+    attachments: Vec<ChatAttachmentInput>,
 }
 
 /// The request body after older turns have been compressed.
@@ -321,6 +322,7 @@ async fn prepare_with(
         .map(|message| Turn {
             role: message.role.clone(),
             content: message.content.clone(),
+            attachments: message.attachments.clone(),
         })
         .collect::<Vec<_>>();
 
@@ -419,10 +421,44 @@ fn to_api_messages(turns: &[Turn]) -> Vec<Value> {
                 "role": "assistant",
                 "content": [{ "type": "text", "text": turn.content }]
             }),
-            _ => json!({
-                "role": "user",
-                "content": turn.content
-            }),
+            _ => {
+                let images = turn
+                    .attachments
+                    .iter()
+                    .filter(|attachment| {
+                        attachment.media_type.starts_with("image/") && !attachment.data.is_empty()
+                    })
+                    .collect::<Vec<_>>();
+
+                if images.is_empty() {
+                    return json!({
+                        "role": "user",
+                        "content": turn.content
+                    });
+                }
+
+                let mut blocks = images
+                    .into_iter()
+                    .map(|attachment| {
+                        json!({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": attachment.media_type,
+                                "data": attachment.data
+                            }
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                if !turn.content.trim().is_empty() {
+                    blocks.push(json!({ "type": "text", "text": turn.content }));
+                }
+
+                json!({
+                    "role": "user",
+                    "content": blocks
+                })
+            }
         })
         .collect()
 }
@@ -678,7 +714,7 @@ mod tests {
         build_body, chunk_end, prepare_with, split_index, to_api_messages, trim_to_user,
         AgentConfig, SummaryCache, Turn, RECENT_BUDGET_CHARS,
     };
-    use crate::tauri_commands::chat::ChatMessageInput;
+    use crate::tauri_commands::chat::{ChatAttachmentInput, ChatMessageInput};
 
     /// A tiny DeepSeek stand-in: answers every request with a JSON summary and records the body.
     struct MockDeepSeek {
@@ -760,7 +796,27 @@ mod tests {
         ChatMessageInput {
             role: role.to_string(),
             content,
+            attachments: Vec::new(),
         }
+    }
+
+    #[test]
+    fn user_images_become_content_blocks() {
+        let turn = Turn {
+            role: "user".to_string(),
+            content: "What is this?".to_string(),
+            attachments: vec![ChatAttachmentInput {
+                media_type: "image/jpeg".to_string(),
+                data: "abc".to_string(),
+            }],
+        };
+
+        let messages = to_api_messages(&[turn]);
+        let blocks = messages[0]["content"].as_array().unwrap();
+        assert_eq!(blocks[0]["type"], "image");
+        assert_eq!(blocks[0]["source"]["media_type"], "image/jpeg");
+        assert_eq!(blocks[0]["source"]["data"], "abc");
+        assert_eq!(blocks[1]["type"], "text");
     }
 
     #[test]
@@ -841,6 +897,7 @@ mod tests {
             .map(|(user, len)| Turn {
                 role: if *user { "user" } else { "assistant" }.to_string(),
                 content: "x".repeat(*len),
+                attachments: Vec::new(),
             })
             .collect()
     }

@@ -7,6 +7,15 @@ use tauri::{AppHandle, Manager};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct StoredAttachment {
+    pub id: String,
+    pub name: String,
+    pub media_type: String,
+    pub data_url: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StoredMessage {
     pub id: String,
     pub role: String,
@@ -15,6 +24,8 @@ pub struct StoredMessage {
     pub status: String,
     #[serde(default)]
     pub error: Option<String>,
+    #[serde(default)]
+    pub attachments: Vec<StoredAttachment>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -70,7 +81,8 @@ impl Storage {
                     content TEXT NOT NULL,
                     created_at INTEGER NOT NULL,
                     status TEXT NOT NULL,
-                    error TEXT
+                    error TEXT,
+                    attachments TEXT
                 );
 
                 CREATE INDEX IF NOT EXISTS messages_by_conversation
@@ -79,23 +91,19 @@ impl Storage {
             )
             .map_err(|error| format!("Could not prepare the Iris database: {error}"))?;
 
-        // Older databases predate archiving.
-        let has_archived_at = connection
-            .prepare("PRAGMA table_info(conversations)")
-            .and_then(|mut statement| {
-                let columns = statement
-                    .query_map([], |row| row.get::<_, String>(1))?
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(columns.iter().any(|column| column == "archived_at"))
-            })
-            .map_err(|error| error.to_string())?;
-        if !has_archived_at {
+        // Older databases predate archiving and image attachments.
+        if !has_column(&connection, "conversations", "archived_at")? {
             connection
                 .execute(
                     "ALTER TABLE conversations ADD COLUMN archived_at INTEGER",
                     [],
                 )
                 .map_err(|error| format!("Could not add conversation archiving: {error}"))?;
+        }
+        if !has_column(&connection, "messages", "attachments")? {
+            connection
+                .execute("ALTER TABLE messages ADD COLUMN attachments TEXT", [])
+                .map_err(|error| format!("Could not add message attachments: {error}"))?;
         }
 
         Ok(Self {
@@ -190,6 +198,35 @@ impl Storage {
     }
 }
 
+fn has_column(connection: &Connection, table: &str, column: &str) -> Result<bool, String> {
+    let mut statement = connection
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(|error| error.to_string())?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+
+    Ok(columns.iter().any(|name| name == column))
+}
+
+fn attachments_json(attachments: &[StoredAttachment]) -> Result<Option<String>, String> {
+    if attachments.is_empty() {
+        return Ok(None);
+    }
+
+    serde_json::to_string(attachments)
+        .map(Some)
+        .map_err(|error| format!("Could not encode message attachments: {error}"))
+}
+
+fn attachments_from(value: Option<String>) -> Vec<StoredAttachment> {
+    value
+        .and_then(|json| serde_json::from_str(&json).ok())
+        .unwrap_or_default()
+}
+
 fn save_in_transaction(
     transaction: &Transaction<'_>,
     conversation: &StoredConversation,
@@ -224,8 +261,8 @@ fn save_in_transaction(
         transaction
             .execute(
                 "INSERT INTO messages
-                    (id, conversation_id, role, content, created_at, status, error)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    (id, conversation_id, role, content, created_at, status, error, attachments)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![
                     message.id,
                     conversation.id,
@@ -233,7 +270,8 @@ fn save_in_transaction(
                     message.content,
                     message.created_at,
                     message.status,
-                    message.error
+                    message.error,
+                    attachments_json(&message.attachments)?
                 ],
             )
             .map_err(|error| error.to_string())?;
@@ -248,7 +286,7 @@ fn messages_for(
 ) -> Result<Vec<StoredMessage>, String> {
     let mut statement = connection
         .prepare(
-            "SELECT id, role, content, created_at, status, error
+            "SELECT id, role, content, created_at, status, error, attachments
              FROM messages
              WHERE conversation_id = ?1
              ORDER BY created_at ASC, rowid ASC",
@@ -264,6 +302,7 @@ fn messages_for(
                 created_at: row.get(3)?,
                 status: row.get(4)?,
                 error: row.get(5)?,
+                attachments: attachments_from(row.get(6)?),
             })
         })
         .map_err(|error| error.to_string())?

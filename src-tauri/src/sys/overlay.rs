@@ -156,6 +156,10 @@ pub fn setup_panels(app: &AppHandle) -> Result<(), String> {
         }
     }
 
+    if let Err(error) = crate::sys::capture::setup(app) {
+        log::warn!("Could not prepare the Iris capture panel: {error}");
+    }
+
     log::info!("Iris windows are ready as non-activating panels");
     Ok(())
 }

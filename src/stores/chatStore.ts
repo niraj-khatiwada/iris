@@ -8,8 +8,14 @@ import {
 } from '@/constants'
 import { cancelActiveRun, startAgentRun } from '@/services/agent'
 import { useSettingsStore } from '@/stores/settingsStore'
-import type { AgentMessage, ChatMessage, Conversation } from '@/types/chat'
+import type {
+  AgentMessage,
+  ChatAttachment,
+  ChatMessage,
+  Conversation,
+} from '@/types/chat'
 import { newId } from '@/utils/id'
+import { attachmentToAgent } from '@/utils/image'
 import { titleFromMessage } from '@/utils/string'
 
 type ChatState = {
@@ -28,7 +34,11 @@ type ChatState = {
   deleteArchivedConversation: (id: string) => void
   renameConversation: (id: string, title: string) => void
   clearAll: () => void
-  sendMessage: (content: string, conversationId?: string) => Promise<void>
+  sendMessage: (
+    content: string,
+    conversationId?: string,
+    attachments?: ChatAttachment[],
+  ) => Promise<void>
   stopStreaming: () => Promise<void>
 }
 
@@ -152,6 +162,13 @@ export const useChatStore = create<ChatState>()(
       hydrateConversations: (conversations) =>
         set((state) => {
           const normalized = conversations
+            // Older builds could archive an empty chat; those are not worth keeping.
+            .filter(
+              (conversation) =>
+                !(
+                  conversation.archivedAt && conversation.messages.length === 0
+                ),
+            )
             .map((conversation) => ({
               ...conversation,
               messages: conversation.messages.map((message) =>
@@ -225,6 +242,41 @@ export const useChatStore = create<ChatState>()(
         }
 
         const now = Date.now()
+        const target = get().conversations.find(
+          (conversation) => conversation.id === id,
+        )
+        if (!target) {
+          return
+        }
+
+        // Empty chats have nothing worth keeping; remove them instead of archiving.
+        if (target.messages.length === 0) {
+          set((state) => {
+            const conversations = state.conversations.filter(
+              (conversation) => conversation.id !== id,
+            )
+            const activeConversationId =
+              state.activeConversationId === id
+                ? (conversations.find(
+                    (conversation) => !conversation.archivedAt,
+                  )?.id ?? null)
+                : state.activeConversationId
+
+            return {
+              conversations,
+              activeConversationId,
+              ...(wasStreaming
+                ? {
+                    streamingRequestId: null,
+                    streamingConversationId: null,
+                    streamingMessageId: null,
+                  }
+                : {}),
+            }
+          })
+          return
+        }
+
         set((state) => {
           const archive = (
             conversation: Conversation,
@@ -371,9 +423,10 @@ export const useChatStore = create<ChatState>()(
         })
       },
 
-      sendMessage: async (content, targetConversationId) => {
+      sendMessage: async (content, targetConversationId, attachments) => {
         const text = content.trim()
-        if (!text) {
+        const files = attachments ?? []
+        if (!text && files.length === 0) {
           return
         }
 
@@ -408,6 +461,7 @@ export const useChatStore = create<ChatState>()(
           content: text,
           createdAt: now,
           status: 'complete',
+          ...(files.length > 0 ? { attachments: files } : {}),
         }
         const assistantMessage: ChatMessage = {
           id: newId(),
@@ -429,10 +483,24 @@ export const useChatStore = create<ChatState>()(
                 message.status === 'complete' &&
                 message.content.trim().length > 0),
           )
-          .map((message) => ({
-            role: message.role,
-            content: message.content,
-          }))
+          .map((message) => {
+            const agentAttachments = message.attachments
+              ?.map(attachmentToAgent)
+              .filter(
+                (
+                  attachment,
+                ): attachment is { mediaType: string; data: string } =>
+                  attachment !== null,
+              )
+
+            return {
+              role: message.role,
+              content: message.content,
+              ...(agentAttachments?.length
+                ? { attachments: agentAttachments }
+                : {}),
+            }
+          })
         // Another window (Settings) may have saved a new API key after this store hydrated.
         await useSettingsStore.persist.rehydrate()
         const settings = useSettingsStore.getState()
@@ -442,7 +510,11 @@ export const useChatStore = create<ChatState>()(
             item.id === conversationId
               ? {
                   ...item,
-                  title: isUntitled ? titleFromMessage(text) : item.title,
+                  title: isUntitled
+                    ? text
+                      ? titleFromMessage(text)
+                      : 'Image'
+                    : item.title,
                   updatedAt: now,
                   messages: [...item.messages, userMessage, assistantMessage],
                 }
@@ -543,16 +615,19 @@ export const useChatStore = create<ChatState>()(
       }),
       merge: (persisted, current) => {
         const saved = persisted as Partial<PersistedChatState> | undefined
-        const conversations = (saved?.conversations ?? []).map(
-          (conversation) => ({
+        const conversations = (saved?.conversations ?? [])
+          .filter(
+            (conversation) =>
+              !(conversation.archivedAt && conversation.messages.length === 0),
+          )
+          .map((conversation) => ({
             ...conversation,
             messages: conversation.messages.map((message) =>
               message.status === 'streaming'
                 ? { ...message, status: 'complete' as const }
                 : message,
             ),
-          }),
-        )
+          }))
 
         return {
           ...current,

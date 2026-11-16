@@ -206,7 +206,8 @@ Anthropic and Codex providers are planned later; keep provider-specific protocol
   The bottom edge stays fixed while the panel grows or shrinks.
 - Deleting a conversation archives it (`archivedAt`). The sidebar shows a collapsible Archives
   section while anything is archived; archived chats open read-only and can be restored or
-  permanently deleted. They never accept new messages or renames.
+  permanently deleted. They never accept new messages or renames. Empty conversations are deleted
+  outright instead of being archived.
 - New quick chats archive the previous quick conversation under a new id, so old messages stay in
   History instead of being discarded.
 - Settings and the DeepSeek API key still live in `localStorage` until the settings/secret-storage
@@ -214,6 +215,14 @@ Anthropic and Codex providers are planned later; keep provider-specific protocol
 - The composer has two request toggles, matching the DeepSeek demo: **DeepThink** sends
   `thinking: { type: "enabled" }`, and **Search** adds the `deepseek_web_search` tool (reading links
   is always available). Both are off by default and apply to the next message only.
+- Images can be pasted or dropped into the composer or the quick overlay; there is no attach
+  button. They are resized to 1280px JPEGs, kept as attachments on the user message, and sent to
+  the Messages API as base64 image blocks. The database stores them in `messages.attachments`.
+- The quick overlay also supports **screen context** (overlay only): a capture button freezes the
+  current display, lets you drag a region, resize it with eight handles, drag the toolbar handle to
+  move it, and annotate it with a pen, rectangle, or arrow in four colours. `Cmd+Z` undoes the last
+  stroke; **Attach** or **Enter** sends the flattened JPEG into the overlay draft like any other image. Escape
+  or Cancel returns to the overlay.
 - Automatic read-aloud has a preparing phase: `speech:preparing` arrives when the reply ends and its
   audio starts downloading, so the overlay shows `Reading aloud…` (with the blob still morphing)
   instead of `Ready`. Playback then emits `speech:start`, and `speech:end` covers completion, Stop,

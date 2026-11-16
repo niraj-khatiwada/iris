@@ -31,7 +31,7 @@ fn main() {
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 // The overlay is positioned and sized by Iris on every show.
-                .with_denylist(&["overlay", "canvas"])
+                .with_denylist(&["overlay", "canvas", "capture"])
                 // The main history window starts hidden; do not restore it as visible.
                 .with_state_flags(
                     tauri_plugin_window_state::StateFlags::all()
@@ -170,6 +170,8 @@ fn main() {
             tauri_commands::overlay::hide_overlay,
             tauri_commands::overlay::toggle_overlay,
             tauri_commands::overlay::resize_overlay,
+            tauri_commands::screen::start_screen_capture,
+            tauri_commands::screen::close_screen_capture,
             tauri_commands::screen::get_screen_capture_permission,
             tauri_commands::screen::request_screen_capture_permission,
             tauri_commands::screen::open_screen_capture_settings,

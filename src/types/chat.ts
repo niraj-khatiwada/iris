@@ -2,6 +2,14 @@ export type ChatRole = 'user' | 'assistant' | 'system'
 
 export type MessageStatus = 'streaming' | 'complete' | 'error'
 
+/** A pasted or dropped image, stored as a data URL so SQLite and the UI share one shape. */
+export type ChatAttachment = {
+  id: string
+  name: string
+  mediaType: string
+  dataUrl: string
+}
+
 export type ChatMessage = {
   id: string
   role: ChatRole
@@ -9,6 +17,7 @@ export type ChatMessage = {
   createdAt: number
   status: MessageStatus
   error?: string
+  attachments?: ChatAttachment[]
 }
 
 export type Conversation = {
@@ -25,4 +34,5 @@ export type Conversation = {
 export type AgentMessage = {
   role: ChatRole
   content: string
+  attachments?: Array<{ mediaType: string; data: string }>
 }

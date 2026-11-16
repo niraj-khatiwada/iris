@@ -14,3 +14,13 @@ export function requestScreenCapturePermission() {
 export function openScreenCaptureSettings() {
   return invoke<void>('open_screen_capture_settings')
 }
+
+/** Hides the quick overlay, captures the current display, and opens the annotation window. */
+export function startScreenCapture() {
+  return invoke<void>('start_screen_capture')
+}
+
+/** Closes the capture window and brings the quick overlay back. */
+export function closeScreenCapture() {
+  return invoke<void>('close_screen_capture')
+}

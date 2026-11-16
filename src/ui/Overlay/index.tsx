@@ -1,6 +1,6 @@
 import { Button, TextArea, Tooltip } from '@heroui/react'
 import { invoke } from '@tauri-apps/api/core'
-import { emit } from '@tauri-apps/api/event'
+import { emit, listen } from '@tauri-apps/api/event'
 import {
   ArrowUp,
   Check,
@@ -9,6 +9,7 @@ import {
   Eye,
   Mic,
   Plus,
+  Scan,
   Square,
   X,
 } from 'lucide-react'
@@ -21,6 +22,7 @@ import {
   useState,
 } from 'react'
 
+import AttachmentStrip from '@/components/AttachmentStrip'
 import ChatToggles from '@/components/ChatToggles'
 import IrisBlob from '@/components/IrisBlob'
 import Markdown from '@/components/Markdown'
@@ -33,6 +35,7 @@ import {
   SENDING_TICK_MS,
 } from '@/constants/blob'
 import { useChatStorage } from '@/hooks/useChatStorage'
+import { useImageAttachments } from '@/hooks/useImageAttachments'
 import { useOverlayWindow } from '@/hooks/useOverlayWindow'
 import { useSettingsSync } from '@/hooks/useSettingsSync'
 import { useSpeechPlayback } from '@/hooks/useSpeechPlayback'
@@ -40,7 +43,13 @@ import { useVoiceInput } from '@/hooks/useVoiceInput'
 import { useChatStore } from '@/stores/chatStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { subscribeToOverlayHidden } from '@/tauri/commands/overlay'
+import {
+  getScreenCapturePermission,
+  requestScreenCapturePermission,
+  startScreenCapture,
+} from '@/tauri/commands/screen'
 import { stopSpeaking } from '@/tauri/commands/voice'
+import { newId } from '@/utils/id'
 import { cn } from '@/utils/tailwind'
 import { isTauri } from '@/utils/tauri'
 
@@ -91,6 +100,7 @@ function Overlay() {
   const { panelRef, inputRef, hide } = useOverlayWindow()
   const autoSendVoice = useSettingsStore((state) => state.autoSendVoice)
   const voice = useVoiceInput()
+  const images = useImageAttachments()
   useChatStorage()
   useSettingsSync()
   const { speaking, preparing } = useSpeechPlayback(QUICK_CONVERSATION_ID)
@@ -101,6 +111,7 @@ function Overlay() {
   )
   const [copied, setCopied] = useState(false)
   const [errorVisible, setErrorVisible] = useState(false)
+  const [captureError, setCaptureError] = useState<string | null>(null)
   const [sendingTick, setSendingTick] = useState(0)
   const [contentHeight, setContentHeight] = useState<number | null>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -120,6 +131,7 @@ function Overlay() {
   const voiceActive = voice.status !== 'idle'
   const errorMessage =
     assistant?.status === 'error' ? (assistant.error ?? '') : ''
+  const overlayError = voice.error ?? captureError
   const apiKeyMissing = /api key/i.test(errorMessage)
   // The blob keeps morphing while a reply streams and while its audio is being prepared.
   const morphing = streaming || preparing
@@ -148,16 +160,19 @@ function Overlay() {
     await invoke('show_main_window')
   }, [])
 
+  const clearImages = images.clear
+
   const newChat = useCallback(() => {
     if (isTauri()) {
       void stopSpeaking()
     }
     resetQuickConversation()
+    clearImages()
     setValue('')
     setRevealed(false)
     setIgnoredResponseId(null)
     requestAnimationFrame(() => inputRef.current?.focus())
-  }, [inputRef, resetQuickConversation])
+  }, [clearImages, inputRef, resetQuickConversation])
 
   useEffect(() => {
     ensureQuickConversation()
@@ -176,7 +191,7 @@ function Overlay() {
   }, [morphing])
 
   useEffect(() => {
-    if (!voice.error) {
+    if (!overlayError) {
       setErrorVisible(false)
       return
     }
@@ -184,7 +199,7 @@ function Overlay() {
     setErrorVisible(true)
     const timer = window.setTimeout(() => setErrorVisible(false), 3000)
     return () => window.clearTimeout(timer)
-  }, [voice.error])
+  }, [overlayError])
 
   // Drive the native window from the animated panel height.
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure when the view changes
@@ -258,6 +273,38 @@ function Overlay() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [inputRef, newChat, openSettings])
 
+  // A finished screen capture arrives as an annotated JPEG for the current draft.
+  useEffect(() => {
+    if (!isTauri()) {
+      return
+    }
+
+    const addAttachment = images.addAttachment
+    let disposed = false
+    let off: (() => void) | undefined
+
+    void listen<{ dataUrl: string }>('capture:attached', (event) => {
+      addAttachment({
+        id: newId(),
+        name: 'Screen capture',
+        mediaType: 'image/jpeg',
+        dataUrl: event.payload.dataUrl,
+      })
+      requestAnimationFrame(() => inputRef.current?.focus())
+    }).then((unlisten) => {
+      if (disposed) {
+        unlisten()
+      } else {
+        off = unlisten
+      }
+    })
+
+    return () => {
+      disposed = true
+      off?.()
+    }
+  }, [images.addAttachment, inputRef])
+
   // The native window can be hidden by the shortcut, which never reaches the React tree.
   useEffect(() => {
     if (!isTauri()) {
@@ -280,17 +327,43 @@ function Overlay() {
     }
   }, [voice.cancel])
 
-  const submit = () => {
-    const text = value.trim()
-    if (!text || streaming) {
+  const startCapture = async () => {
+    if (!isTauri()) {
       return
     }
 
+    setCaptureError(null)
+    try {
+      const allowed = await getScreenCapturePermission()
+      if (!allowed) {
+        const granted = await requestScreenCapturePermission()
+        if (!granted) {
+          setCaptureError(
+            'Enable Screen Recording for Iris in System Settings, then try again.',
+          )
+          return
+        }
+      }
+
+      await startScreenCapture()
+    } catch (error) {
+      setCaptureError(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  const submit = () => {
+    const text = value.trim()
+    if ((!text && images.attachments.length === 0) || streaming) {
+      return
+    }
+
+    const attachments = images.attachments
     setValue('')
+    images.clear()
     setRevealed(false)
     setIgnoredResponseId(null)
     ensureQuickConversation()
-    void sendMessage(text, QUICK_CONVERSATION_ID)
+    void sendMessage(text, QUICK_CONVERSATION_ID, attachments)
     requestAnimationFrame(() => inputRef.current?.focus())
   }
 
@@ -365,7 +438,7 @@ function Overlay() {
       >
         <div ref={contentRef} className="relative">
           <AnimatePresence>
-            {errorVisible && voice.error ? (
+            {errorVisible && overlayError ? (
               <motion.div
                 key="voice-error"
                 animate={{ opacity: 1, y: 0 }}
@@ -375,7 +448,7 @@ function Overlay() {
                 transition={{ duration: 0.2, ease: 'easeOut' }}
               >
                 <p className="max-w-[90%] rounded-full border border-red-400/20 bg-red-950/85 px-3 py-1.5 text-center text-[11px] leading-4 text-red-200 shadow-lg backdrop-blur-xl">
-                  {voice.error}
+                  {overlayError}
                 </p>
               </motion.div>
             ) : null}
@@ -473,7 +546,7 @@ function Overlay() {
                         <Button
                           isIconOnly
                           aria-label="Stop speaking"
-                          className="size-6 min-w-6 shrink-0 text-white/45"
+                          className="-ml-1.5 size-6 min-w-6 shrink-0 text-white/45"
                           size="sm"
                           variant="ghost"
                           onPress={() => {
@@ -555,6 +628,22 @@ function Overlay() {
                         </Tooltip>
                       ) : null}
 
+                      {!streaming && !preparing && !voiceActive ? (
+                        <Tooltip delay={500}>
+                          <Button
+                            isIconOnly
+                            aria-label="Capture screen"
+                            className="size-7 min-w-7 text-white/45"
+                            size="sm"
+                            variant="ghost"
+                            onPress={() => void startCapture()}
+                          >
+                            <Scan className="size-3.5" />
+                          </Button>
+                          <Tooltip.Content>Capture screen</Tooltip.Content>
+                        </Tooltip>
+                      ) : null}
+
                       <Tooltip delay={500}>
                         <Button
                           isIconOnly
@@ -603,65 +692,81 @@ function Overlay() {
 
                   <div
                     className={cn(
-                      'flex items-end gap-2 px-3',
+                      'px-3',
                       hasResponse
                         ? 'border-t border-white/[0.06] pt-1.5 pb-2.5'
                         : 'pt-1 pb-2.5',
+                      images.dragging && 'bg-white/[0.03]',
                     )}
                     data-tauri-drag-region="deep"
+                    {...images.dragHandlers}
                   >
-                    <div className="pb-1.5">
-                      <ChatToggles />
-                    </div>
-
-                    <TextArea
-                      ref={inputRef}
-                      aria-label="Ask Iris"
-                      className="max-h-[120px] min-h-10 w-full resize-none border-0 bg-transparent px-1 py-2 text-[15px] leading-6 text-white shadow-none placeholder:text-white/35 focus-visible:ring-0"
-                      placeholder={
-                        hasResponse ? 'Ask a follow-up…' : 'Ask Iris anything…'
-                      }
-                      rows={1}
-                      value={value}
-                      variant="secondary"
-                      onChange={(event) => setValue(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' && !event.shiftKey) {
-                          if (event.nativeEvent.isComposing) {
-                            return
-                          }
-                          event.preventDefault()
-                          submit()
-                        }
-                      }}
+                    <AttachmentStrip
+                      attachments={images.attachments}
+                      className="pb-2"
+                      compact
+                      onRemove={images.remove}
                     />
 
-                    <div className="mb-0.5 flex shrink-0 items-center gap-0.5">
-                      <Tooltip delay={500}>
+                    <div className="flex items-end gap-2">
+                      <div className="pb-1.5">
+                        <ChatToggles />
+                      </div>
+
+                      <TextArea
+                        ref={inputRef}
+                        aria-label="Ask Iris"
+                        className="max-h-[120px] min-h-10 w-full resize-none border-0 bg-transparent px-1 py-2 text-[15px] leading-6 text-white shadow-none placeholder:text-white/35 focus-visible:ring-0"
+                        placeholder={
+                          hasResponse
+                            ? 'Ask a follow-up…'
+                            : 'Ask Iris anything…'
+                        }
+                        rows={1}
+                        value={value}
+                        variant="secondary"
+                        onChange={(event) => setValue(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' && !event.shiftKey) {
+                            if (event.nativeEvent.isComposing) {
+                              return
+                            }
+                            event.preventDefault()
+                            submit()
+                          }
+                        }}
+                      />
+
+                      <div className="mb-0.5 flex shrink-0 items-center gap-0.5">
+                        <Tooltip delay={500}>
+                          <Button
+                            isIconOnly
+                            aria-label="Voice input"
+                            className="text-white/45"
+                            isDisabled={streaming}
+                            size="sm"
+                            variant="ghost"
+                            onPress={() => void voice.start()}
+                          >
+                            <Mic className="size-4" />
+                          </Button>
+                          <Tooltip.Content>Voice input</Tooltip.Content>
+                        </Tooltip>
+
                         <Button
                           isIconOnly
-                          aria-label="Voice input"
-                          className="text-white/45"
-                          isDisabled={streaming}
+                          aria-label="Send message"
+                          isDisabled={
+                            streaming ||
+                            (!value.trim() && images.attachments.length === 0)
+                          }
                           size="sm"
-                          variant="ghost"
-                          onPress={() => void voice.start()}
+                          variant="primary"
+                          onPress={submit}
                         >
-                          <Mic className="size-4" />
+                          <ArrowUp className="size-4" />
                         </Button>
-                        <Tooltip.Content>Voice input</Tooltip.Content>
-                      </Tooltip>
-
-                      <Button
-                        isIconOnly
-                        aria-label="Send message"
-                        isDisabled={streaming || !value.trim()}
-                        size="sm"
-                        variant="primary"
-                        onPress={submit}
-                      >
-                        <ArrowUp className="size-4" />
-                      </Button>
+                      </div>
                     </div>
                   </div>
                 </>

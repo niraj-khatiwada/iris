@@ -18,3 +18,6 @@ pub const SPEECH_END: &str = "speech:end";
 
 /// The quick overlay was hidden by the shortcut, Escape, or an explicit action.
 pub const OVERLAY_HIDDEN: &str = "overlay:hidden";
+
+/// The capture window received a fresh screenshot and waits for a region selection.
+pub const CAPTURE_START: &str = "capture:start";

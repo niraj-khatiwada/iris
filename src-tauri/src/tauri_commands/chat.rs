@@ -8,9 +8,19 @@ use crate::core::agent::AgentConfig;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ChatAttachmentInput {
+    pub media_type: String,
+    /// Base64 payload without the `data:` prefix.
+    pub data: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChatMessageInput {
     pub role: String,
     pub content: String,
+    #[serde(default)]
+    pub attachments: Vec<ChatAttachmentInput>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
