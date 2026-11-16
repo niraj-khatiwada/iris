@@ -218,8 +218,42 @@ pub fn show(app: &AppHandle) -> Result<(), String> {
         window.set_focus().map_err(|error| error.to_string())?;
     }
 
+    // Make the webview first responder before the frontend focuses the textarea, otherwise a
+    // re-shown non-activating panel can become key with no caret.
+    focus_webview(&window);
+
     let _ = app.emit(crate::utils::event::OVERLAY_FOCUSED, ());
     Ok(())
+}
+
+/// Hands keyboard focus back to the WKWebView. Re-keying a non-activating panel does not restore
+/// the webview's first-responder status, so a focused textarea would receive typing but show no
+/// caret until the webview itself is first responder again.
+#[cfg(target_os = "macos")]
+fn focus_webview(window: &WebviewWindow) {
+    if let Err(error) = window.with_webview(|webview| {
+        use objc2_app_kit::{NSResponder, NSView};
+
+        unsafe {
+            let view = webview.inner() as *const NSView;
+            if view.is_null() {
+                return;
+            }
+            let Some(ns_window) = (*view).window() else {
+                return;
+            };
+            ns_window.makeFirstResponder(Some(&*(view as *const NSResponder)));
+        }
+    }) {
+        log::warn!("Could not focus the Iris webview: {error}");
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn focus_webview(window: &WebviewWindow) {
+    if let Err(error) = window.set_focus() {
+        log::warn!("Could not focus the Iris overlay: {error}");
+    }
 }
 
 /// Shows the overlay above the capture panel without taking key focus, so the capture selection

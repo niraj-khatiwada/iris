@@ -19,6 +19,27 @@ export function useOverlayWindow() {
     }
   }, [])
 
+  const focusInput = useCallback(() => {
+    const input = inputRef.current
+    if (!input) {
+      return
+    }
+
+    const wasFocused = document.activeElement === input
+    input.focus({ preventScroll: true })
+    if (!wasFocused) {
+      const end = input.value.length
+      input.setSelectionRange(end, end)
+    }
+  }, [])
+
+  // Focus immediately, then once more after the panel has actually become key. Re-keying a
+  // non-activating panel can land the caret after the first frame.
+  const focusSoon = useCallback(() => {
+    requestAnimationFrame(focusInput)
+    window.setTimeout(focusInput, 120)
+  }, [focusInput])
+
   // Keep the native window exactly the size of the panel. This runs while the window is still
   // hidden, so the first frame is revealed at its final size.
   useEffect(() => {
@@ -44,10 +65,7 @@ export function useOverlayWindow() {
   }, [])
 
   useEffect(() => {
-    const focusInput = () => {
-      requestAnimationFrame(() => inputRef.current?.focus())
-    }
-    const initialFocus = window.setTimeout(focusInput, 80)
+    const initialFocus = window.setTimeout(focusSoon, 80)
 
     if (!isTauri()) {
       return () => window.clearTimeout(initialFocus)
@@ -66,7 +84,7 @@ export function useOverlayWindow() {
       }
       revealed = true
       void invoke('overlay_ready')
-        .then(focusInput)
+        .then(focusSoon)
         .catch(() => undefined)
     }
 
@@ -86,7 +104,7 @@ export function useOverlayWindow() {
     void appWindow
       .onFocusChanged(({ payload: focused }) => {
         if (focused) {
-          focusInput()
+          focusSoon()
         }
       })
       .then((off) => {
@@ -100,16 +118,19 @@ export function useOverlayWindow() {
       }
     }
 
+    const onWindowFocus = () => focusSoon()
     window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('focus', onWindowFocus)
 
     return () => {
       disposed = true
       window.clearTimeout(initialFocus)
       globalThis.clearTimeout(fallback)
       window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('focus', onWindowFocus)
       unlisten?.()
     }
-  }, [hide])
+  }, [focusSoon, hide])
 
   // Rust emits this whenever the overlay is shown or brought forward. Focusing here also covers
   // the case where the panel becomes key without a Tauri focus-change event.
@@ -122,7 +143,7 @@ export function useOverlayWindow() {
     let unlisten: UnlistenFn | undefined
 
     void listen('overlay:focused', () => {
-      requestAnimationFrame(() => inputRef.current?.focus())
+      focusSoon()
     }).then((off) => {
       if (disposed) {
         off()
@@ -135,7 +156,7 @@ export function useOverlayWindow() {
       disposed = true
       unlisten?.()
     }
-  }, [])
+  }, [focusSoon])
 
   return { panelRef, inputRef, hide }
 }
