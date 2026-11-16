@@ -39,7 +39,44 @@ type ChatState = {
     conversationId?: string,
     attachments?: ChatAttachment[],
   ) => Promise<void>
+  /** Replaces an assistant reply with a fresh response to the same user message. */
+  regenerate: (conversationId: string, messageId: string) => Promise<void>
+  /** Rewrites a user message and answers again, dropping everything that followed it. */
+  editAndResend: (
+    conversationId: string,
+    messageId: string,
+    content: string,
+  ) => Promise<void>
   stopStreaming: () => Promise<void>
+}
+
+/**
+ * Turns stored messages into the request history: assistant turns only count once they have
+ * content, so empty bubbles and failures are never sent back to the model.
+ */
+function toAgentHistory(messages: ChatMessage[]): AgentMessage[] {
+  return messages
+    .filter(
+      (message) =>
+        message.role === 'user' ||
+        (message.role === 'assistant' &&
+          message.status === 'complete' &&
+          message.content.trim().length > 0),
+    )
+    .map((message) => {
+      const agentAttachments = message.attachments
+        ?.map(attachmentToAgent)
+        .filter(
+          (attachment): attachment is { mediaType: string; data: string } =>
+            attachment !== null,
+        )
+
+      return {
+        role: message.role,
+        content: message.content,
+        ...(agentAttachments?.length ? { attachments: agentAttachments } : {}),
+      }
+    })
 }
 
 type PersistedChatState = Pick<
@@ -91,6 +128,119 @@ function finishConversationMessages(
     })
 
     return { ...conversation, updatedAt: Date.now(), messages }
+  })
+}
+
+type RunContext = {
+  set: (
+    partial: Partial<ChatState> | ((state: ChatState) => Partial<ChatState>),
+  ) => void
+  get: () => ChatState
+}
+
+/**
+ * Streams one assistant reply for an already-stored user turn. `sendMessage`, `regenerate`, and
+ * `editAndResend` all differ only in how they prepare the conversation, so the request, streaming,
+ * and error bookkeeping live here once.
+ */
+async function runAssistantReply({
+  set,
+  get,
+  conversationId,
+  assistantMessageId,
+}: RunContext & { conversationId: string; assistantMessageId: string }) {
+  const conversation = get().conversations.find(
+    (item) => item.id === conversationId,
+  )
+  if (!conversation) {
+    return
+  }
+
+  // The placeholder is already in the conversation, so it is excluded from the history.
+  const history = toAgentHistory(
+    conversation.messages.filter(
+      (message) => message.id !== assistantMessageId,
+    ),
+  )
+
+  // Another window (Settings) may have saved a new API key after this store hydrated.
+  await useSettingsStore.persist.rehydrate()
+  const settings = useSettingsStore.getState()
+
+  const requestId = startAgentRun({
+    conversationId,
+    messages: history,
+    apiKey: settings.apiKey,
+    baseUrl: settings.baseUrl,
+    model: settings.model,
+    autoSpeak: settings.autoSpeak,
+    deepThink: settings.deepThink,
+    webSearch: settings.webSearch,
+    ttsVoice: settings.ttsVoice,
+    onToken: (token) => {
+      if (get().streamingRequestId !== requestId) {
+        return
+      }
+
+      set((current) => ({
+        conversations: withMessage(
+          current.conversations,
+          conversationId,
+          assistantMessageId,
+          (message) => ({
+            ...message,
+            content: message.content + token,
+          }),
+        ),
+      }))
+    },
+    onDone: ({ cancelled }) => {
+      if (get().streamingRequestId !== requestId) {
+        return
+      }
+
+      set((current) => ({
+        conversations: finishConversationMessages(
+          current.conversations,
+          conversationId,
+          assistantMessageId,
+          cancelled,
+        ),
+        streamingRequestId: null,
+        streamingConversationId: null,
+        streamingMessageId: null,
+      }))
+    },
+    onError: (message) => {
+      if (get().streamingRequestId !== requestId) {
+        return
+      }
+
+      set((current) => ({
+        conversations: withMessage(
+          current.conversations,
+          conversationId,
+          assistantMessageId,
+          (item) => ({
+            ...item,
+            status: 'error',
+            error: message,
+            content:
+              item.content ||
+              'Something went wrong while contacting the agent.',
+          }),
+        ),
+        streamingRequestId: null,
+        streamingConversationId: null,
+        streamingMessageId: null,
+      }))
+    },
+  })
+
+  set({
+    streamingRequestId: requestId,
+    streamingConversationId: conversationId,
+    streamingMessageId: assistantMessageId,
   })
 }
 
@@ -475,35 +625,6 @@ export const useChatStore = create<ChatState>()(
           conversation.messages.length === 0 ||
           conversation.title === 'New conversation' ||
           conversation.title === QUICK_CONVERSATION_TITLE
-        const history: AgentMessage[] = [...conversation.messages, userMessage]
-          .filter(
-            (message) =>
-              message.role === 'user' ||
-              (message.role === 'assistant' &&
-                message.status === 'complete' &&
-                message.content.trim().length > 0),
-          )
-          .map((message) => {
-            const agentAttachments = message.attachments
-              ?.map(attachmentToAgent)
-              .filter(
-                (
-                  attachment,
-                ): attachment is { mediaType: string; data: string } =>
-                  attachment !== null,
-              )
-
-            return {
-              role: message.role,
-              content: message.content,
-              ...(agentAttachments?.length
-                ? { attachments: agentAttachments }
-                : {}),
-            }
-          })
-        // Another window (Settings) may have saved a new API key after this store hydrated.
-        await useSettingsStore.persist.rehydrate()
-        const settings = useSettingsStore.getState()
 
         set((current) => ({
           conversations: current.conversations.map((item) =>
@@ -522,80 +643,108 @@ export const useChatStore = create<ChatState>()(
           ),
         }))
 
-        const requestId = startAgentRun({
-          conversationId,
-          messages: history,
-          apiKey: settings.apiKey,
-          baseUrl: settings.baseUrl,
-          model: settings.model,
-          autoSpeak: settings.autoSpeak,
-          deepThink: settings.deepThink,
-          webSearch: settings.webSearch,
-          ttsVoice: settings.ttsVoice,
-          onToken: (token) => {
-            if (get().streamingRequestId !== requestId) {
-              return
-            }
-
-            set((current) => ({
-              conversations: withMessage(
-                current.conversations,
-                conversationId as string,
-                assistantMessage.id,
-                (message) => ({
-                  ...message,
-                  content: message.content + token,
-                }),
-              ),
-            }))
-          },
-          onDone: ({ cancelled }) => {
-            if (get().streamingRequestId !== requestId) {
-              return
-            }
-
-            set((current) => ({
-              conversations: finishConversationMessages(
-                current.conversations,
-                conversationId as string,
-                assistantMessage.id,
-                cancelled,
-              ),
-              streamingRequestId: null,
-              streamingConversationId: null,
-              streamingMessageId: null,
-            }))
-          },
-          onError: (message) => {
-            if (get().streamingRequestId !== requestId) {
-              return
-            }
-
-            set((current) => ({
-              conversations: withMessage(
-                current.conversations,
-                conversationId as string,
-                assistantMessage.id,
-                (item) => ({
-                  ...item,
-                  status: 'error',
-                  error: message,
-                  content:
-                    item.content ||
-                    'Something went wrong while contacting the agent.',
-                }),
-              ),
-              streamingRequestId: null,
-              streamingConversationId: null,
-              streamingMessageId: null,
-            }))
-          },
+        await runAssistantReply({
+          set,
+          get,
+          conversationId: conversationId as string,
+          assistantMessageId: assistantMessage.id,
         })
+      },
 
-        set({
-          streamingRequestId: requestId,
-          streamingConversationId: conversationId,
-          streamingMessageId: assistantMessage.id,
+      regenerate: async (conversationId, messageId) => {
+        const conversation = get().conversations.find(
+          (item) => item.id === conversationId,
+        )
+        if (!conversation || conversation.archivedAt) {
+          return
+        }
+
+        const index = conversation.messages.findIndex(
+          (message) => message.id === messageId,
+        )
+        if (index < 0 || conversation.messages[index].role !== 'assistant') {
+          return
+        }
+
+        cancelActiveRun()
+
+        const reply: ChatMessage = {
+          id: newId(),
+          role: 'assistant',
+          content: '',
+          createdAt: Date.now(),
+          status: 'streaming',
+        }
+        const kept = conversation.messages.slice(0, index)
+
+        set((current) => ({
+          conversations: current.conversations.map((item) =>
+            item.id === conversationId
+              ? {
+                  ...item,
+                  updatedAt: Date.now(),
+                  messages: [...kept, reply],
+                }
+              : item,
+          ),
+        }))
+
+        await runAssistantReply({
+          set,
+          get,
+          conversationId,
+          assistantMessageId: reply.id,
+        })
+      },
+
+      editAndResend: async (conversationId, messageId, content) => {
+        const text = content.trim()
+        const conversation = get().conversations.find(
+          (item) => item.id === conversationId,
+        )
+        if (!conversation || conversation.archivedAt) {
+          return
+        }
+
+        const index = conversation.messages.findIndex(
+          (message) => message.id === messageId,
+        )
+        const original = conversation.messages[index]
+        if (index < 0 || original.role !== 'user') {
+          return
+        }
+        if (!text && !original.attachments?.length) {
+          return
+        }
+
+        cancelActiveRun()
+
+        const reply: ChatMessage = {
+          id: newId(),
+          role: 'assistant',
+          content: '',
+          createdAt: Date.now(),
+          status: 'streaming',
+        }
+        // Editing rewrites this turn: the old reply and everything after it are dropped.
+        const kept = conversation.messages
+          .slice(0, index)
+          .concat({ ...original, content: text })
+          .concat(reply)
+
+        set((current) => ({
+          conversations: current.conversations.map((item) =>
+            item.id === conversationId
+              ? { ...item, updatedAt: Date.now(), messages: kept }
+              : item,
+          ),
+        }))
+
+        await runAssistantReply({
+          set,
+          get,
+          conversationId,
+          assistantMessageId: reply.id,
         })
       },
 

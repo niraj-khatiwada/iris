@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { startVoiceRecording, type VoiceRecording } from '@/services/recorder'
 import { useSettingsStore } from '@/stores/settingsStore'
-import { transcribeAudio } from '@/tauri/commands/voice'
+import { stopSpeaking, transcribeAudio } from '@/tauri/commands/voice'
 import { isTauri } from '@/utils/tauri'
 
 export type VoiceInputStatus = 'idle' | 'recording' | 'transcribing'
@@ -84,6 +84,13 @@ export function useVoiceInput() {
     if (!isVoiceAvailable()) {
       setError('Voice input is not available in this window.')
       return
+    }
+
+    // Dictating while Iris is reading aloud would feed the speaker back into the microphone.
+    if (isTauri()) {
+      void stopSpeaking().catch(() => {
+        // Nothing was playing; the backend simply has nothing to stop.
+      })
     }
 
     const operation = ++operationRef.current
