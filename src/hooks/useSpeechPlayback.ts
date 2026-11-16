@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 
+import { useSpeechStore } from '@/stores/speechStore'
 import {
   subscribeToSpeechEnd,
   subscribeToSpeechPreparing,
@@ -8,13 +9,12 @@ import {
 import { isTauri } from '@/utils/tauri'
 
 /**
- * Tracks the backend's automatic read-aloud. `preparing` covers the gap between the reply and
- * playback while the TTS audio is still downloading.
+ * Follows the backend's automatic read-aloud into the shared speech store.
+ *
+ * Events are not filtered by conversation: exactly one reply is spoken at a time, so the state
+ * belongs to the app rather than to the conversation it started from. Mount this once per window.
  */
-export function useSpeechPlayback(conversationId?: string) {
-  const [speaking, setSpeaking] = useState(false)
-  const [preparing, setPreparing] = useState(false)
-
+export function useSpeechPlayback() {
   useEffect(() => {
     if (!isTauri()) {
       return
@@ -22,18 +22,10 @@ export function useSpeechPlayback(conversationId?: string) {
 
     let disposed = false
     const cleanup: Array<() => void> = []
+    const { setState } = useSpeechStore
 
-    const track = (
-      subscribe: (
-        handler: (payload: { conversationId: string }) => void,
-      ) => Promise<() => void>,
-      handler: (payload: { conversationId: string }) => void,
-    ) => {
-      void subscribe((payload) => {
-        if (!conversationId || payload.conversationId === conversationId) {
-          handler(payload)
-        }
-      }).then((off) => {
+    const track = (subscribe: () => Promise<() => void>) => {
+      void subscribe().then((off) => {
         if (disposed) {
           off()
         } else {
@@ -42,17 +34,21 @@ export function useSpeechPlayback(conversationId?: string) {
       })
     }
 
-    track(subscribeToSpeechPreparing, () => {
-      setPreparing(true)
-    })
-    track(subscribeToSpeechStart, () => {
-      setPreparing(false)
-      setSpeaking(true)
-    })
-    track(subscribeToSpeechEnd, () => {
-      setPreparing(false)
-      setSpeaking(false)
-    })
+    track(() =>
+      subscribeToSpeechPreparing(({ conversationId }) => {
+        setState({ conversationId, preparing: true, speaking: false })
+      }),
+    )
+    track(() =>
+      subscribeToSpeechStart(({ conversationId }) => {
+        setState({ conversationId, preparing: false, speaking: true })
+      }),
+    )
+    track(() =>
+      subscribeToSpeechEnd(() => {
+        setState({ conversationId: null, preparing: false, speaking: false })
+      }),
+    )
 
     return () => {
       disposed = true
@@ -60,7 +56,5 @@ export function useSpeechPlayback(conversationId?: string) {
         off()
       }
     }
-  }, [conversationId])
-
-  return { speaking, preparing }
+  }, [])
 }

@@ -5,13 +5,16 @@ import { useEffect, useRef, useState } from 'react'
 import AttachmentStrip from '@/components/AttachmentStrip'
 import ChatToggles from '@/components/ChatToggles'
 import SendButton from '@/components/SendButton'
+import SpeechControl from '@/components/SpeechControl'
 import { useImageAttachments } from '@/hooks/useImageAttachments'
+import { useSpeechPlayback } from '@/hooks/useSpeechPlayback'
 import { useChatStore } from '@/stores/chatStore'
 import { useUIStore } from '@/stores/uiStore'
 import { cn } from '@/utils/tailwind'
 
 function Composer() {
   const [value, setValue] = useState('')
+  useSpeechPlayback()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const sendMessage = useChatStore((state) => state.sendMessage)
   const stopStreaming = useChatStore((state) => state.stopStreaming)
@@ -99,6 +102,8 @@ function Composer() {
           />
 
           <div className="flex shrink-0 items-center gap-1 pb-1">
+            <SpeechControl />
+
             <Tooltip delay={400}>
               <Button
                 isIconOnly

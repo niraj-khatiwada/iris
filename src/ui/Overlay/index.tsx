@@ -26,8 +26,8 @@ import ChatToggles from '@/components/ChatToggles'
 import IrisBlob, { type IrisTone } from '@/components/IrisBlob'
 import Markdown from '@/components/Markdown'
 import SendButton from '@/components/SendButton'
+import SpeechControl from '@/components/SpeechControl'
 import VoiceStrip from '@/components/VoiceStrip'
-import VoiceWave from '@/components/VoiceWave'
 import { QUICK_CONVERSATION_ID } from '@/constants'
 import {
   SENDING_EMOTIONS,
@@ -42,6 +42,7 @@ import { useSpeechPlayback } from '@/hooks/useSpeechPlayback'
 import { useVoiceInput } from '@/hooks/useVoiceInput'
 import { useChatStore } from '@/stores/chatStore'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { useSpeechStore } from '@/stores/speechStore'
 import { subscribeToOverlayHidden } from '@/tauri/commands/overlay'
 import {
   closeScreenCapture,
@@ -127,7 +128,9 @@ function Overlay() {
   const images = useImageAttachments()
   useChatStorage()
   useSettingsSync()
-  const { speaking, preparing } = useSpeechPlayback(QUICK_CONVERSATION_ID)
+  useSpeechPlayback()
+  const speaking = useSpeechStore((state) => state.speaking)
+  const preparing = useSpeechStore((state) => state.preparing)
   const [value, setValue] = useState('')
   const [revealed, setRevealed] = useState(false)
   const [ignoredResponseId, setIgnoredResponseId] = useState<string | null>(
@@ -711,33 +714,6 @@ function Overlay() {
                       </span>
                     ) : null}
 
-                    {speaking ? (
-                      <VoiceWave
-                        active
-                        compact
-                        className="w-24 shrink-0"
-                        tone="speaking"
-                      />
-                    ) : null}
-
-                    {!streaming && (speaking || preparing) ? (
-                      <Tooltip delay={500}>
-                        <Button
-                          isIconOnly
-                          aria-label="Stop speaking"
-                          className="-ml-1.5 size-6 min-w-6 shrink-0 text-foreground/45"
-                          size="sm"
-                          variant="ghost"
-                          onPress={() => {
-                            void stopSpeaking()
-                          }}
-                        >
-                          <Square className="size-3 fill-current" />
-                        </Button>
-                        <Tooltip.Content>Stop speaking</Tooltip.Content>
-                      </Tooltip>
-                    ) : null}
-
                     <div className="ml-auto flex items-center gap-0.5">
                       {showResponse && assistant?.content ? (
                         <Tooltip delay={500}>
@@ -927,6 +903,8 @@ function Overlay() {
                       />
 
                       <div className="mb-0.5 flex shrink-0 items-center gap-0.5">
+                        <SpeechControl />
+
                         <Tooltip delay={500}>
                           <Button
                             isIconOnly

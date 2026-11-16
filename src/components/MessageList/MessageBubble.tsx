@@ -1,12 +1,10 @@
 import { Button, Tooltip } from '@heroui/react'
-import { Check, LoaderCircle, Pencil, RotateCcw, Square, X } from 'lucide-react'
+import { Check, Pencil, RotateCcw, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import CopyButton from '@/components/CopyButton'
 import Markdown from '@/components/Markdown'
-import VoiceWave from '@/components/VoiceWave'
 import { useChatStore } from '@/stores/chatStore'
-import { stopSpeaking } from '@/tauri/commands/voice'
 import type { ChatMessage } from '@/types/chat'
 import { formatMessageTime } from '@/utils/format'
 import { cn } from '@/utils/tailwind'
@@ -19,10 +17,6 @@ type MessageBubbleProps = {
   /** Only the final reply can be regenerated. */
   canRegenerate: boolean
   disabled: boolean
-  /** The TTS audio for this reply is still downloading. */
-  preparing?: boolean
-  /** This reply is being read aloud right now. */
-  speaking?: boolean
 }
 
 function MessageBubble({
@@ -31,8 +25,6 @@ function MessageBubble({
   canEdit,
   canRegenerate,
   disabled,
-  preparing = false,
-  speaking = false,
 }: MessageBubbleProps) {
   const isUser = message.role === 'user'
   const isEmptyStream = message.status === 'streaming' && !message.content
@@ -228,35 +220,6 @@ function MessageBubble({
               </Button>
               <Tooltip.Content>Regenerate</Tooltip.Content>
             </Tooltip>
-          ) : null}
-
-          {!editing && !isUser && (preparing || speaking) ? (
-            <span className="flex items-center gap-1">
-              {preparing ? (
-                <>
-                  <LoaderCircle className="size-3 animate-spin text-muted" />
-                  <span className="text-muted/70">Preparing audio…</span>
-                </>
-              ) : (
-                <>
-                  <VoiceWave active compact className="w-16" tone="speaking" />
-                  <span className="sr-only">Reading aloud</span>
-                </>
-              )}
-              <Tooltip delay={400}>
-                <Button
-                  isIconOnly
-                  aria-label="Stop reading aloud"
-                  className="size-6 min-w-6 text-muted"
-                  size="sm"
-                  variant="ghost"
-                  onPress={() => void stopSpeaking()}
-                >
-                  <Square className="size-3 fill-current" />
-                </Button>
-                <Tooltip.Content>Stop reading aloud</Tooltip.Content>
-              </Tooltip>
-            </span>
           ) : null}
 
           {!editing &&

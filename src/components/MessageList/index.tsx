@@ -1,7 +1,6 @@
 import EmptyState from '@/components/EmptyState'
 import MessageBubble from '@/components/MessageList/MessageBubble'
 import { useAutoScroll } from '@/hooks/useAutoScroll'
-import { useSpeechPlayback } from '@/hooks/useSpeechPlayback'
 import { useChatStore } from '@/stores/chatStore'
 
 function MessageList() {
@@ -9,7 +8,6 @@ function MessageList() {
     state.conversations.find((item) => item.id === state.activeConversationId),
   )
   const streaming = useChatStore((state) => Boolean(state.streamingRequestId))
-  const { speaking, preparing } = useSpeechPlayback(conversation?.id)
   const lastMessage = conversation?.messages[conversation.messages.length - 1]
   const { ref, onScroll } = useAutoScroll<HTMLDivElement>(
     `${conversation?.id ?? ''}:${lastMessage?.content.length ?? 0}`,
@@ -38,8 +36,6 @@ function MessageList() {
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 py-8">
         {messages.map((message, index) => {
           const isLast = index === lastIndex
-          // Read-aloud always belongs to the newest reply, which is the one Iris just finished.
-          const isSpeaking = isLast && message.role === 'assistant'
 
           return (
             <MessageBubble
@@ -51,8 +47,6 @@ function MessageList() {
               conversationId={conversation.id}
               disabled={streaming}
               message={message}
-              preparing={isSpeaking && preparing}
-              speaking={isSpeaking && speaking}
             />
           )
         })}

@@ -8,7 +8,8 @@
       "!src-tauri/gen/**/*",
       "!src/routeTree.gen.ts",
       "!src/lib/island/**",
-      "!src/components/islandcn/**"
+      "!src/components/islandcn/**",
+      "!.commandcode/**"
     ]
   },
   "formatter": {

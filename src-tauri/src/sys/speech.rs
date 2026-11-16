@@ -41,6 +41,16 @@ impl SpeechState {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
+
+    /// Reserves a unique epoch for a new request. Anything holding an older epoch is superseded.
+    fn begin(&self) -> u64 {
+        self.epoch.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    /// Whether `epoch` still belongs to the request that should be spoken.
+    fn is_current(&self, epoch: u64) -> bool {
+        self.epoch.load(Ordering::SeqCst) == epoch
+    }
 }
 
 /// Stops the current read-aloud and invalidates any TTS request still in flight.
@@ -83,7 +93,9 @@ pub async fn speak(
         return;
     };
 
-    let epoch = state.epoch.load(Ordering::SeqCst);
+    // Claim the newest epoch: a later reply supersedes this one, and vice versa. Without this a
+    // slower download from an older conversation could start playing after a newer one.
+    let epoch = state.begin();
     *state.preparing() = Some(conversation_id.clone());
     let _ = app.emit(
         event::SPEECH_PREPARING,
@@ -143,7 +155,7 @@ pub async fn speak(
     };
 
     // A newer message or Stop invalidated this request while it was downloading.
-    if state.epoch.load(Ordering::SeqCst) != epoch {
+    if !state.is_current(epoch) {
         // `stop` already ended the preparing state for this request.
         return;
     }
@@ -179,20 +191,50 @@ pub async fn speak(
         return;
     }
 
-    if state.epoch.load(Ordering::SeqCst) != epoch {
+    if !state.is_current(epoch) {
         let _ = std::fs::remove_file(&path);
         return;
     }
 
-    // Playback is about to start; clear the preparing state without ending it.
-    *state.preparing() = None;
-    play(&app, path, conversation_id);
+    // Playback is about to start; clear the preparing state without ending it. Only this request's
+    // entry is cleared, so a newer reply that already started preparing keeps its spinner.
+    {
+        let mut preparing = state.preparing();
+        if preparing.as_deref() == Some(conversation_id.as_str()) {
+            *preparing = None;
+        }
+    }
+    play(&app, path, conversation_id, epoch);
+}
+
+/// Stops whatever is audible without touching the epoch, so the caller's reservation survives.
+fn interrupt(app: &AppHandle) {
+    let Some(state) = app.try_state::<SpeechState>() else {
+        return;
+    };
+
+    if let Some(conversation_id) = state.preparing().take() {
+        let _ = app.emit(event::SPEECH_END, SpeechEventPayload { conversation_id });
+    }
+
+    let active = state
+        .active
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .take();
+    if let Some(mut active) = active {
+        let conversation_id = active.conversation_id.clone();
+        let _ = active.child.kill();
+        let _ = active.child.wait();
+        let _ = std::fs::remove_file(active.path);
+        let _ = app.emit(event::SPEECH_END, SpeechEventPayload { conversation_id });
+    }
 }
 
 /// Drops the preparing state when this request never reaches playback. Ignored when a newer
 /// request already replaced it.
 fn abort(app: &AppHandle, state: &SpeechState, conversation_id: &str, epoch: u64) {
-    if state.epoch.load(Ordering::SeqCst) != epoch {
+    if !state.is_current(epoch) {
         return;
     }
 
@@ -206,8 +248,22 @@ fn abort(app: &AppHandle, state: &SpeechState, conversation_id: &str, epoch: u64
     }
 }
 
-fn play(app: &AppHandle, path: std::path::PathBuf, conversation_id: String) {
-    stop(app);
+fn play(app: &AppHandle, path: std::path::PathBuf, conversation_id: String, epoch: u64) {
+    let Some(state) = app.try_state::<SpeechState>() else {
+        let _ = std::fs::remove_file(path);
+        return;
+    };
+
+    // A newer reply may have claimed the epoch while this audio was downloading. Bail before
+    // touching the shared state so a stale request cannot silence the one that superseded it.
+    if !state.is_current(epoch) {
+        let _ = std::fs::remove_file(path);
+        return;
+    }
+
+    // Silence whatever is playing, but keep this request's epoch: `stop` would bump it and make
+    // the caller bail out on its own reservation.
+    interrupt(app);
 
     let mut command = Command::new("/usr/bin/afplay");
     command
@@ -216,14 +272,8 @@ fn play(app: &AppHandle, path: std::path::PathBuf, conversation_id: String) {
         .stderr(Stdio::null());
 
     match command.spawn() {
-        Ok(mut child) => {
+        Ok(child) => {
             let pid = child.id();
-            let Some(state) = app.try_state::<SpeechState>() else {
-                let _ = child.kill();
-                let _ = child.wait();
-                let _ = std::fs::remove_file(path);
-                return;
-            };
 
             *state
                 .active
@@ -305,4 +355,33 @@ fn write_wav(path: &std::path::Path, pcm: &[u8]) -> std::io::Result<()> {
     file.write_all(&data_len.to_le_bytes())?;
     file.write_all(pcm)?;
     file.flush()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SpeechState;
+
+    /// Two replies finishing close together must not both play: the newer claim wins and the
+    /// older download is dropped when it checks its epoch.
+    #[test]
+    fn a_newer_request_supersedes_an_older_one() {
+        let state = SpeechState::default();
+
+        let first = state.begin();
+        let second = state.begin();
+
+        assert!(!state.is_current(first), "the older reply must stand down");
+        assert!(state.is_current(second), "the newest reply must play");
+    }
+
+    /// Stop bumps the epoch, which is what invalidates a download that is still in flight.
+    #[test]
+    fn stop_invalidates_the_current_request() {
+        let state = SpeechState::default();
+        let epoch = state.begin();
+
+        state.epoch.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+        assert!(!state.is_current(epoch));
+    }
 }
