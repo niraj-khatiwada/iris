@@ -203,8 +203,8 @@ feature-parity plan, not just a custom URL.
   `bun run tauri:dev` and `bun run tauri:build:debug`. Dev chats and settings therefore live in
   separate `Application Support` and WebKit folders and never clash with the installed app.
 - The quick overlay has configurable local shortcuts in Settings → Shortcuts: Capture screen
-  (`⌘C`), New chat (`⌘N`), DeepThink (`⌘D`), Web search (`⌘S`), and Voice input (`⌘I`). They are
-  overlay-only and never register with the OS.
+  (`⌘C`), New chat (`⌘N`), Show / hide response (`⌘B`), DeepThink (`⌘D`), Web search (`⌘S`), and
+  Voice input (`⌘I`). They are overlay-only and never register with the OS.
 - Settings → Storage has two separate actions: **Clear** deletes only conversations, while
   **Reset Iris** wipes conversations, compressed summaries, speech audio, settings, the API key,
   and the pre-rename data copies, then reloads both webviews. The SQLite file is vacuumed and its
@@ -269,8 +269,10 @@ SQLite. The API key is stored in plain text in `credential`; the webview still n
 - The overlay is always dark; the history window follows light/dark/system.
 - Screen Recording and Microphone permissions are declared in `src-tauri/Info.plist`.
   Screen Recording is exposed through `src-tauri/src/sys/screen.rs` +
-  `src/tauri/commands/screen.ts`; the drag-to-select region capture will request it the same way
-  Raycast does. The microphone is used only by the overlay's voice input.
+  `src/tauri/commands/screen.ts`. If access is denied, the overlay shows a persistent notice with
+  an **Open Settings** button that jumps to the Screen Recording pane; macOS only prompts once and
+  may require restarting Iris after access is granted. The microphone is used only by the overlay's
+  voice input.
 - Text inputs are intentionally quiet: no focus ring, glow, or accent outline. The caret is the
   focus cue.
 - Glass is a first-class part of the look: the overlay uses the `.liquid-glass` surface (sheen,

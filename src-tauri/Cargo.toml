@@ -34,10 +34,13 @@ tauri-plugin-global-shortcut = "2.4.1"
 
 [profile.release]
 codegen-units = 1
-lto = true
+# Thin LTO and debuginfo-only stripping are required: `lto = true` together with `strip = true`
+# (symbols) makes Rust unable to load proc-macro dylibs in release builds, starting with
+# include_dir_macros and then tauri_macros: "can't find crate for ...".
+lto = "thin"
 opt-level = 3
 panic = "abort"
-strip = true
+strip = "debuginfo"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = "0.3"

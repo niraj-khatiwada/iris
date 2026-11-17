@@ -4,6 +4,7 @@ import { emit, listen } from '@tauri-apps/api/event'
 import {
   ChevronDown,
   ChevronUp,
+  Info,
   Mic,
   Plus,
   RotateCcw,
@@ -48,12 +49,13 @@ import { subscribeToOverlayHidden } from '@/tauri/commands/overlay'
 import {
   closeScreenCapture,
   getScreenCapturePermission,
+  openScreenCaptureSettings,
   requestScreenCapturePermission,
   startScreenCapture,
 } from '@/tauri/commands/screen'
 import { stopSpeaking } from '@/tauri/commands/voice'
 import { newId } from '@/utils/id'
-import { matchesShortcut } from '@/utils/shortcut'
+import { formatShortcut, matchesShortcut } from '@/utils/shortcut'
 import { cn } from '@/utils/tailwind'
 import { isTauri } from '@/utils/tauri'
 
@@ -144,6 +146,7 @@ function Overlay() {
   )
   const [errorVisible, setErrorVisible] = useState(false)
   const [captureError, setCaptureError] = useState<string | null>(null)
+  const [capturePermissionNeeded, setCapturePermissionNeeded] = useState(false)
   const [capturing, setCapturing] = useState(false)
   const [sendingTick, setSendingTick] = useState(0)
   const [contentHeight, setContentHeight] = useState<number | null>(null)
@@ -275,8 +278,9 @@ function Overlay() {
     element.style.height = `${Math.min(element.scrollHeight, 120)}px`
   }, [value, inputRef])
 
-  // Overlay-local shortcuts: "/" focuses the input, Cmd+, opens Settings, and the five
-  // configurable bindings drive capture, new chat, thinking mode, web search, and voice input.
+  // Overlay-local shortcuts: "/" focuses the input, Cmd+, opens Settings, and the six
+  // configurable bindings drive capture, new chat, show/hide response, thinking mode, web search,
+  // and voice input.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const modifier = event.metaKey || event.ctrlKey
@@ -289,6 +293,14 @@ function Overlay() {
       if (matchesShortcut(event, overlayShortcuts.newChat)) {
         event.preventDefault()
         newChat()
+        return
+      }
+
+      if (matchesShortcut(event, overlayShortcuts.toggleResponse)) {
+        if (!streaming && hasResponse) {
+          event.preventDefault()
+          setRevealed((current) => !current)
+        }
         return
       }
 
@@ -342,6 +354,7 @@ function Overlay() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [
     deepThink,
+    hasResponse,
     inputRef,
     newChat,
     openSettings,
@@ -487,20 +500,35 @@ function Overlay() {
     }
 
     setCaptureError(null)
+    setCapturePermissionNeeded(false)
     try {
       const allowed = await getScreenCapturePermission()
       if (!allowed) {
-        const granted = await requestScreenCapturePermission()
+        // macOS only presents the TCC prompt once. If it was denied before, this returns false
+        // without showing anything, so the overlay must explain what to do next.
+        await requestScreenCapturePermission()
+        const granted = await getScreenCapturePermission()
         if (!granted) {
-          setCaptureError(
-            'Enable Screen Recording for Iris in System Settings, then try again.',
-          )
+          setCapturePermissionNeeded(true)
           return
         }
       }
 
       await startScreenCapture()
       setCapturing(true)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (/screen recording|permission/i.test(message)) {
+        setCapturePermissionNeeded(true)
+      } else {
+        setCaptureError(message)
+      }
+    }
+  }
+
+  const openScreenSettings = async () => {
+    try {
+      await openScreenCaptureSettings()
     } catch (error) {
       setCaptureError(error instanceof Error ? error.message : String(error))
     }
@@ -734,7 +762,10 @@ function Overlay() {
                           >
                             <ChevronUp className="size-3.5" />
                           </Button>
-                          <Tooltip.Content>Show response</Tooltip.Content>
+                          <Tooltip.Content>
+                            Show response ·{' '}
+                            {formatShortcut(overlayShortcuts.toggleResponse)}
+                          </Tooltip.Content>
                         </Tooltip>
                       ) : showResponse ? (
                         <Tooltip delay={500}>
@@ -748,7 +779,10 @@ function Overlay() {
                           >
                             <ChevronDown className="size-3.5" />
                           </Button>
-                          <Tooltip.Content>Hide response</Tooltip.Content>
+                          <Tooltip.Content>
+                            Hide response ·{' '}
+                            {formatShortcut(overlayShortcuts.toggleResponse)}
+                          </Tooltip.Content>
                         </Tooltip>
                       ) : null}
 
@@ -773,7 +807,8 @@ function Overlay() {
                             <Scan className="size-3.5" />
                           </Button>
                           <Tooltip.Content>
-                            {capturing ? 'Stop capture' : 'Capture screen'}
+                            {capturing ? 'Stop capture' : 'Capture screen'} ·{' '}
+                            {formatShortcut(overlayShortcuts.capture)}
                           </Tooltip.Content>
                         </Tooltip>
                       ) : null}
@@ -789,7 +824,9 @@ function Overlay() {
                         >
                           <Plus className="size-3.5" />
                         </Button>
-                        <Tooltip.Content>New chat</Tooltip.Content>
+                        <Tooltip.Content>
+                          New chat · {formatShortcut(overlayShortcuts.newChat)}
+                        </Tooltip.Content>
                       </Tooltip>
 
                       <Tooltip delay={500}>
@@ -807,6 +844,46 @@ function Overlay() {
                       </Tooltip>
                     </div>
                   </header>
+
+                  <AnimatePresence initial={false}>
+                    {capturePermissionNeeded ? (
+                      <motion.div
+                        key="capture-permission"
+                        animate={{ opacity: 1, height: 'auto' }}
+                        className="overflow-hidden"
+                        exit={{ opacity: 0, height: 0 }}
+                        initial={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.18, ease: 'easeOut' }}
+                      >
+                        <div className="mx-3 mb-1 flex items-center gap-2 rounded-xl border border-border/50 bg-surface/45 px-3 py-2 text-[11px] leading-4 text-foreground/70 backdrop-blur-xl">
+                          <Info className="size-3.5 shrink-0 text-foreground/55" />
+                          <p className="min-w-0 flex-1">
+                            Screen Recording is off. Enable Iris in System
+                            Settings → Privacy &amp; Security → Screen
+                            Recording, then restart Iris.
+                          </p>
+                          <Button
+                            className="h-7 min-w-0 shrink-0 px-2 text-[11px]"
+                            size="sm"
+                            variant="secondary"
+                            onPress={() => void openScreenSettings()}
+                          >
+                            Open Settings
+                          </Button>
+                          <Button
+                            isIconOnly
+                            aria-label="Dismiss"
+                            className="size-7 min-w-7 shrink-0 text-foreground/45"
+                            size="sm"
+                            variant="ghost"
+                            onPress={() => setCapturePermissionNeeded(false)}
+                          >
+                            <X className="size-3.5" />
+                          </Button>
+                        </div>
+                      </motion.div>
+                    ) : null}
+                  </AnimatePresence>
 
                   {showResponse ? (
                     <div className="iris-response px-5 pb-2 pt-1.5">
@@ -877,7 +954,16 @@ function Overlay() {
 
                     <div className="flex items-end gap-2">
                       <div className="pb-1.5">
-                        <ChatToggles />
+                        <ChatToggles
+                          shortcutHints={{
+                            webSearch: formatShortcut(
+                              overlayShortcuts.webSearch,
+                            ),
+                            deepThink: formatShortcut(
+                              overlayShortcuts.deepThink,
+                            ),
+                          }}
+                        />
                       </div>
 
                       <TextArea
@@ -919,7 +1005,10 @@ function Overlay() {
                           >
                             <Mic className="size-4" />
                           </Button>
-                          <Tooltip.Content>Voice input</Tooltip.Content>
+                          <Tooltip.Content>
+                            Voice input ·{' '}
+                            {formatShortcut(overlayShortcuts.voiceInput)}
+                          </Tooltip.Content>
                         </Tooltip>
 
                         <SendButton

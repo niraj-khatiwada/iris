@@ -386,6 +386,12 @@ const OVERLAY_SHORTCUT_ROWS: Array<{
     search: ['new', 'chat', 'conversation', 'shortcut'],
   },
   {
+    id: 'toggleResponse',
+    title: 'Show / hide response',
+    description: 'Reveal the reply below the overlay, or hide it again.',
+    search: ['show', 'hide', 'response', 'reply', 'reveal', 'shortcut'],
+  },
+  {
     id: 'deepThink',
     title: 'Thinking mode',
     description: 'Toggle thinking mode for the next message.',

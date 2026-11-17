@@ -8,11 +8,19 @@ import { cn } from '@/utils/tailwind'
  * Thinking mode and Search toggles shared by the quick overlay and the history composer.
  * Both settings apply to the next request; they never rewrite the conversation.
  */
-function ChatToggles() {
+function ChatToggles({
+  shortcutHints,
+}: {
+  /** Formatted overlay-only shortcut labels; the history composer has no local shortcuts. */
+  shortcutHints?: { webSearch: string; deepThink: string }
+}) {
   const deepThink = useSettingsStore((state) => state.deepThink)
   const webSearch = useSettingsStore((state) => state.webSearch)
   const setDeepThink = useSettingsStore((state) => state.setDeepThink)
   const setWebSearch = useSettingsStore((state) => state.setWebSearch)
+
+  const searchHint = shortcutHints ? ` · ${shortcutHints.webSearch}` : ''
+  const thinkHint = shortcutHints ? ` · ${shortcutHints.deepThink}` : ''
 
   return (
     <div className="flex shrink-0 items-center gap-0.5">
@@ -35,6 +43,7 @@ function ChatToggles() {
           {webSearch
             ? 'Search on · looks things up when needed'
             : 'Search off · answers from its own knowledge'}
+          {searchHint}
         </Tooltip.Content>
       </Tooltip>
 
@@ -57,6 +66,7 @@ function ChatToggles() {
           {deepThink
             ? 'Thinking on · thinks before answering'
             : 'Thinking off · answers directly'}
+          {thinkHint}
         </Tooltip.Content>
       </Tooltip>
     </div>
