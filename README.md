@@ -40,7 +40,7 @@ bun run tauri:dev
 
 The first Rust build takes a few minutes; later builds are incremental.
 
-Open Settings (`⌘,`) and add your DeepSeek API key and, if needed, the API origin and model. The default origin is `https://api.deepseek.com` and the default model is `deepseek-flash`.
+Open Settings (`⌘,`) and add your DeepSeek API key and, if needed, the API origin and model. The default origin is `https://api.deepseek.com` and the default model is `deepseek-flash`. The **Prompt** section edits the Iris Island and main chat system prompts; the main chat follows the island prompt by default.
 
 To work on the UI without the native shell:
 
@@ -107,7 +107,7 @@ src/
 │   ├── dynamic-island/ # DynamicIsland, agent activity, notices
 │   └── islandcn/       # Vendored islandcn content kit
 ├── constants/      # App constants and suggested prompts
-├── hooks/          # Theme, shortcuts, overlay window, history sync
+├── hooks/          # Theme, shortcuts, overlay window, chat storage
 ├── lib/            # Vendored engines (island/)
 ├── providers/      # App-level layout provider
 ├── routes/         # TanStack Router file routes (history window)
@@ -195,10 +195,13 @@ feature-parity plan, not just a custom URL.
 
 ## Local data
 
-- Conversations are stored in SQLite at `Application Support/com.iris.desktop/iris.db`. The quick
-  overlay and the history window share the database, and `useChatStorage` mirrors changes into it
-  while keeping `localStorage` as a fast cross-window cache and crash fallback. Existing local
-  conversations are migrated on first launch.
+- Conversations are stored only in SQLite at `Application Support/com.iris.desktop/iris.db`.
+  The quick overlay and the history window share the database; `useChatStorage` loads summaries,
+  saves metadata and messages incrementally, and reloads on focus. The history list virtualizes its messages
+  (only the visible window is in the DOM), loads the newest 100 and fetches older pages as you
+  scroll up, and fades into the composer at the bottom. `localStorage` only keeps settings and the selected conversation ids
+  (`iris.chat.ui`). The old `iris.chat` cache is imported into SQLite once on first launch, then
+  removed.
 - The bundle identifier is `com.iris.desktop` (reverse-DNS, no `.app` suffix). On first launch
   after the rename from `com.iris.app`, `core/legacy.rs` copies the old Application Support and
   WebKit folders into the new identifier so chats and settings survive.
@@ -224,7 +227,7 @@ feature-parity plan, not just a custom URL.
   outright instead of being archived.
 - New quick chats move the previous quick conversation to a new id, so old messages stay in
   History instead of being discarded. `⌘⇧N` brings the previous quick conversation back.
-- Settings live in `localStorage`; the DeepSeek API key lives in the SQLite `credential` table and
+- Settings → AI → **Prompt** edits the Iris Island and main chat system prompts; the main chat follows the island prompt by default. Reset restores the built-in Iris instructions. Settings live in `localStorage`; the DeepSeek API key lives in the SQLite `credential` table and
   is read only inside Rust.
 - The composer has two request toggles: **DeepThink** sends `thinking: { type: "adaptive" }`, and
   **Search** adds DeepSeek's `deepseek_web_search` server tool. When the newest message contains a
@@ -260,9 +263,9 @@ Chat history is stored in Rust with `rusqlite`, not by reaching into SQL from th
 - `messages` — id, conversation_id, role, content, created_at, status, error
 - `credential` — name, api_key, updated_at (the single key used for every request)
 
-The database lives at `Application Support/com.iris.desktop/iris.db`. Conversations are saved
-individually after a short debounce; `localStorage` remains the immediate cross-window cache and
-is merged by `updatedAt` on launch/focus. Attachments and FTS5 search are still planned. Store
+The database lives at `Application Support/com.iris.desktop/iris.db` and is the only conversation
+store. Conversations are saved individually after a short debounce; the overlay and history window
+reload and merge by `updatedAt` on focus. Attachments and FTS5 search are still planned. Store
 screenshots and other large attachments as files under Application Support, with their paths in
 SQLite. The API key is stored in plain text in `credential`; the webview still never reads it.
 

@@ -9,6 +9,7 @@ import {
   Select,
   Switch,
   Tabs,
+  TextArea,
   TextField,
 } from '@heroui/react'
 import { ask } from '@tauri-apps/plugin-dialog'
@@ -35,9 +36,12 @@ import IrisBlob from '@/components/IrisBlob'
 import ShortcutRecorder from '@/components/ShortcutRecorder'
 import {
   CHAT_STORAGE_KEY,
+  CHAT_UI_STORAGE_KEY,
   DEFAULT_BASE_URL,
   DEFAULT_MODEL,
   DEFAULT_OPEN_SHORTCUT,
+  DEFAULT_OVERLAY_SHORTCUTS,
+  DEFAULT_SYSTEM_PROMPT,
   DEFAULT_TTS_VOICE,
   SETTINGS_STORAGE_KEY,
   THEME_LABELS,
@@ -353,7 +357,7 @@ function GeneralPanel({ query }: { query: string }) {
         </SettingRow>
       </SettingsSection>
 
-      <SettingsSection title="Iris Overlay">
+      <SettingsSection title="Iris Island">
         <SwitchRow
           isSelected={revealResponse}
           title="Reveal response by default"
@@ -402,7 +406,7 @@ const OVERLAY_SHORTCUT_ROWS: Array<{
   {
     id: 'toggleResponse',
     title: 'Show / hide response',
-    description: 'Reveal the reply below the overlay, or hide it again.',
+    description: 'Reveal the reply below Iris Island, or hide it again.',
     search: ['show', 'hide', 'response', 'reply', 'reveal', 'shortcut'],
   },
   {
@@ -480,7 +484,7 @@ function ShortcutsPanel({ query }: { query: string }) {
       <SettingsSection title="Keyboard">
         <SettingRow
           title="Open Iris"
-          description="Click to record a new shortcut for the quick overlay."
+          description="Click to record a new shortcut for Iris Island."
           query={query}
           search={[
             'shortcut',
@@ -716,28 +720,164 @@ function AiPanel({ query }: { query: string }) {
   const setBaseUrl = useSettingsStore((state) => state.setBaseUrl)
 
   return (
-    <SettingsSection title="DeepSeek">
-      <ApiKeyField query={query} />
+    <>
+      <SettingsSection title="DeepSeek">
+        <ApiKeyField query={query} />
 
-      <SettingField
-        title="Base URL"
-        description="The official DeepSeek API by default. Change it only for a proxy that still speaks DeepSeek's API."
-        query={query}
-        search={['ai', 'base url', 'url', 'endpoint', 'proxy', 'connection']}
-      >
-        <TextField
-          className="w-full"
-          name="baseUrl"
-          value={baseUrl}
-          variant="secondary"
-          onChange={setBaseUrl}
+        <SettingField
+          title="Base URL"
+          description="The official DeepSeek API by default. Change it only for a proxy that still speaks DeepSeek's API."
+          query={query}
+          search={['ai', 'base url', 'url', 'endpoint', 'proxy', 'connection']}
         >
-          <Input aria-label="Base URL" placeholder={DEFAULT_BASE_URL} />
-        </TextField>
+          <TextField
+            className="w-full"
+            name="baseUrl"
+            value={baseUrl}
+            variant="secondary"
+            onChange={setBaseUrl}
+          >
+            <Input aria-label="Base URL" placeholder={DEFAULT_BASE_URL} />
+          </TextField>
+        </SettingField>
+
+        <ModelField query={query} />
+      </SettingsSection>
+
+      <SettingsSection title="Prompt">
+        <SystemPromptFields query={query} />
+      </SettingsSection>
+    </>
+  )
+}
+
+/**
+ * The island and main chat have separate prompts. The main chat follows the island prompt by
+ * default; turning that off reveals an independent field.
+ */
+function SystemPromptFields({ query }: { query: string }) {
+  const islandSystemPrompt = useSettingsStore(
+    (state) => state.islandSystemPrompt,
+  )
+  const mainSystemPrompt = useSettingsStore((state) => state.mainSystemPrompt)
+  const mainUsesIslandPrompt = useSettingsStore(
+    (state) => state.mainUsesIslandPrompt,
+  )
+  const setIslandSystemPrompt = useSettingsStore(
+    (state) => state.setIslandSystemPrompt,
+  )
+  const setMainSystemPrompt = useSettingsStore(
+    (state) => state.setMainSystemPrompt,
+  )
+  const setMainUsesIslandPrompt = useSettingsStore(
+    (state) => state.setMainUsesIslandPrompt,
+  )
+
+  return (
+    <>
+      <SettingField
+        title="Iris Island system prompt"
+        description="Instructions for replies in the Iris Island overlay: how to address you, the tone you want, and any standing rules."
+        query={query}
+        search={[
+          'ai',
+          'island',
+          'overlay',
+          'system',
+          'prompt',
+          'instructions',
+          'personality',
+          'tone',
+          'custom',
+        ]}
+      >
+        <div className="flex w-full flex-col gap-2">
+          <TextArea
+            aria-label="Iris Island system prompt"
+            className="min-h-32 w-full resize-y text-[13px] leading-5"
+            placeholder={DEFAULT_SYSTEM_PROMPT}
+            rows={6}
+            value={islandSystemPrompt}
+            variant="secondary"
+            onChange={(event) => setIslandSystemPrompt(event.target.value)}
+          />
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[11px] leading-4 text-muted">
+              Reset restores Iris&apos;s built-in instructions.
+            </p>
+            <Button
+              isDisabled={islandSystemPrompt === DEFAULT_SYSTEM_PROMPT}
+              size="sm"
+              variant="ghost"
+              onPress={() => setIslandSystemPrompt(DEFAULT_SYSTEM_PROMPT)}
+            >
+              Reset
+            </Button>
+          </div>
+        </div>
       </SettingField>
 
-      <ModelField query={query} />
-    </SettingsSection>
+      <SettingField
+        title="Main chat system prompt"
+        description="Instructions for the history window's main chat. Keep Same as Iris Island on to share one prompt."
+        query={query}
+        search={[
+          'ai',
+          'main',
+          'chat',
+          'system',
+          'prompt',
+          'instructions',
+          'same',
+          'island',
+          'overlay',
+        ]}
+      >
+        <div className="flex w-full flex-col gap-2">
+          <Switch
+            className="w-full"
+            isSelected={mainUsesIslandPrompt}
+            onChange={setMainUsesIslandPrompt}
+          >
+            <Switch.Content className="flex w-full items-center justify-between gap-3">
+              <Label className="text-xs text-muted">Same as Iris Island</Label>
+              <Switch.Control className="shrink-0">
+                <Switch.Thumb />
+              </Switch.Control>
+            </Switch.Content>
+          </Switch>
+
+          <TextArea
+            aria-label="Main chat system prompt"
+            className="min-h-32 w-full resize-y text-[13px] leading-5"
+            disabled={mainUsesIslandPrompt}
+            placeholder={DEFAULT_SYSTEM_PROMPT}
+            rows={6}
+            value={mainUsesIslandPrompt ? islandSystemPrompt : mainSystemPrompt}
+            variant="secondary"
+            onChange={(event) => setMainSystemPrompt(event.target.value)}
+          />
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[11px] leading-4 text-muted">
+              {mainUsesIslandPrompt
+                ? 'Main chat follows the Iris Island prompt.'
+                : "Reset restores Iris's built-in instructions."}
+            </p>
+            <Button
+              isDisabled={
+                mainUsesIslandPrompt ||
+                mainSystemPrompt === DEFAULT_SYSTEM_PROMPT
+              }
+              size="sm"
+              variant="ghost"
+              onPress={() => setMainSystemPrompt(DEFAULT_SYSTEM_PROMPT)}
+            >
+              Reset
+            </Button>
+          </div>
+        </div>
+      </SettingField>
+    </>
   )
 }
 
@@ -1049,16 +1189,22 @@ function StoragePanel({ query }: { query: string }) {
               theme: 'dark',
               baseUrl: DEFAULT_BASE_URL,
               model: DEFAULT_MODEL,
+              islandSystemPrompt: DEFAULT_SYSTEM_PROMPT,
+              mainSystemPrompt: DEFAULT_SYSTEM_PROMPT,
+              mainUsesIslandPrompt: true,
               apiKeyPresent: false,
               apiKeyHint: null,
               autoSpeak: true,
               autoSendVoice: true,
+              revealResponse: true,
               deepThink: false,
               webSearch: false,
               ttsVoice: DEFAULT_TTS_VOICE,
               openShortcut: DEFAULT_OPEN_SHORTCUT,
+              overlayShortcuts: { ...DEFAULT_OVERLAY_SHORTCUTS },
             })
             localStorage.removeItem(CHAT_STORAGE_KEY)
+            localStorage.removeItem(CHAT_UI_STORAGE_KEY)
             localStorage.removeItem(SETTINGS_STORAGE_KEY)
 
             try {

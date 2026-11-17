@@ -13,6 +13,7 @@ use futures_util::StreamExt;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::core::storage::{Storage, StoredMessage};
 use crate::sys::speech;
 use crate::tauri_commands::chat::{
     ChatAttachmentInput, ChatDonePayload, ChatErrorPayload, ChatMessageInput, ChatTokenPayload,
@@ -21,8 +22,7 @@ use crate::tauri_commands::chat::{
 use crate::utils::event;
 
 const SYSTEM_PROMPT: &str =
-    "You are Iris, a personal desktop assistant. Be direct, warm, and concise. \
-     The user will hear your reply read aloud, so write naturally and avoid unnecessary formatting.";
+    "You are Iris, a personal desktop assistant. Be direct, warm, and concise. The user wants the reply to be like how a human have conversation, so write naturally in summarized form and avoid unnecessary formatting.";
 
 /// Kept in the request whenever the conversation fits in this many characters.
 const CONTEXT_BUDGET_CHARS: usize = 60_000;
@@ -298,23 +298,89 @@ async fn prepare(
     cancelled: &AtomicBool,
 ) -> Result<Option<Prepared>, String> {
     let cache = app.state::<SummaryCache>();
+    let messages = full_history(app, request);
     prepare_with(
         &cache,
         &request.conversation_id,
-        &request.messages,
+        &messages,
+        &request.system_prompt,
         config,
         cancelled,
     )
     .await
 }
 
+/// The UI only loads the newest page of messages, but the agent needs the whole conversation.
+/// The request's tail is authoritative; older database messages are prepended by id.
+fn full_history(app: &AppHandle, request: &SendMessageRequest) -> Vec<ChatMessageInput> {
+    let Some(storage) = app.try_state::<Storage>() else {
+        return request.messages.clone();
+    };
+    let stored = match storage.load_all_messages(&request.conversation_id) {
+        Ok(messages) => messages,
+        Err(error) => {
+            log::warn!("Could not load the full conversation for the agent: {error}");
+            return request.messages.clone();
+        }
+    };
+    if stored.is_empty() {
+        return request.messages.clone();
+    }
+
+    if request.messages.iter().all(|message| message.id.is_empty()) {
+        return request.messages.clone();
+    }
+
+    let first = request.messages.iter().find_map(|message| {
+        if message.id.is_empty() {
+            return None;
+        }
+        stored.iter().position(|stored| stored.id == message.id)
+    });
+    let older = match first {
+        Some(index) => &stored[..index],
+        None => &stored[..],
+    };
+
+    let mut merged = older.iter().map(stored_to_input).collect::<Vec<_>>();
+    merged.extend(request.messages.iter().cloned());
+    merged
+}
+
+fn stored_to_input(message: &StoredMessage) -> ChatMessageInput {
+    ChatMessageInput {
+        id: message.id.clone(),
+        role: message.role.clone(),
+        content: message.content.clone(),
+        attachments: message
+            .attachments
+            .iter()
+            .filter_map(|attachment| {
+                let (_, data) = attachment.data_url.split_once(";base64,")?;
+                Some(ChatAttachmentInput {
+                    media_type: attachment.media_type.clone(),
+                    data: data.to_string(),
+                })
+            })
+            .collect(),
+    }
+}
+
 async fn prepare_with(
     cache: &SummaryCache,
     conversation_id: &str,
     messages: &[ChatMessageInput],
+    system_prompt: &str,
     config: &AgentConfig,
     cancelled: &AtomicBool,
 ) -> Result<Option<Prepared>, String> {
+    // Settings → AI → Prompt; an empty field keeps the built-in Iris instructions.
+    let system_prompt = if system_prompt.trim().is_empty() {
+        SYSTEM_PROMPT
+    } else {
+        system_prompt.trim()
+    };
+
     let turns = messages
         .iter()
         .filter(|message| match message.role.as_str() {
@@ -336,7 +402,7 @@ async fn prepare_with(
     let total_chars = turns.iter().map(|turn| turn.content.len()).sum::<usize>();
     if total_chars <= CONTEXT_BUDGET_CHARS {
         return Ok(Some(Prepared {
-            system: SYSTEM_PROMPT.to_string(),
+            system: system_prompt.to_string(),
             messages: to_api_messages(&turns),
         }));
     }
@@ -352,7 +418,7 @@ async fn prepare_with(
     if split == 0 {
         // A single oversized turn; there is no earlier history to compress.
         return Ok(Some(Prepared {
-            system: SYSTEM_PROMPT.to_string(),
+            system: system_prompt.to_string(),
             messages: to_api_messages(&turns),
         }));
     }
@@ -402,10 +468,10 @@ async fn prepare_with(
     }
 
     let system = if summary.trim().is_empty() {
-        SYSTEM_PROMPT.to_string()
+        system_prompt.to_string()
     } else {
         format!(
-            "{SYSTEM_PROMPT}\n\nEarlier in this conversation (compressed):\n{summary}\n\n\
+            "{system_prompt}\n\nEarlier in this conversation (compressed):\n{summary}\n\n\
              The most recent turns follow verbatim. Continue from them."
         )
     };
@@ -826,6 +892,7 @@ mod tests {
         let mut content = "x".repeat(16_250);
         content.replace_range(..tag.len(), tag);
         ChatMessageInput {
+            id: format!("{role}-{tag}"),
             role: role.to_string(),
             content,
             attachments: Vec::new(),
@@ -922,16 +989,19 @@ mod tests {
     fn only_the_newest_user_message_is_checked_for_links() {
         let messages = vec![
             ChatMessageInput {
+                id: "m1".to_string(),
                 role: "user".to_string(),
                 content: "https://example.com".to_string(),
                 attachments: Vec::new(),
             },
             ChatMessageInput {
+                id: "m2".to_string(),
                 role: "assistant".to_string(),
                 content: "I read it.".to_string(),
                 attachments: Vec::new(),
             },
             ChatMessageInput {
+                id: "m3".to_string(),
                 role: "user".to_string(),
                 content: "And what about this?".to_string(),
                 attachments: Vec::new(),
@@ -940,6 +1010,37 @@ mod tests {
 
         assert_eq!(newest_user_message(&messages), Some("And what about this?"));
         assert!(!newest_user_message(&messages).is_some_and(contains_url));
+    }
+
+    #[tokio::test]
+    async fn uses_the_custom_system_prompt() {
+        let cache = SummaryCache::default();
+        let config = AgentConfig {
+            api_key: "test-key".to_string(),
+            base_url: "http://127.0.0.1".to_string(),
+            model: "deepseek-flash".to_string(),
+            auto_speak: false,
+            deep_think: false,
+            web_search: false,
+            tts_voice: "stella".to_string(),
+            tts_url: String::new(),
+        };
+        let cancelled = AtomicBool::new(false);
+        let messages = vec![turn("user", "hello")];
+
+        let prepared = prepare_with(
+            &cache,
+            "conversation",
+            &messages,
+            "You are a pirate. Answer briefly.",
+            &config,
+            &cancelled,
+        )
+        .await
+        .expect("preparation")
+        .expect("request");
+
+        assert_eq!(prepared.system, "You are a pirate. Answer briefly.");
     }
 
     #[tokio::test]
@@ -964,7 +1065,7 @@ mod tests {
             turn("user", "gamma"),
             turn("assistant", "delta"),
         ];
-        let first = prepare_with(&cache, "conversation", &messages, &config, &cancelled)
+        let first = prepare_with(&cache, "conversation", &messages, "", &config, &cancelled)
             .await
             .expect("first preparation")
             .expect("first request");
@@ -974,7 +1075,7 @@ mod tests {
 
         messages.push(turn("user", "epsilon"));
         messages.push(turn("assistant", "zeta"));
-        let second = prepare_with(&cache, "conversation", &messages, &config, &cancelled)
+        let second = prepare_with(&cache, "conversation", &messages, "", &config, &cancelled)
             .await
             .expect("second preparation")
             .expect("second request");

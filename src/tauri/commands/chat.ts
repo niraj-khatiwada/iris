@@ -28,6 +28,7 @@ export function sendMessage(request: {
   messages: AgentMessage[]
   baseUrl: string
   model: string
+  systemPrompt: string
   autoSpeak: boolean
   deepThink: boolean
   webSearch: boolean

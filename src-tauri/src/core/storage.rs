@@ -40,6 +40,27 @@ pub struct StoredConversation {
     pub messages: Vec<StoredMessage>,
 }
 
+/// Sidebar metadata without messages; the message list fetches pages separately.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredConversationSummary {
+    pub id: String,
+    pub title: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+    #[serde(default)]
+    pub archived_at: Option<i64>,
+}
+
+/// One page of messages, oldest-first, plus the cursor needed to load the page before it.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredMessagePage {
+    pub messages: Vec<StoredMessage>,
+    pub next_cursor: Option<String>,
+    pub has_more: bool,
+}
+
 /// The single credential row Iris uses for every outbound request. The keys are provider-neutral,
 /// so one row covers chat, read-aloud, and voice input.
 const API_KEY_CREDENTIAL: &str = "api-key";
@@ -78,7 +99,7 @@ impl Storage {
         })
     }
 
-    pub fn load(&self) -> Result<Vec<StoredConversation>, String> {
+    pub fn load(&self) -> Result<Vec<StoredConversationSummary>, String> {
         let connection = self
             .connection
             .lock()
@@ -92,26 +113,245 @@ impl Storage {
             )
             .map_err(|error| error.to_string())?;
 
-        let mut conversations = statement
+        let conversations = statement
             .query_map([], |row| {
-                Ok(StoredConversation {
+                Ok(StoredConversationSummary {
                     id: row.get(0)?,
                     title: row.get(1)?,
                     created_at: row.get(2)?,
                     updated_at: row.get(3)?,
                     archived_at: row.get(4)?,
-                    messages: Vec::new(),
                 })
             })
             .map_err(|error| error.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| error.to_string())?;
 
-        for conversation in &mut conversations {
-            conversation.messages = messages_for(&connection, &conversation.id)?;
+        Ok(conversations)
+    }
+
+    /// Loads one page of messages, oldest first. `before` is the cursor returned by the previous
+    /// page; the initial page passes `None` and gets the newest messages.
+    pub fn load_message_page(
+        &self,
+        conversation_id: &str,
+        before: Option<&str>,
+        limit: usize,
+    ) -> Result<StoredMessagePage, String> {
+        let limit = limit.clamp(1, 500) as i64;
+        let connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        let mut rows: Vec<(StoredMessage, i64)>;
+        if let Some(cursor) = before {
+            let (created_at, rowid) = parse_cursor(cursor)?;
+            let mut statement = connection
+                .prepare(
+                    "SELECT rowid, id, role, content, created_at, status, error, attachments
+                     FROM messages
+                     WHERE conversation_id = ?1
+                       AND (created_at < ?2 OR (created_at = ?2 AND rowid < ?3))
+                     ORDER BY created_at DESC, rowid DESC
+                     LIMIT ?4",
+                )
+                .map_err(|error| error.to_string())?;
+            rows = statement
+                .query_map(
+                    params![conversation_id, created_at, rowid, limit + 1],
+                    row_from_page,
+                )
+                .map_err(|error| error.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| error.to_string())?;
+        } else {
+            let mut statement = connection
+                .prepare(
+                    "SELECT rowid, id, role, content, created_at, status, error, attachments
+                     FROM messages
+                     WHERE conversation_id = ?1
+                     ORDER BY created_at DESC, rowid DESC
+                     LIMIT ?2",
+                )
+                .map_err(|error| error.to_string())?;
+            rows = statement
+                .query_map(params![conversation_id, limit + 1], row_from_page)
+                .map_err(|error| error.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| error.to_string())?;
         }
 
-        Ok(conversations)
+        let has_more = rows.len() as i64 > limit;
+        rows.truncate(limit as usize);
+        let next_cursor = if has_more {
+            rows.last()
+                .map(|(message, rowid)| format!("{}:{}", message.created_at, rowid))
+        } else {
+            None
+        };
+        rows.reverse();
+
+        Ok(StoredMessagePage {
+            messages: rows.into_iter().map(|(message, _)| message).collect(),
+            next_cursor,
+            has_more,
+        })
+    }
+
+    /// Every message in a conversation, for the agent's full context while the UI is paginated.
+    pub fn load_all_messages(&self, conversation_id: &str) -> Result<Vec<StoredMessage>, String> {
+        let connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        messages_for(&connection, conversation_id)
+    }
+
+    /// Upserts one conversation's metadata without touching its messages.
+    pub fn save_summary(&self, summary: &StoredConversationSummary) -> Result<(), String> {
+        self.connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .execute(
+                "INSERT INTO conversations (id, title, created_at, updated_at, archived_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(id) DO UPDATE SET
+                    title = excluded.title,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at,
+                    archived_at = excluded.archived_at",
+                params![
+                    summary.id,
+                    summary.title,
+                    summary.created_at,
+                    summary.updated_at,
+                    summary.archived_at
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    /// Upserts one message without deleting messages that the UI has not loaded yet.
+    pub fn save_message(
+        &self,
+        conversation_id: &str,
+        message: &StoredMessage,
+    ) -> Result<(), String> {
+        let attachments = attachments_json(&message.attachments)?;
+        self.connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .execute(
+                "INSERT INTO messages
+                    (id, conversation_id, role, content, created_at, status, error, attachments)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT(id) DO UPDATE SET
+                    conversation_id = excluded.conversation_id,
+                    role = excluded.role,
+                    content = excluded.content,
+                    created_at = excluded.created_at,
+                    status = excluded.status,
+                    error = excluded.error,
+                    attachments = excluded.attachments",
+                params![
+                    message.id,
+                    conversation_id,
+                    message.role,
+                    message.content,
+                    message.created_at,
+                    message.status,
+                    message.error,
+                    attachments
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    /// Moves every message to another conversation id, inserting that conversation row when
+    /// needed. Quick-chat archiving needs this because the UI only holds the newest page.
+    pub fn move_conversation_messages(&self, from: &str, to: &str) -> Result<(), String> {
+        let mut connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "INSERT OR IGNORE INTO conversations (id, title, created_at, updated_at, archived_at)
+                 SELECT ?2, title, created_at, ?3, ?3 FROM conversations WHERE id = ?1",
+                params![from, to, now_ms()],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "UPDATE messages SET conversation_id = ?2 WHERE conversation_id = ?1",
+                params![from, to],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction.commit().map_err(|error| error.to_string())
+    }
+
+    /// Restores the previous quick conversation: optionally retires the current quick, moves the
+    /// previous conversation's messages onto the quick id, then removes the previous row.
+    pub fn restore_quick_conversation(
+        &self,
+        quick: &str,
+        previous: &str,
+        retired: Option<&str>,
+    ) -> Result<(), String> {
+        let mut connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        if let Some(retired) = retired {
+            transaction
+                .execute(
+                    "INSERT OR IGNORE INTO conversations (id, title, created_at, updated_at, archived_at)
+                     SELECT ?2, title, created_at, ?3, ?3 FROM conversations WHERE id = ?1",
+                    params![quick, retired, now_ms()],
+                )
+                .map_err(|error| error.to_string())?;
+            transaction
+                .execute(
+                    "UPDATE messages SET conversation_id = ?2 WHERE conversation_id = ?1",
+                    params![quick, retired],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        transaction
+            .execute(
+                "UPDATE messages SET conversation_id = ?2 WHERE conversation_id = ?1",
+                params![previous, quick],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute("DELETE FROM conversations WHERE id = ?1", params![previous])
+            .map_err(|error| error.to_string())?;
+        transaction.commit().map_err(|error| error.to_string())
+    }
+
+    pub fn delete_messages(&self, ids: &[String]) -> Result<(), String> {
+        let mut connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        for id in ids {
+            transaction
+                .execute("DELETE FROM messages WHERE id = ?1", params![id])
+                .map_err(|error| error.to_string())?;
+        }
+        transaction.commit().map_err(|error| error.to_string())
     }
 
     pub fn save(&self, conversation: &StoredConversation) -> Result<(), String> {
@@ -252,6 +492,35 @@ fn now_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as i64)
         .unwrap_or_default()
+}
+
+fn parse_cursor(cursor: &str) -> Result<(i64, i64), String> {
+    let (created_at, rowid) = cursor
+        .split_once(':')
+        .ok_or_else(|| "Invalid message cursor.".to_string())?;
+    let created_at = created_at
+        .parse::<i64>()
+        .map_err(|_| "Invalid message cursor.".to_string())?;
+    let rowid = rowid
+        .parse::<i64>()
+        .map_err(|_| "Invalid message cursor.".to_string())?;
+    Ok((created_at, rowid))
+}
+
+fn row_from_page(row: &rusqlite::Row<'_>) -> rusqlite::Result<(StoredMessage, i64)> {
+    let rowid = row.get(0)?;
+    Ok((
+        StoredMessage {
+            id: row.get(1)?,
+            role: row.get(2)?,
+            content: row.get(3)?,
+            created_at: row.get(4)?,
+            status: row.get(5)?,
+            error: row.get(6)?,
+            attachments: attachments_from(row.get(7)?),
+        },
+        rowid,
+    ))
 }
 
 fn attachments_json(attachments: &[StoredAttachment]) -> Result<Option<String>, String> {
@@ -395,6 +664,126 @@ mod tests {
         storage.remove_api_key().expect("remove");
         assert!(!storage.has_api_key());
         assert_eq!(storage.api_key().expect("read"), None);
+    }
+
+    fn message(id: &str, created_at: i64, content: &str) -> super::StoredMessage {
+        super::StoredMessage {
+            id: id.to_string(),
+            role: "user".to_string(),
+            content: content.to_string(),
+            created_at,
+            status: "complete".to_string(),
+            error: None,
+            attachments: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn message_pages_and_incremental_saves_preserve_history() {
+        let storage = storage();
+        let conversation = super::StoredConversation {
+            id: "c1".to_string(),
+            title: "Talk".to_string(),
+            created_at: 0,
+            updated_at: 5,
+            archived_at: None,
+            messages: (0..5)
+                .map(|index| message(&format!("m{index}"), index, &format!("m{index}")))
+                .collect(),
+        };
+        storage.save(&conversation).expect("save conversation");
+
+        let summaries = storage.load().expect("summaries");
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].title, "Talk");
+
+        let newest = storage
+            .load_message_page("c1", None, 2)
+            .expect("newest page");
+        assert_eq!(
+            newest
+                .messages
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["m3", "m4"]
+        );
+        assert!(newest.has_more);
+
+        let older = storage
+            .load_message_page("c1", newest.next_cursor.as_deref(), 2)
+            .expect("older page");
+        assert_eq!(
+            older
+                .messages
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["m1", "m2"]
+        );
+        assert!(older.has_more);
+
+        let oldest = storage
+            .load_message_page("c1", older.next_cursor.as_deref(), 2)
+            .expect("oldest page");
+        assert_eq!(oldest.messages.len(), 1);
+        assert_eq!(oldest.messages[0].id, "m0");
+        assert!(!oldest.has_more);
+        assert!(oldest.next_cursor.is_none());
+
+        // A single message update must not delete the unloaded pages.
+        storage
+            .save_message("c1", &message("m1", 1, "edited"))
+            .expect("update one message");
+        let all = storage.load_all_messages("c1").expect("all messages");
+        assert_eq!(all.len(), 5);
+        assert_eq!(all[1].content, "edited");
+
+        storage
+            .delete_messages(&["m2".to_string()])
+            .expect("delete one message");
+        assert_eq!(
+            storage.load_all_messages("c1").expect("after delete").len(),
+            4
+        );
+    }
+
+    #[test]
+    fn messages_can_move_between_quick_and_archived_conversations() {
+        let storage = storage();
+        let conversation = super::StoredConversation {
+            id: "quick".to_string(),
+            title: "Quick".to_string(),
+            created_at: 0,
+            updated_at: 1,
+            archived_at: None,
+            messages: vec![message("m1", 1, "hello")],
+        };
+        storage.save(&conversation).expect("save");
+
+        storage
+            .move_conversation_messages("quick", "retired")
+            .expect("archive quick");
+        assert!(storage
+            .load_all_messages("quick")
+            .expect("quick")
+            .is_empty());
+        assert_eq!(
+            storage.load_all_messages("retired").expect("retired").len(),
+            1
+        );
+
+        storage
+            .restore_quick_conversation("quick", "retired", None)
+            .expect("restore previous");
+        assert_eq!(
+            storage.load_all_messages("quick").expect("restored").len(),
+            1
+        );
+        assert!(storage
+            .load_all_messages("retired")
+            .expect("gone")
+            .is_empty());
     }
 
     #[test]

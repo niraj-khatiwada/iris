@@ -6,6 +6,7 @@ import {
   DEFAULT_MODEL,
   DEFAULT_OPEN_SHORTCUT,
   DEFAULT_OVERLAY_SHORTCUTS,
+  DEFAULT_SYSTEM_PROMPT,
   DEFAULT_TTS_VOICE,
   SETTINGS_STORAGE_KEY,
 } from '@/constants'
@@ -20,12 +21,20 @@ type LegacySettings = {
   apiFormat?: unknown
   ttsUrl?: unknown
   asrUrl?: unknown
+  /** The single prompt from before island and main chat had separate instructions. */
+  systemPrompt?: unknown
 }
 
 /**
  * Rebuilds the shortcut map from whatever was persisted. Older builds stored a different set of
  * actions, so a missing key must fall back to its default instead of reaching `formatShortcut`.
  */
+function normalizePrompt(saved: unknown): string {
+  return typeof saved === 'string' && saved.trim().length > 0
+    ? saved
+    : DEFAULT_SYSTEM_PROMPT
+}
+
 function normalizeOverlayShortcuts(saved: unknown): OverlayShortcuts {
   const value = (saved ?? {}) as Partial<Record<string, unknown>>
   const shortcuts = { ...DEFAULT_OVERLAY_SHORTCUTS } as OverlayShortcuts
@@ -63,6 +72,12 @@ type SettingsState = {
   /** DeepSeek API origin. Defaults to the official API; set a proxy if one is required. */
   baseUrl: string
   model: string
+  /** Prompt used by the Iris Island (quick overlay) chat. */
+  islandSystemPrompt: string
+  /** Prompt used by the main history chat. */
+  mainSystemPrompt: string
+  /** Reuse the island prompt in the main chat; on by default. */
+  mainUsesIslandPrompt: boolean
   /**
    * A key is stored. The source of truth is `has_api_key`; this cached flag keeps the saved state
    * instant on the first paint.
@@ -97,6 +112,9 @@ type SettingsState = {
   markApiKeyChanged: () => void
   setBaseUrl: (baseUrl: string) => void
   setModel: (model: string) => void
+  setIslandSystemPrompt: (islandSystemPrompt: string) => void
+  setMainSystemPrompt: (mainSystemPrompt: string) => void
+  setMainUsesIslandPrompt: (mainUsesIslandPrompt: boolean) => void
   setAutoSpeak: (autoSpeak: boolean) => void
   setRevealResponse: (revealResponse: boolean) => void
   setAutoSendVoice: (autoSendVoice: boolean) => void
@@ -113,6 +131,9 @@ export const useSettingsStore = create<SettingsState>()(
       theme: 'dark',
       baseUrl: DEFAULT_BASE_URL,
       model: DEFAULT_MODEL,
+      islandSystemPrompt: DEFAULT_SYSTEM_PROMPT,
+      mainSystemPrompt: DEFAULT_SYSTEM_PROMPT,
+      mainUsesIslandPrompt: true,
       apiKeyPresent: false,
       apiKeyHint: null,
       apiKeyRevision: 0,
@@ -132,6 +153,11 @@ export const useSettingsStore = create<SettingsState>()(
         set((state) => ({ apiKeyRevision: state.apiKeyRevision + 1 })),
       setBaseUrl: (baseUrl) => set({ baseUrl }),
       setModel: (model) => set({ model }),
+      setIslandSystemPrompt: (islandSystemPrompt) =>
+        set({ islandSystemPrompt }),
+      setMainSystemPrompt: (mainSystemPrompt) => set({ mainSystemPrompt }),
+      setMainUsesIslandPrompt: (mainUsesIslandPrompt) =>
+        set({ mainUsesIslandPrompt }),
       setAutoSpeak: (autoSpeak) => set({ autoSpeak }),
       setRevealResponse: (revealResponse) => set({ revealResponse }),
       setAutoSendVoice: (autoSendVoice) => set({ autoSendVoice }),
@@ -155,11 +181,17 @@ export const useSettingsStore = create<SettingsState>()(
           apiFormat: _legacyFormat,
           ttsUrl: _legacyTtsUrl,
           asrUrl: _legacyAsrUrl,
+          systemPrompt: legacySystemPrompt,
           ...rest
         } = saved
         return {
           ...current,
           ...rest,
+          islandSystemPrompt: normalizePrompt(
+            saved.islandSystemPrompt ?? legacySystemPrompt,
+          ),
+          mainSystemPrompt: normalizePrompt(saved.mainSystemPrompt),
+          mainUsesIslandPrompt: saved.mainUsesIslandPrompt !== false,
           overlayShortcuts: normalizeOverlayShortcuts(saved.overlayShortcuts),
         }
       },
@@ -171,6 +203,7 @@ export const useSettingsStore = create<SettingsState>()(
           apiFormat: _legacyFormat,
           ttsUrl: _legacyTtsUrl,
           asrUrl: _legacyAsrUrl,
+          systemPrompt: legacySystemPrompt,
           ...rest
         } = saved
         const openShortcut =
@@ -200,6 +233,11 @@ export const useSettingsStore = create<SettingsState>()(
           webSearch: rest.webSearch ?? false,
           ttsVoice: rest.ttsVoice === 'tide' ? 'tide' : DEFAULT_TTS_VOICE,
           openShortcut,
+          islandSystemPrompt: normalizePrompt(
+            rest.islandSystemPrompt ?? legacySystemPrompt,
+          ),
+          mainSystemPrompt: normalizePrompt(rest.mainSystemPrompt),
+          mainUsesIslandPrompt: rest.mainUsesIslandPrompt !== false,
           overlayShortcuts: normalizeOverlayShortcuts(rest.overlayShortcuts),
         } as SettingsState
       },

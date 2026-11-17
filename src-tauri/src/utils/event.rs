@@ -33,3 +33,6 @@ pub const OVERLAY_FOCUSED: &str = "overlay:focused";
 
 /// The overlay is being dragged; the canvas draws the snap guides at these positions.
 pub const OVERLAY_GUIDES: &str = "overlay:guides";
+
+/// Every stored conversation was cleared; each window drops its local chat state too.
+pub const CHAT_CLEARED: &str = "chat:cleared";

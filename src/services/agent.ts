@@ -15,6 +15,7 @@ export type AgentRunOptions = {
   messages: AgentMessage[]
   baseUrl: string
   model: string
+  systemPrompt: string
   autoSpeak: boolean
   deepThink: boolean
   webSearch: boolean
@@ -102,6 +103,7 @@ export function startAgentRun(options: AgentRunOptions): string {
           messages: options.messages,
           baseUrl: options.baseUrl,
           model: options.model,
+          systemPrompt: options.systemPrompt,
           autoSpeak: options.autoSpeak,
           deepThink: options.deepThink,
           webSearch: options.webSearch,

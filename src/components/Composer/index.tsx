@@ -17,6 +17,11 @@ function Composer() {
   useSpeechPlayback()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const sendMessage = useChatStore((state) => state.sendMessage)
+  const hydrated = useChatStore((state) => state.hydrated)
+  const activeConversation = useChatStore((state) =>
+    state.conversations.find((item) => item.id === state.activeConversationId),
+  )
+  const conversationReady = activeConversation?.messagesLoaded ?? true
   const stopStreaming = useChatStore((state) => state.stopStreaming)
   const streaming = useChatStore((state) => Boolean(state.streamingRequestId))
   const focusToken = useUIStore((state) => state.composerFocusToken)
@@ -50,7 +55,12 @@ function Composer() {
 
   const submit = () => {
     const text = value.trim()
-    if ((!text && images.attachments.length === 0) || streaming) {
+    if (
+      (!text && images.attachments.length === 0) ||
+      streaming ||
+      !hydrated ||
+      !conversationReady
+    ) {
       return
     }
 
@@ -134,7 +144,11 @@ function Composer() {
               </Tooltip>
             ) : (
               <SendButton
-                isDisabled={!value.trim() && images.attachments.length === 0}
+                isDisabled={
+                  !hydrated ||
+                  !conversationReady ||
+                  (!value.trim() && images.attachments.length === 0)
+                }
                 onPress={submit}
               />
             )}

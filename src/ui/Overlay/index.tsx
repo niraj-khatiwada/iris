@@ -37,6 +37,7 @@ import {
   SENDING_TICK_MS,
 } from '@/constants/blob'
 import { useChatStorage } from '@/hooks/useChatStorage'
+import { useConversationHistory } from '@/hooks/useConversationHistory'
 import { useImageAttachments } from '@/hooks/useImageAttachments'
 import { useOverlayWindow } from '@/hooks/useOverlayWindow'
 import { useSettingsSync } from '@/hooks/useSettingsSync'
@@ -95,6 +96,12 @@ function Overlay() {
   const ensureQuickConversation = useChatStore(
     (state) => state.ensureQuickConversation,
   )
+  const hydrated = useChatStore((state) => state.hydrated)
+  const hasQuickConversation = useChatStore((state) =>
+    state.conversations.some(
+      (conversation) => conversation.id === QUICK_CONVERSATION_ID,
+    ),
+  )
   const resetQuickConversation = useChatStore(
     (state) => state.resetQuickConversation,
   )
@@ -107,6 +114,8 @@ function Overlay() {
   const conversation = useChatStore((state) =>
     state.conversations.find((item) => item.id === QUICK_CONVERSATION_ID),
   )
+  useConversationHistory(QUICK_CONVERSATION_ID)
+  const quickLoaded = conversation?.messagesLoaded ?? false
   const selectConversation = useChatStore((state) => state.selectConversation)
   const streaming = useChatStore(
     (state) => state.streamingConversationId === QUICK_CONVERSATION_ID,
@@ -221,8 +230,13 @@ function Overlay() {
   }, [clearImages, inputRef, resetQuickConversation, revealResponse])
 
   useEffect(() => {
-    ensureQuickConversation()
-  }, [ensureQuickConversation])
+    // Wait for SQLite before creating the quick chat, otherwise the empty local one could win
+    // the hydration merge and replace a stored conversation. The conversation check also
+    // recreates it after Clear History.
+    if (hydrated && !hasQuickConversation) {
+      ensureQuickConversation()
+    }
+  }, [ensureQuickConversation, hasQuickConversation, hydrated])
 
   useEffect(() => {
     if (!morphing) {
@@ -546,7 +560,12 @@ function Overlay() {
 
   const submit = () => {
     const text = value.trim()
-    if ((!text && images.attachments.length === 0) || streaming) {
+    if (
+      (!text && images.attachments.length === 0) ||
+      streaming ||
+      !hydrated ||
+      !quickLoaded
+    ) {
       return
     }
 
@@ -1035,6 +1054,8 @@ function Overlay() {
                         <SendButton
                           isDisabled={
                             streaming ||
+                            !hydrated ||
+                            !quickLoaded ||
                             (!value.trim() && images.attachments.length === 0)
                           }
                           onPress={submit}

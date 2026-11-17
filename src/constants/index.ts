@@ -36,6 +36,9 @@ export const APP_NAME = 'Iris'
 /** DeepSeek's official API. A proxy can be set in Settings when it still speaks DeepSeek. */
 export const DEFAULT_BASE_URL = 'https://api.deepseek.com'
 export const DEFAULT_MODEL = 'deepseek-flash'
+/** Default instructions for every reply; editable in Settings → AI → Prompt. */
+export const DEFAULT_SYSTEM_PROMPT =
+  'You are Iris, a personal desktop assistant. Be direct, warm, and concise. The user wants the reply to be like how a human have conversation, so write naturally in summarized form and avoid unnecessary formatting.'
 /** DeepSeek-owned tool endpoints, always derived from the configured base URL. */
 export const TTS_PATH = '/v1/tools/tts'
 export const ASR_PATH = '/v1/tools/asr'
@@ -49,6 +52,8 @@ export const DEFAULT_USER_NAME = 'You'
 export const QUICK_CONVERSATION_ID = 'iris:quick'
 export const QUICK_CONVERSATION_TITLE = 'Quick chat'
 export const CHAT_STORAGE_KEY = 'iris.chat'
+/** Only the selected conversation ids; conversations themselves live in SQLite. */
+export const CHAT_UI_STORAGE_KEY = 'iris.chat.ui'
 export const SETTINGS_STORAGE_KEY = 'iris.settings'
 /** In-app shortcuts recorded in Settings; stopping read-aloud also works in the history window. */
 export const DEFAULT_OVERLAY_SHORTCUTS = {

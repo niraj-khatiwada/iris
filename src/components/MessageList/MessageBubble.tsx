@@ -1,7 +1,7 @@
 import { Button, Tooltip } from '@heroui/react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Check, Pencil, RotateCcw, X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 
 import CopyButton from '@/components/CopyButton'
 import Markdown from '@/components/Markdown'
@@ -23,7 +23,7 @@ type MessageBubbleProps = {
   disabled: boolean
 }
 
-function MessageBubble({
+const MessageBubble = memo(function MessageBubble({
   message,
   conversationId,
   canEdit,
@@ -257,7 +257,7 @@ function MessageBubble({
       </div>
     </article>
   )
-}
+})
 
 function TypingDots() {
   return (

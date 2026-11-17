@@ -5,7 +5,6 @@ import MessageList from '@/components/MessageList'
 import SettingsDialog from '@/components/SettingsDialog'
 import Sidebar from '@/components/Sidebar'
 import { useChatStorage } from '@/hooks/useChatStorage'
-import { useHistorySync } from '@/hooks/useHistorySync'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 import { useSettingsSync } from '@/hooks/useSettingsSync'
 import { useShortcutSync } from '@/hooks/useShortcutSync'
@@ -21,7 +20,6 @@ function ChatWorkspace() {
   useThemeSync()
   useKeyboardShortcuts()
   useStopSpeakingShortcut()
-  useHistorySync()
   useChatStorage()
   useSettingsSync()
   useShortcutSync()

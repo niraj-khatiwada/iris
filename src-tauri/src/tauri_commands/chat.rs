@@ -21,6 +21,9 @@ pub struct ChatAttachmentInput {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatMessageInput {
+    /// The client message id, used to merge a paginated request tail with the stored history.
+    #[serde(default)]
+    pub id: String,
     pub role: String,
     pub content: String,
     #[serde(default)]
@@ -36,6 +39,9 @@ pub struct SendMessageRequest {
     pub messages: Vec<ChatMessageInput>,
     pub base_url: String,
     pub model: String,
+    /// Instructions from Settings → AI → Prompt. Empty keeps the built-in default.
+    #[serde(default)]
+    pub system_prompt: String,
     pub auto_speak: bool,
     /// Enables DeepSeek's DeepThink before the reply.
     #[serde(default)]
@@ -299,7 +305,10 @@ mod tests {
 
     #[test]
     fn titles_are_single_line_without_quotes_or_final_punctuation() {
-        assert_eq!(normalize_title("  \"James Bond reboot.\"  "), "James Bond reboot");
+        assert_eq!(
+            normalize_title("  \"James Bond reboot.\"  "),
+            "James Bond reboot"
+        );
         assert_eq!(
             normalize_title("Title: A plan for the day"),
             "A plan for the day"
