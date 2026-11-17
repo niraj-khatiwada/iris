@@ -36,12 +36,18 @@ pub fn show_main_window(app: AppHandle) {
 }
 
 #[tauri::command]
-pub fn restart_app(app: AppHandle) {
-    app.restart();
+pub fn reload_app_windows(app: AppHandle) {
+    // Reload both webviews so every Zustand store and the localStorage cache start clean. The
+    // process (and the menu bar item) stays alive; a full restart raced the single-instance plugin.
+    for label in ["main", "overlay"] {
+        if let Some(window) = app.get_webview_window(label) {
+            let _ = window.eval("window.location.reload()");
+        }
+    }
 }
 
 /// Wipes everything Iris owns on this Mac: conversations, compressed summaries, speech audio,
-/// and the pre-rename data copies. The webview clears its own settings and then restarts Iris.
+/// and the pre-rename data copies. The webview clears its own settings and then reloads.
 #[tauri::command]
 pub fn reset_app_data(app: AppHandle, storage: State<'_, Storage>) -> Result<(), String> {
     crate::sys::speech::stop(&app);
@@ -50,7 +56,9 @@ pub fn reset_app_data(app: AppHandle, storage: State<'_, Storage>) -> Result<(),
         cache.clear();
     }
 
-    storage.clear()?;
+    // Drop the schema and immediately rebuild an empty one, so the backend is usable during the
+    // short window before the webviews reload.
+    storage.reset_schema()?;
 
     if let Ok(directory) = app.path().app_cache_dir() {
         if let Ok(entries) = std::fs::read_dir(&directory) {
@@ -69,7 +77,8 @@ pub fn reset_app_data(app: AppHandle, storage: State<'_, Storage>) -> Result<(),
 
     crate::core::legacy::remove_legacy_data();
     crate::sys::overlay::reset_position(&app);
-    storage.clear_credentials()?;
+    // The schema reset above dropped the credential table, which takes the API key with it, so no
+    // separate clear is needed here.
 
     Ok(())
 }

@@ -1,6 +1,10 @@
 /// DeepSeek-owned API paths. The UI only configures the origin, so every feature stays on the same
 /// host and a proxy only has to forward DeepSeek's own routes.
-pub const MESSAGES_PATH: &str = "/v1/messages";
+///
+/// The Anthropic-compatible Messages API lives under `/anthropic`: the SDK base URL is
+/// `https://api.deepseek.com/anthropic`, and it appends `/v1/messages`. Posting to the root
+/// `/v1/messages` returns 404 even though `/v1/models` works.
+pub const MESSAGES_PATH: &str = "/anthropic/v1/messages";
 pub const MODELS_PATH: &str = "/v1/models";
 pub const TTS_PATH: &str = "/v1/tools/tts";
 pub const ASR_PATH: &str = "/v1/tools/asr";
@@ -19,6 +23,10 @@ mod tests {
         assert_eq!(
             url("https://api.deepseek.com", "/v1/models"),
             "https://api.deepseek.com/v1/models"
+        );
+        assert_eq!(
+            url("https://api.deepseek.com", "/anthropic/v1/messages"),
+            "https://api.deepseek.com/anthropic/v1/messages"
         );
         assert_eq!(
             url("https://proxy.example.com/", "/v1/tools/tts"),

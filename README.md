@@ -159,8 +159,8 @@ activities and wrappers in `src/components/dynamic-island` instead of editing th
 
 1. `src/stores/chatStore.ts` adds the user message and an empty assistant message.
 2. `src/services/agent.ts` starts a run and subscribes to `chat:token` / `chat:done` / `chat:error`.
-3. The Rust command `send_message` calls DeepSeek's Messages API (`/v1/messages`) and streams the
-   response.
+3. The Rust command `send_message` calls DeepSeek's Anthropic-compatible Messages API
+   (`/anthropic/v1/messages`) and streams the response.
 4. Tokens are emitted back to the webview and appended to the active message, which stays hidden
    in the overlay. `cancel_generation` stops the stream.
 5. On completion, the backend automatically sends the reply to DeepSeek TTS
@@ -174,8 +174,9 @@ change without touching the UI.
 
 `src-tauri/src/core/agent.rs` is the DeepSeek integration point. Iris supports only DeepSeek: the
 base URL defaults to `https://api.deepseek.com` and can point at a DeepSeek-compatible proxy, but
-there is no provider picker or wire-format switch. `core/endpoints.rs` derives `/v1/messages`,
-`/v1/models`, `/v1/tools/tts`, and `/v1/tools/asr` from that single origin.
+there is no provider picker or wire-format switch. `core/endpoints.rs` derives
+`/anthropic/v1/messages`, `/v1/models`, `/v1/tools/tts`, and `/v1/tools/asr` from that single
+origin. The Messages route is under `/anthropic`; the root `/v1/messages` returns 404.
 
 `src-tauri/src/sys/speech.rs` owns automatic read-aloud. It calls `/v1/tools/tts` with the selected
 voice, wraps the raw PCM in a WAV, and plays it with macOS `afplay`. A new message, Cancel, New
@@ -206,8 +207,8 @@ feature-parity plan, not just a custom URL.
   overlay-only and never register with the OS.
 - Settings → Storage has two separate actions: **Clear** deletes only conversations, while
   **Reset Iris** wipes conversations, compressed summaries, speech audio, settings, the API key,
-  and the pre-rename data copies, then restarts the app. The SQLite file is vacuumed and its WAL
-  truncated so cleared messages are not recoverable from the database files.
+  and the pre-rename data copies, then reloads both webviews. The SQLite file is vacuumed and its
+  WAL truncated so cleared messages are not recoverable from the database files.
 - The quick overlay can be dragged by its header or input-row background. Its frame is saved to
   `overlay-position.json` in the app data directory, restored on launch, and cleared by Reset Iris.
   The bottom edge stays fixed while the panel grows or shrinks.

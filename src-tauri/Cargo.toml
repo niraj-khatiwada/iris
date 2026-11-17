@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "A personal, always-available desktop AI assistant for macOS."
 authors = ["Niraj"]
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.80"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -25,6 +25,11 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "str
 futures-util = "0.3"
 base64 = "0.22"
 rusqlite = { version = "0.32", features = ["bundled"] }
+# Pinned to 1.x: 2.x requires rusqlite >= 0.34, and a second rusqlite would make its
+# `Connection` type incompatible with ours. `from-directory` loads migrations/*/up.sql.
+rusqlite_migration = { version = "1.3.1", features = ["from-directory"] }
+# Compiles the migrations directory into the binary so no .sql file ships alongside the app.
+include_dir = "0.7"
 tauri-plugin-global-shortcut = "2.4.1"
 
 [profile.release]

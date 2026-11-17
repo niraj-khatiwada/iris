@@ -58,12 +58,20 @@ impl Storage {
         std::fs::create_dir_all(&directory)
             .map_err(|error| format!("Could not create the app data directory: {error}"))?;
 
-        let connection = Connection::open(directory.join("iris.db"))
+        let mut connection = Connection::open(directory.join("iris.db"))
             .map_err(|error| format!("Could not open the Iris database: {error}"))?;
         connection
             .busy_timeout(Duration::from_secs(5))
             .map_err(|error| error.to_string())?;
-        prepare(&connection)?;
+        // WAL is a property of the file; foreign keys are a property of each connection, so the
+        // key check is re-enabled after the migrations have run.
+        connection
+            .execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = OFF;")
+            .map_err(|error| format!("Could not prepare the Iris database: {error}"))?;
+        crate::core::migrations::prepare(&mut connection)?;
+        connection
+            .execute_batch("PRAGMA foreign_keys = ON;")
+            .map_err(|error| format!("Could not prepare the Iris database: {error}"))?;
 
         Ok(Self {
             connection: Mutex::new(connection),
@@ -146,14 +154,29 @@ impl Storage {
             .connection
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // Messages cascade from their conversation when foreign keys are on. Deleting both
+        // explicitly keeps Clear correct even on a connection where the pragma was never applied.
         connection
-            .execute("DELETE FROM conversations", [])
+            .execute_batch("DELETE FROM messages; DELETE FROM conversations;")
             .map_err(|error| error.to_string())?;
         // Rebuild the file and drop old WAL frames so a cleared conversation is not recoverable.
         connection
             .execute_batch("VACUUM; PRAGMA wal_checkpoint(TRUNCATE);")
             .map_err(|error| error.to_string())?;
         Ok(())
+    }
+
+    /// Drops the schema and immediately rebuilds an empty one from the migration files, so the
+    /// running app remains usable and the next window reload starts fresh. Reset Iris uses this
+    /// instead of `clear`, because a cleared-but-still-versioned file would look migrated while
+    /// missing whatever a later migration adds.
+    pub fn reset_schema(&self) -> Result<(), String> {
+        let mut connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        crate::core::migrations::reset(&connection)?;
+        crate::core::migrations::upgrade(&mut connection)
     }
 
     /// Reads the stored API key. `Ok(None)` means no key has been saved yet.
@@ -222,92 +245,13 @@ impl Storage {
             .map_err(|error| format!("Could not remove the API key: {error}"))?;
         Ok(())
     }
-
-    /// Drops every credential row. Used by Reset Iris; Clear conversations leaves the key alone.
-    pub fn clear_credentials(&self) -> Result<(), String> {
-        self.connection
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .execute("DELETE FROM credential", [])
-            .map_err(|error| error.to_string())?;
-        Ok(())
-    }
 }
 
-/// Creates the current schema and upgrades databases written by older builds.
-fn prepare(connection: &Connection) -> Result<(), String> {
-    connection
-        .execute_batch(
-            "
-            PRAGMA journal_mode = WAL;
-            PRAGMA foreign_keys = ON;
-
-            CREATE TABLE IF NOT EXISTS conversations (
-                id TEXT PRIMARY KEY,
-                title TEXT NOT NULL,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL,
-                archived_at INTEGER
-            );
-
-            CREATE TABLE IF NOT EXISTS messages (
-                id TEXT PRIMARY KEY,
-                conversation_id TEXT NOT NULL
-                    REFERENCES conversations(id) ON DELETE CASCADE,
-                role TEXT NOT NULL,
-                content TEXT NOT NULL,
-                created_at INTEGER NOT NULL,
-                status TEXT NOT NULL,
-                error TEXT,
-                attachments TEXT
-            );
-
-            CREATE INDEX IF NOT EXISTS messages_by_conversation
-                ON messages(conversation_id, created_at);
-
-            CREATE TABLE IF NOT EXISTS credential (
-                name TEXT PRIMARY KEY,
-                api_key TEXT NOT NULL,
-                updated_at INTEGER NOT NULL
-            );
-            ",
-        )
-        .map_err(|error| format!("Could not prepare the Iris database: {error}"))?;
-
-    // Older databases predate archiving and image attachments.
-    if !has_column(connection, "conversations", "archived_at")? {
-        connection
-            .execute(
-                "ALTER TABLE conversations ADD COLUMN archived_at INTEGER",
-                [],
-            )
-            .map_err(|error| format!("Could not add conversation archiving: {error}"))?;
-    }
-    if !has_column(connection, "messages", "attachments")? {
-        connection
-            .execute("ALTER TABLE messages ADD COLUMN attachments TEXT", [])
-            .map_err(|error| format!("Could not add message attachments: {error}"))?;
-    }
-
-    Ok(())
-}
-
-fn now_ms() -> i64 {    SystemTime::now()
+fn now_ms() -> i64 {
+    SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as i64)
         .unwrap_or_default()
-}
-
-fn has_column(connection: &Connection, table: &str, column: &str) -> Result<bool, String> {    let mut statement = connection
-        .prepare(&format!("PRAGMA table_info({table})"))
-        .map_err(|error| error.to_string())?;
-    let columns = statement
-        .query_map([], |row| row.get::<_, String>(1))
-        .map_err(|error| error.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())?;
-
-    Ok(columns.iter().any(|name| name == column))
 }
 
 fn attachments_json(attachments: &[StoredAttachment]) -> Result<Option<String>, String> {
@@ -413,14 +357,15 @@ fn messages_for(
 
 #[cfg(test)]
 mod tests {
-    use super::{prepare, Storage};
+    use super::Storage;
+    use crate::core::migrations::upgrade;
     use rusqlite::Connection;
     use std::sync::Mutex;
 
     /// An in-memory database keeps the credential tests away from the real iris.db.
     fn storage() -> Storage {
-        let connection = Connection::open_in_memory().expect("open an in-memory database");
-        prepare(&connection).expect("create the schema");
+        let mut connection = Connection::open_in_memory().expect("open an in-memory database");
+        upgrade(&mut connection).expect("create the schema");
         Storage {
             connection: Mutex::new(connection),
         }
@@ -460,7 +405,23 @@ mod tests {
         storage.clear().expect("clear conversations");
         assert!(storage.has_api_key());
 
-        storage.clear_credentials().expect("clear credentials");
+        // Reset Iris drops the schema, so the key goes with it.
+        storage.reset_schema().expect("reset the schema");
         assert!(!storage.has_api_key());
+    }
+
+    /// Reset rebuilds the schema immediately, so the running app is still usable during the
+    /// reload and a later launch finds a modern, empty database.
+    #[test]
+    fn resetting_rebuilds_an_empty_database_that_still_works() {
+        let storage = storage();
+        storage.save_api_key("sk-old").expect("save");
+        storage.reset_schema().expect("reset");
+
+        assert!(!storage.has_api_key());
+        assert!(storage.load().expect("load after reset").is_empty());
+
+        storage.save_api_key("sk-new").expect("save after reset");
+        assert!(storage.has_api_key());
     }
 }

@@ -3,6 +3,7 @@ import { useEffect } from 'react'
 
 import { useChatStore } from '@/stores/chatStore'
 import {
+  clearConversations,
   deleteConversation,
   loadConversations,
   saveConversation,
@@ -12,10 +13,24 @@ import type { Conversation } from '@/types/chat'
 import { isTauri } from '@/utils/tauri'
 
 let suspended = false
+let clearStored: (() => Promise<void>) | null = null
 
 /** Stops the SQLite mirror while Iris resets its data, so a focus hydrate cannot undo the wipe. */
 export function suspendChatStorage() {
   suspended = true
+}
+
+/**
+ * Deletes every stored conversation while pausing the mirror. The debounced writer and an
+ * in-flight focus hydrate are allowed to settle first, so neither can re-save a conversation
+ * after the backend has cleared the table.
+ */
+export async function clearStoredConversations() {
+  if (!clearStored) {
+    await clearConversations()
+    return
+  }
+  await clearStored()
 }
 
 /**
@@ -37,6 +52,33 @@ export function useChatStorage() {
     let previous = new Map<string, string>()
     let pending = new Map<string, Conversation>()
     let removed = new Set<string>()
+    let activeFlush: Promise<void> | null = null
+    let activeHydrate: Promise<void> | null = null
+
+    const clearStoredForThisWindow = async () => {
+      suspended = true
+      if (flushTimer !== null) {
+        window.clearTimeout(flushTimer)
+        flushTimer = null
+      }
+
+      try {
+        // Let a writer that already started finish before deleting, then discard anything queued.
+        if (activeFlush) {
+          await activeFlush.catch(() => {})
+        }
+        if (activeHydrate) {
+          await activeHydrate.catch(() => {})
+        }
+        pending = new Map()
+        removed = new Set()
+        await clearConversations()
+        previous = new Map()
+      } finally {
+        suspended = false
+      }
+    }
+    clearStored = clearStoredForThisWindow
 
     const snapshot = (conversations: Conversation[]) =>
       new Map(
@@ -51,7 +93,13 @@ export function useChatStorage() {
         window.clearTimeout(flushTimer)
       }
       flushTimer = window.setTimeout(() => {
-        void flush()
+        const run = flush()
+        activeFlush = run
+        void run.finally(() => {
+          if (activeFlush === run) {
+            activeFlush = null
+          }
+        })
       }, 400)
     }
 
@@ -129,6 +177,9 @@ export function useChatStorage() {
       try {
         await useChatStore.persist.rehydrate()
         const stored = await loadConversations()
+        if (suspended) {
+          return
+        }
         const local = useChatStore.getState().conversations
         const merged = mergeConversations(stored, local)
         useChatStore.getState().hydrateConversations(merged)
@@ -169,7 +220,17 @@ export function useChatStorage() {
       }
     }
 
-    void hydrate()
+    const runHydrate = () => {
+      const run = hydrate()
+      activeHydrate = run
+      void run.finally(() => {
+        if (activeHydrate === run) {
+          activeHydrate = null
+        }
+      })
+    }
+
+    runHydrate()
 
     unsubscribe = useChatStore.subscribe((state) => {
       schedule(state.conversations)
@@ -178,7 +239,7 @@ export function useChatStorage() {
     void getCurrentWindow()
       .onFocusChanged(({ payload: focused }) => {
         if (focused) {
-          void hydrate()
+          runHydrate()
         }
       })
       .then((off) => {
@@ -193,6 +254,9 @@ export function useChatStorage() {
       disposed = true
       if (flushTimer !== null) {
         window.clearTimeout(flushTimer)
+      }
+      if (clearStored === clearStoredForThisWindow) {
+        clearStored = null
       }
       unsubscribe?.()
       unlistenFocus?.()

@@ -44,14 +44,17 @@ import {
   TTS_VOICES,
 } from '@/constants'
 import { useAppInfo } from '@/hooks/useAppInfo'
-import { suspendChatStorage } from '@/hooks/useChatStorage'
+import {
+  clearStoredConversations,
+  suspendChatStorage,
+} from '@/hooks/useChatStorage'
 import { useChatStore } from '@/stores/chatStore'
 import {
   type OverlayShortcutAction,
   useSettingsStore,
 } from '@/stores/settingsStore'
 import { useUIStore } from '@/stores/uiStore'
-import { resetAppData, restartApp } from '@/tauri/commands/app'
+import { reloadAppWindows, resetAppData } from '@/tauri/commands/app'
 import { setOpenShortcut as applyOpenShortcut } from '@/tauri/commands/shortcut'
 import {
   hasApiKey,
@@ -948,6 +951,22 @@ function StoragePanel({ query }: { query: string }) {
               : window.confirm(message)
 
             if (confirmed) {
+              // Delete through the storage hook: it pauses the mirror first, so a pending save or
+              // a focus hydrate cannot put the conversations straight back.
+              if (isTauri()) {
+                try {
+                  await clearStoredConversations()
+                } catch (error) {
+                  notify({
+                    id: 'clear-failed',
+                    title: 'Could not clear history',
+                    subtitle:
+                      error instanceof Error ? error.message : String(error),
+                    tone: 'error',
+                  })
+                  return
+                }
+              }
               clearAll()
               notify({
                 id: 'history-cleared',
@@ -973,7 +992,7 @@ function StoragePanel({ query }: { query: string }) {
           variant="danger-soft"
           onPress={async () => {
             const message =
-              'Reset Iris? This deletes every conversation, all settings, and your API key. Iris will restart.'
+              'Reset Iris? This deletes every conversation, all settings, and your API key. Iris will start fresh.'
             const confirmed = isTauri()
               ? await ask(message, {
                   title: 'Reset Iris',
@@ -1011,7 +1030,10 @@ function StoragePanel({ query }: { query: string }) {
             try {
               if (isTauri()) {
                 await resetAppData()
-                await restartApp()
+                // Reload every webview instead of restarting the process: app.restart() races the
+                // single-instance plugin and can leave Iris running with no window. A reload gives
+                // the same fresh state without losing the menu bar process.
+                await reloadAppWindows()
               } else {
                 window.location.reload()
               }

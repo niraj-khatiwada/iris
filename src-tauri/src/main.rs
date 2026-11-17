@@ -162,7 +162,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             tauri_commands::app::get_app_info,
             tauri_commands::app::show_main_window,
-            tauri_commands::app::restart_app,
+            tauri_commands::app::reload_app_windows,
             tauri_commands::app::reset_app_data,
             tauri_commands::chat::send_message,
             tauri_commands::chat::cancel_generation,

@@ -10,8 +10,9 @@ export function showMainWindow() {
   return invoke<void>('show_main_window')
 }
 
-export function restartApp() {
-  return invoke<void>('restart_app')
+/** Reloads the main and overlay webviews without restarting the Iris process. */
+export function reloadAppWindows() {
+  return invoke<void>('reload_app_windows')
 }
 
 /** Wipes backend-owned Iris data: conversations, summaries, speech audio, and old data copies. */

@@ -582,9 +582,12 @@ fn build_body(system: String, messages: Vec<Value>, config: &AgentConfig) -> Val
         "stream": true
     });
 
-    if config.deep_think {
-        body["thinking"] = json!({ "type": "adaptive" });
-    }
+    // DeepSeek enables thinking by default for deepseek-flash, so the off state must be explicit.
+    body["thinking"] = if config.deep_think {
+        json!({ "type": "adaptive" })
+    } else {
+        json!({ "type": "disabled" })
+    };
 
     if config.web_search {
         // The standard server-side search tool runs on DeepSeek's Messages endpoint.
@@ -830,9 +833,9 @@ mod tests {
             tts_url: String::new(),
         };
 
-        // Off: neither field is sent, so providers that reject them stay happy.
+        // Off: thinking is explicitly disabled and no tool is sent.
         let off = build_body("system".to_string(), vec![], &config);
-        assert!(off.get("thinking").is_none());
+        assert_eq!(off["thinking"]["type"], "disabled");
         assert!(off.get("tools").is_none());
 
         config.deep_think = true;
@@ -975,7 +978,7 @@ mod format_tests {
         assert!(body.get("reasoning_effort").is_none());
     }
 
-    /// With the toggles off the body carries no thinking or tool fields at all.
+    /// With the toggles off thinking is disabled explicitly and no tool is sent.
     #[test]
     fn the_body_omits_optional_fields_when_toggles_are_off() {
         let mut off = config();
@@ -983,7 +986,7 @@ mod format_tests {
         off.web_search = false;
 
         let body = build_body("sys".to_string(), vec![], &off);
-        assert!(body.get("thinking").is_none());
+        assert_eq!(body["thinking"]["type"], "disabled");
         assert!(body.get("tools").is_none());
         assert_eq!(body["max_tokens"], MAX_OUTPUT_TOKENS);
     }
