@@ -110,9 +110,9 @@ fn base64_encode(bytes: &[u8]) -> String {
 
 /// Builds a one-turn probe body for the given wire format and capability.
 ///
-/// The extras match what `core/agent.rs` sends, so a pass here means the real requests will work:
-/// Anthropic uses `thinking: adaptive` and the `web_search_20250305` server tool, OpenAI uses
-/// `reasoning_effort` and `web_search_options`.
+/// The extras mirror `core/agent.rs` exactly, so a pass here means the real requests will work.
+/// The Messages API takes the standard `thinking` and `web_search_20250305` tool; Chat Completions
+/// has no standard search tool, so its own provider tool is used there.
 fn probe_body(format: &str, model: &str, probe: Probe) -> Value {
     let with_image = probe == Probe::Image;
     // Search and thinking probes need a prompt that cannot be answered from memory, plus room to
@@ -144,9 +144,14 @@ fn probe_body(format: &str, model: &str, probe: Probe) -> Value {
         });
 
         match probe {
-            // Same value the chat runtime sends, so a pass here means real requests will work.
-            Probe::Thinking => body["reasoning_effort"] = json!("medium"),
-            Probe::WebSearch => body["web_search_options"] = json!({}),
+            // Same values the chat runtime sends, so a pass here means real requests will work.
+            Probe::Thinking => {
+                body["thinking"] = json!({ "type": "enabled" });
+                body["reasoning_effort"] = json!("high");
+            }
+            // Chat Completions has no standard search tool; this provider's own is the only one that
+            // runs.
+            Probe::WebSearch => body["tools"] = json!([{ "type": "deepseek_web_search" }]),
             _ => {}
         }
 
@@ -225,14 +230,28 @@ fn reasoned(format: &str, body: &Value) -> bool {
 /// merely an accepted `tools` field.
 fn searched(format: &str, body: &Value) -> bool {
     if format == "openai" {
-        return body
+        let message = body
             .get("choices")
             .and_then(Value::as_array)
             .and_then(|choices| choices.first())
-            .and_then(|choice| choice.get("message"))
+            .and_then(|choice| choice.get("message"));
+
+        // A provider may report citations, the raw search calls, or only the billing counters; any
+        // of them means the search really ran.
+        let annotations = message
             .and_then(|message| message.get("annotations"))
             .and_then(Value::as_array)
             .is_some_and(|annotations| !annotations.is_empty());
+        let calls = message
+            .and_then(|message| message.get("server_tool_calls"))
+            .and_then(Value::as_array)
+            .is_some_and(|calls| !calls.is_empty());
+        let counted = body["usage"]["server_tool_use"]["tool_search"]
+            .as_u64()
+            .unwrap_or(0)
+            > 0;
+
+        return annotations || calls || counted;
     }
 
     body.get("content")
@@ -417,12 +436,14 @@ mod tests {
         let anthropic_search = probe_body("anthropic", "m", Probe::WebSearch);
         assert_eq!(anthropic_search["tools"][0]["name"], "web_search");
 
+        // Chat Completions gets both the Anthropic thinking block and the effort hint, because the
+        // provider reads the block and other OpenAI-style providers read the hint.
         let openai_thinking = probe_body("openai", "m", Probe::Thinking);
-        assert_eq!(openai_thinking["reasoning_effort"], "medium");
-        assert!(openai_thinking.get("thinking").is_none());
+        assert_eq!(openai_thinking["thinking"]["type"], "enabled");
+        assert_eq!(openai_thinking["reasoning_effort"], "high");
 
         let openai_search = probe_body("openai", "m", Probe::WebSearch);
-        assert!(openai_search.get("web_search_options").is_some());
+        assert_eq!(openai_search["tools"][0]["type"], "deepseek_web_search");
 
         // A plain text probe carries none of the optional fields.
         let plain = probe_body("openai", "m", Probe::Text);
@@ -485,6 +506,23 @@ mod tests {
             "choices": [{ "message": { "content": "It is $90k.", "annotations": [{ "type": "url_citation" }] } }]
         });
         assert!(searched("openai", &searched_openai));
+
+        // This provider reports the raw search calls rather than citations, and an empty
+        // `annotations` list is normal on those replies.
+        let called = serde_json::json!({
+            "choices": [{ "message": {
+                "content": "It is $90k.",
+                "annotations": null,
+                "server_tool_calls": [{ "type": "deepseek_web_search" }]
+            } }]
+        });
+        assert!(searched("openai", &called));
+
+        let counted = serde_json::json!({
+            "choices": [{ "message": { "content": "It is $90k." } }],
+            "usage": { "server_tool_use": { "tool_search": 2 } }
+        });
+        assert!(searched("openai", &counted));
     }
 }
 

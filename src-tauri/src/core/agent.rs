@@ -656,6 +656,8 @@ fn build_body(system: String, messages: Vec<Value>, config: &AgentConfig) -> Val
     }
 
     if config.web_search {
+        // The standard server-side search tool. DeepSeek executes it on its Anthropic endpoint, so
+        // this stays portable across providers that implement the Messages API.
         body["tools"] = json!([
             { "type": "web_search_20250305", "name": "web_search" }
         ]);
@@ -680,8 +682,16 @@ fn build_openai_body(system: String, messages: Vec<Value>, config: &AgentConfig)
     });
 
     if config.deep_think {
-        // OpenAI reasoning models take an effort hint rather than Anthropic's thinking block.
-        body["reasoning_effort"] = json!("medium");
+        // DeepSeek takes Anthropic's thinking block in every format. `adaptive` is accepted by
+        // providers that implement the Messages API, so this stays portable.
+        body["thinking"] = json!({ "type": "enabled" });
+        body["reasoning_effort"] = json!("high");
+    }
+
+    if config.web_search {
+        // Chat Completions has no standard search tool, and DeepSeek rejects anything but
+        // `function`, so its own server-side tool is the only one that runs here.
+        body["tools"] = json!([{ "type": "deepseek_web_search" }]);
     }
 
     body
@@ -1188,7 +1198,10 @@ mod format_tests {
         let body = build_body("sys".to_string(), messages, &config("openai"));
 
         assert!(body.get("system").is_none(), "OpenAI has no top-level system");
-        assert!(body.get("thinking").is_none(), "no Anthropic thinking block");
+        // Thinking and search travel as the Anthropic fields here too: this provider reads them in
+        // both formats, and the fixture enables both toggles.
+        assert_eq!(body["thinking"]["type"], "enabled");
+        assert_eq!(body["tools"][0]["type"], "deepseek_web_search");
         let out = body["messages"].as_array().expect("messages");
         assert_eq!(out[0]["role"], "system");
         assert_eq!(out[0]["content"], "sys");
