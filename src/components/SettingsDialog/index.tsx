@@ -423,6 +423,20 @@ const OVERLAY_SHORTCUT_ROWS: Array<{
     description: 'Start voice input; Enter sends and Escape cancels.',
     search: ['voice', 'input', 'microphone', 'dictate', 'speech', 'shortcut'],
   },
+  {
+    id: 'stopSpeaking',
+    title: 'Stop read-aloud',
+    description: 'Stop a reply that is being prepared or read aloud.',
+    search: [
+      'stop',
+      'read aloud',
+      'speech',
+      'audio',
+      'voice',
+      'tts',
+      'shortcut',
+    ],
+  },
 ]
 
 function ShortcutsPanel({ query }: { query: string }) {

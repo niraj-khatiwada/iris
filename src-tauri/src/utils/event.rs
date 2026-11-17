@@ -30,3 +30,6 @@ pub const CAPTURE_CLOSED: &str = "capture:closed";
 
 /// The overlay was shown or brought forward; the webview should focus its input.
 pub const OVERLAY_FOCUSED: &str = "overlay:focused";
+
+/// The overlay is being dragged; the canvas draws the snap guides at these positions.
+pub const OVERLAY_GUIDES: &str = "overlay:guides";

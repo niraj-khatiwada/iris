@@ -3,9 +3,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use base64::Engine;
 use tauri::{AppHandle, Emitter, Manager};
 
-/// Hides the overlay for the screenshot, then opens the capture panel below the overlay so Iris
-/// stays visible and usable above the frozen screen. AppKit window calls must stay on the main
-/// thread; only the blocking screencapture runs off it.
+/// Opens the live capture panel over the current display. Nothing is screenshotted yet: the
+/// screen keeps rendering behind a transparent selection overlay, and the annotated region is
+/// captured only when the user attaches it. AppKit window calls must stay on the main thread.
 #[tauri::command]
 pub async fn start_screen_capture(app: AppHandle) -> Result<(), String> {
     if !crate::sys::screen::has_permission() {
@@ -19,55 +19,26 @@ pub async fn start_screen_capture(app: AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    let prepare_app = app.clone();
-    let (monitor, display) = on_main(&app, move || -> Result<(tauri::Monitor, usize), String> {
-        let overlay = prepare_app
+    let monitor_app = app.clone();
+    let monitor = on_main(&app, move || -> Result<tauri::Monitor, String> {
+        let overlay = monitor_app
             .get_webview_window(crate::sys::overlay::OVERLAY_LABEL)
             .ok_or_else(|| "The Iris overlay is not available.".to_string())?;
-        let monitor = overlay
+        overlay
             .current_monitor()
             .map_err(|error| error.to_string())?
             .or_else(|| overlay.primary_monitor().ok().flatten())
-            .ok_or_else(|| "Could not find a display to capture.".to_string())?;
-        let display = display_number(&prepare_app, &monitor);
-        Ok((monitor, display))
+            .ok_or_else(|| "Could not find a display to capture.".to_string())
     })??;
-
-    let hide_app = app.clone();
-    on_main(&app, move || crate::sys::overlay::hide(&hide_app))??;
-
-    tokio::time::sleep(Duration::from_millis(220)).await;
-
-    let capture_app = app.clone();
-    let image =
-        match tokio::task::spawn_blocking(move || capture_display(&capture_app, display)).await {
-            Ok(Ok(image)) => image,
-            Ok(Err(error)) => {
-                restore_overlay(&app);
-                return Err(error);
-            }
-            Err(error) => {
-                restore_overlay(&app);
-                return Err(format!("Screen capture task failed: {error}"));
-            }
-        };
 
     let show_app = app.clone();
     let show_monitor = monitor.clone();
-    let show_image = image.clone();
-    let shown = on_main(&app, move || {
-        crate::sys::capture::show(&show_app, &show_monitor, &show_image)
-    });
-    let result = match shown {
-        Ok(inner) => inner,
-        Err(error) => Err(error),
-    };
-    if let Err(error) = result {
-        restore_overlay(&app);
-        return Err(error);
-    }
+    on_main(&app, move || {
+        crate::sys::capture::show(&show_app, &show_monitor)
+    })??;
 
-    // Show Iris above the capture panel without stealing its key focus.
+    // Iris stays above the selection as a passive panel: visible and clickable, but it never
+    // takes key focus from the capture tools.
     let overlay_app = app.clone();
     if let Err(error) = on_main(&app, move || {
         crate::sys::overlay::show_passive(&overlay_app)
@@ -76,6 +47,47 @@ pub async fn start_screen_capture(app: AppHandle) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Captures the display under the live capture panel. The frontend hides the selection chrome
+/// first, so the screenshot contains the live screen plus the annotations, never the handles or
+/// toolbar. Iris is hidden for the shot and restored passively afterwards.
+#[tauri::command]
+pub async fn capture_annotated_screen(app: AppHandle) -> Result<String, String> {
+    if !crate::sys::screen::has_permission() {
+        return Err("Screen Recording permission is required.".to_string());
+    }
+
+    let hide_app = app.clone();
+    on_main(&app, move || crate::sys::overlay::hide(&hide_app))??;
+    tokio::time::sleep(Duration::from_millis(120)).await;
+
+    let display_app = app.clone();
+    let display = on_main(&app, move || -> Result<usize, String> {
+        let capture = display_app
+            .get_webview_window(crate::sys::capture::CAPTURE_LABEL)
+            .ok_or_else(|| "The Iris capture window is not available.".to_string())?;
+        let monitor = capture
+            .current_monitor()
+            .map_err(|error| error.to_string())?
+            .or_else(|| capture.primary_monitor().ok().flatten())
+            .ok_or_else(|| "Could not find a display to capture.".to_string())?;
+        Ok(display_number(&display_app, &monitor))
+    })??;
+
+    let capture_app = app.clone();
+    let image = tokio::task::spawn_blocking(move || capture_display(&capture_app, display))
+        .await
+        .map_err(|error| format!("Screen capture task failed: {error}"))?;
+
+    // The capture panel keeps key focus. Showing Iris passively again also leaves the capture
+    // usable if the frontend fails to crop the image.
+    let restore_app = app.clone();
+    let _ = on_main(&app, move || {
+        crate::sys::overlay::show_passive(&restore_app)
+    });
+
+    image
 }
 
 /// Closes the capture window and brings the quick overlay back.
@@ -99,11 +111,6 @@ pub fn request_screen_capture_permission() -> bool {
 #[tauri::command]
 pub fn open_screen_capture_settings() -> Result<(), String> {
     crate::sys::screen::open_settings()
-}
-
-fn restore_overlay(app: &AppHandle) {
-    let handle = app.clone();
-    let _ = on_main(app, move || crate::sys::overlay::show(&handle));
 }
 
 /// Runs a closure on the main thread and waits for it. AppKit window APIs require this.

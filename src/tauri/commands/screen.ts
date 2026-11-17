@@ -15,9 +15,17 @@ export function openScreenCaptureSettings() {
   return invoke<void>('open_screen_capture_settings')
 }
 
-/** Hides the quick overlay, captures the current display, and opens the annotation window. */
+/** Opens the live selection overlay. The screen keeps playing; nothing is captured yet. */
 export function startScreenCapture() {
   return invoke<void>('start_screen_capture')
+}
+
+/**
+ * Captures the display under the live capture panel after its selection chrome is hidden. The
+ * annotations are part of the capture window, so the returned image already includes them.
+ */
+export function captureAnnotatedScreen() {
+  return invoke<string>('capture_annotated_screen')
 }
 
 /** Closes the capture window and brings the quick overlay back. */

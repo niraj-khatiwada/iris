@@ -13,13 +13,17 @@ import {
 import { useEffect, useRef, useState } from 'react'
 import ReactDOM from 'react-dom/client'
 
-import { closeScreenCapture } from '@/tauri/commands/screen'
+import {
+  captureAnnotatedScreen,
+  closeScreenCapture,
+} from '@/tauri/commands/screen'
 import { cn } from '@/utils/tailwind'
 import { isTauri } from '@/utils/tauri'
 import { applyTheme } from '@/utils/theme'
 
 import './global.css'
 
+document.documentElement.dataset.window = 'capture'
 applyTheme('dark')
 
 type Point = { x: number; y: number }
@@ -52,19 +56,70 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
 }
 
+function nextFrame() {
+  return new Promise<void>((resolve) => {
+    requestAnimationFrame(() => resolve())
+  })
+}
+
+function loadImage(source: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () =>
+      reject(new Error('Could not read the captured screen.'))
+    image.src = source
+  })
+}
+
+/** Crops the annotated display capture to the selection at native resolution. */
+async function cropToSelection(
+  source: string,
+  selection: Rect,
+): Promise<string> {
+  const image = await loadImage(source)
+  const scale = image.naturalWidth / window.innerWidth
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.round(selection.width * scale))
+  canvas.height = Math.max(1, Math.round(selection.height * scale))
+  const context = canvas.getContext('2d')
+  if (!context) {
+    throw new Error('Could not crop the captured screen.')
+  }
+  context.drawImage(
+    image,
+    Math.round(selection.x * scale),
+    Math.round(selection.y * scale),
+    canvas.width,
+    canvas.height,
+    0,
+    0,
+    canvas.width,
+    canvas.height,
+  )
+  return canvas.toDataURL('image/jpeg', 0.92)
+}
+
 function Capture() {
-  const [image, setImage] = useState<string | null>(null)
-  const [phase, setPhase] = useState<'idle' | 'select' | 'annotate'>('idle')
+  const [session, setSession] = useState(isTauri() ? 0 : 1)
+  const [phase, setPhase] = useState<'idle' | 'select' | 'annotate'>(
+    isTauri() ? 'idle' : 'select',
+  )
   const [draft, setDraft] = useState<Rect | null>(null)
   const [selection, setSelection] = useState<Rect | null>(null)
   const [tool, setTool] = useState<Tool>('pen')
   const [color, setColor] = useState<string>(COLORS[1].value)
   const [ready, setReady] = useState(false)
+  const [capturing, setCapturing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [size, setSize] = useState(() => ({
+    width: window.innerWidth,
+    height: window.innerHeight,
+  }))
 
   const stageContainerRef = useRef<HTMLDivElement>(null)
   const annotationsRef = useRef<Konva.Shape[]>([])
   const undoRef = useRef<(() => void) | null>(null)
-  const exportRef = useRef<(() => string) | null>(null)
   const attachRef = useRef<(() => void) | null>(null)
   const toolRef = useRef<Tool>('pen')
   const colorRef = useRef<string>(COLORS[1].value)
@@ -82,61 +137,72 @@ function Capture() {
   colorRef.current = color
   selectionRef.current = selection
 
+  // The capture panel is resized from its hidden 100x100 frame when it opens. Rebuild the stage
+  // for the final size so the annotation coordinates match the live display.
   useEffect(() => {
-    let unlisten: (() => void) | undefined
-    let disposed = false
+    const onResize = () =>
+      setSize((current) =>
+        current.width === window.innerWidth &&
+        current.height === window.innerHeight
+          ? current
+          : { width: window.innerWidth, height: window.innerHeight },
+      )
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
+  useEffect(() => {
     if (!isTauri()) {
-      // Browser preview: a synthetic screen so the capture flow can be designed without
-      // Screen Recording permissions.
-      const canvas = document.createElement('canvas')
-      canvas.width = 1440
-      canvas.height = 900
-      const context = canvas.getContext('2d')
-      if (context) {
-        const gradient = context.createLinearGradient(0, 0, 1440, 900)
-        gradient.addColorStop(0, '#0b1220')
-        gradient.addColorStop(0.55, '#16233a')
-        gradient.addColorStop(1, '#251a2e')
-        context.fillStyle = gradient
-        context.fillRect(0, 0, 1440, 900)
-        context.fillStyle = 'rgba(255,255,255,0.06)'
-        for (let row = 0; row < 3; row += 1) {
-          for (let column = 0; column < 3; column += 1) {
-            context.fillRect(120 + column * 420, 150 + row * 240, 340, 180)
-          }
-        }
-        context.fillStyle = '#7ce2a3'
-        context.fillRect(120, 72, 120, 10)
-        context.fillStyle = 'rgba(255,255,255,0.35)'
-        context.fillRect(120, 96, 280, 6)
-      }
-      setImage(canvas.toDataURL('image/png'))
-      setPhase('select')
       return
     }
 
-    void listen<{ image: string }>('capture:start', (event) => {
-      setImage(event.payload.image)
-      setPhase('select')
-      setDraft(null)
-      setSelection(null)
-      setReady(false)
-      dragStart.current = null
-      draftRef.current = null
-      resize.current = null
-      moveHandle.current = null
-    }).then((off) => {
-      if (disposed) {
-        off()
-      } else {
-        unlisten = off
-      }
-    })
+    let disposed = false
+
+    const cleanups: Array<() => void> = []
+    const track = (subscribe: Promise<() => void>) => {
+      void subscribe.then((off) => {
+        if (disposed) {
+          off()
+        } else {
+          cleanups.push(off)
+        }
+      })
+    }
+
+    track(
+      listen('capture:start', () => {
+        setPhase('select')
+        setDraft(null)
+        setSelection(null)
+        setReady(false)
+        setCapturing(false)
+        setError(null)
+        dragStart.current = null
+        draftRef.current = null
+        resize.current = null
+        moveHandle.current = null
+        setSession((current) => current + 1)
+      }),
+    )
+
+    // The window is hidden before this arrives, so the next show never flashes the old selection.
+    track(
+      listen('capture:closed', () => {
+        setPhase('idle')
+        setDraft(null)
+        setSelection(null)
+        setReady(false)
+        setCapturing(false)
+        setError(null)
+        setSession(0)
+      }),
+    )
 
     return () => {
       disposed = true
-      unlisten?.()
+      for (const cleanup of cleanups) {
+        cleanup()
+      }
     }
   }, [])
 
@@ -164,10 +230,11 @@ function Capture() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
-  // One full-screen stage: the frozen screenshot plus annotations in screen coordinates. The
-  // selection is only a crop frame, so resizing or moving it never rewrites the annotations.
+  // One full-screen annotation layer in screen coordinates. The selection is only a crop frame,
+  // so resizing or moving it never rewrites what has been drawn. The live screen shows through
+  // the transparent window behind it.
   useEffect(() => {
-    if (!image) {
+    if (session === 0) {
       return
     }
     const container = stageContainerRef.current
@@ -175,8 +242,8 @@ function Capture() {
       return
     }
 
-    const width = window.innerWidth
-    const height = window.innerHeight
+    const width = size.width
+    const height = size.height
     const stage = new Konva.Stage({ container, width, height })
     const layer = new Konva.Layer()
     stage.add(layer)
@@ -276,37 +343,7 @@ function Capture() {
     }
     stage.on('mouseup touchend', finish)
 
-    const backgroundImage = new window.Image()
-    backgroundImage.onload = () => {
-      const scale = backgroundImage.naturalWidth / window.innerWidth
-      const background = new Konva.Image({
-        image: backgroundImage,
-        width,
-        height,
-        listening: false,
-      })
-      layer.add(background)
-      background.moveToBottom()
-      layer.batchDraw()
-      setReady(true)
-
-      exportRef.current = () => {
-        const current = selectionRef.current
-        if (!current) {
-          return ''
-        }
-        return stage.toDataURL({
-          x: current.x,
-          y: current.y,
-          width: current.width,
-          height: current.height,
-          pixelRatio: scale,
-          mimeType: 'image/jpeg',
-          quality: 0.92,
-        })
-      }
-    }
-    backgroundImage.src = image
+    setReady(true)
 
     undoRef.current = () => {
       annotationsRef.current.pop()?.destroy()
@@ -316,9 +353,8 @@ function Capture() {
     return () => {
       stage.destroy()
       undoRef.current = null
-      exportRef.current = null
     }
-  }, [image])
+  }, [session, size.height, size.width])
 
   useEffect(() => {
     if (phase !== 'annotate') {
@@ -339,7 +375,7 @@ function Capture() {
   }
 
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!image) {
+    if (phase !== 'select') {
       return
     }
 
@@ -482,17 +518,26 @@ function Capture() {
   }
 
   const attach = async () => {
-    const dataUrl = exportRef.current?.()
-    if (!dataUrl) {
+    const current = selectionRef.current
+    if (!current || capturing || !isTauri()) {
       return
     }
 
-    if (!isTauri()) {
-      return
-    }
+    setCapturing(true)
+    setError(null)
 
-    await emit('capture:attached', { dataUrl })
-    await closeScreenCapture()
+    try {
+      // Let the browser paint the chrome-free frame before the native screenshot runs.
+      await nextFrame()
+      await nextFrame()
+      const display = await captureAnnotatedScreen()
+      const dataUrl = await cropToSelection(display, current)
+      await emit('capture:attached', { dataUrl })
+      await closeScreenCapture()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+      setCapturing(false)
+    }
   }
 
   attachRef.current = () => void attach()
@@ -507,12 +552,22 @@ function Capture() {
     : 0
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-black/40 text-white">
+    <div
+      className="relative h-full w-full overflow-hidden text-white"
+      style={
+        isTauri()
+          ? undefined
+          : {
+              background:
+                'radial-gradient(circle at 30% 18%, #22304a 0%, #0b1220 60%, #1a1122 100%)',
+            }
+      }
+    >
       <div
         ref={stageContainerRef}
         className="absolute inset-0"
         style={{
-          pointerEvents: phase === 'annotate' ? 'auto' : 'none',
+          pointerEvents: capturing || phase !== 'annotate' ? 'none' : 'auto',
         }}
       />
 
@@ -555,7 +610,10 @@ function Capture() {
       {phase === 'annotate' && selection ? (
         <>
           <div
-            className="pointer-events-none absolute border border-white/35 shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]"
+            className={cn(
+              'pointer-events-none absolute border shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]',
+              capturing ? 'border-transparent' : 'border-white/35',
+            )}
             style={{
               left: selection.x,
               top: selection.y,
@@ -564,114 +622,126 @@ function Capture() {
             }}
           />
 
-          {HANDLES.map((handle) => (
-            <button
-              key={handle.id}
-              type="button"
-              aria-label={`Resize ${handle.id}`}
-              className="absolute z-30 flex size-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center"
+          {!capturing
+            ? HANDLES.map((handle) => (
+                <button
+                  key={handle.id}
+                  type="button"
+                  aria-label={`Resize ${handle.id}`}
+                  className="absolute z-30 flex size-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center"
+                  style={{
+                    left: selection.x + selection.width * handle.x,
+                    top: selection.y + selection.height * handle.y,
+                    cursor: handle.cursor,
+                  }}
+                  onPointerCancel={endResize}
+                  onPointerDown={startResize(handle.id)}
+                  onPointerMove={moveResize}
+                  onPointerUp={endResize}
+                >
+                  <span className="size-2 rounded-full border border-black/40 bg-white shadow-sm" />
+                </button>
+              ))
+            : null}
+
+          {!capturing ? (
+            <div
+              className="fixed z-40 flex items-center gap-0.5 rounded-2xl border border-white/10 bg-[#1b1b1f]/95 px-1.5 py-1 shadow-2xl backdrop-blur-xl"
               style={{
-                left: selection.x + selection.width * handle.x,
-                top: selection.y + selection.height * handle.y,
-                cursor: handle.cursor,
+                left: toolbarLeft,
+                top: toolbarTop,
+                transform: 'translateX(-50%)',
               }}
-              onPointerCancel={endResize}
-              onPointerDown={startResize(handle.id)}
-              onPointerMove={moveResize}
-              onPointerUp={endResize}
             >
-              <span className="size-2 rounded-full border border-black/40 bg-white shadow-sm" />
-            </button>
-          ))}
+              <Tooltip delay={400}>
+                <button
+                  type="button"
+                  aria-label="Drag selection"
+                  className="flex size-7 cursor-grab items-center justify-center rounded-full text-white/70 transition-colors hover:bg-white/10 active:cursor-grabbing"
+                  onPointerCancel={endMove}
+                  onPointerDown={startMove}
+                  onPointerMove={moveSelection}
+                  onPointerUp={endMove}
+                >
+                  <Move className="size-3.5" />
+                </button>
+                <Tooltip.Content>Drag to move the selection</Tooltip.Content>
+              </Tooltip>
 
-          <div
-            className="fixed z-40 flex items-center gap-0.5 rounded-2xl border border-white/10 bg-[#1b1b1f]/95 px-1.5 py-1 shadow-2xl backdrop-blur-xl"
-            style={{
-              left: toolbarLeft,
-              top: toolbarTop,
-              transform: 'translateX(-50%)',
-            }}
-          >
-            <Tooltip delay={400}>
-              <button
-                type="button"
-                aria-label="Drag selection"
-                className="flex size-7 cursor-grab items-center justify-center rounded-full text-white/70 transition-colors hover:bg-white/10 active:cursor-grabbing"
-                onPointerCancel={endMove}
-                onPointerDown={startMove}
-                onPointerMove={moveSelection}
-                onPointerUp={endMove}
-              >
-                <Move className="size-3.5" />
-              </button>
-              <Tooltip.Content>Drag to move the selection</Tooltip.Content>
-            </Tooltip>
+              <span className="mx-0.5 h-4 w-px bg-white/10" />
 
-            <span className="mx-0.5 h-4 w-px bg-white/10" />
-
-            <ToolButton
-              active={tool === 'pen'}
-              icon={Pencil}
-              label="Pen"
-              onPress={() => setTool('pen')}
-            />
-            <ToolButton
-              active={tool === 'rect'}
-              icon={Square}
-              label="Rectangle"
-              onPress={() => setTool('rect')}
-            />
-            <ToolButton
-              active={tool === 'arrow'}
-              icon={ArrowUpRight}
-              label="Arrow"
-              onPress={() => setTool('arrow')}
-            />
-
-            <span className="mx-0.5 h-4 w-px bg-white/10" />
-
-            {COLORS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                aria-label={`${option.label} ink`}
-                className={cn(
-                  'size-4 rounded-full ring-1 ring-white/30 transition-transform hover:scale-110',
-                  color === option.value && 'ring-2 ring-white',
-                )}
-                style={{ backgroundColor: option.value }}
-                onClick={() => setColor(option.value)}
+              <ToolButton
+                active={tool === 'pen'}
+                icon={Pencil}
+                label="Pen"
+                onPress={() => setTool('pen')}
               />
-            ))}
+              <ToolButton
+                active={tool === 'rect'}
+                icon={Square}
+                label="Rectangle"
+                onPress={() => setTool('rect')}
+              />
+              <ToolButton
+                active={tool === 'arrow'}
+                icon={ArrowUpRight}
+                label="Arrow"
+                onPress={() => setTool('arrow')}
+              />
 
-            <span className="mx-0.5 h-4 w-px bg-white/10" />
+              <span className="mx-0.5 h-4 w-px bg-white/10" />
 
-            <Button
-              isIconOnly
-              aria-label="Cancel capture"
-              className="size-7 min-w-7 text-white/65"
-              size="sm"
-              variant="ghost"
-              onPress={() => void closeScreenCapture()}
-            >
-              <X className="size-3.5" />
-            </Button>
+              {COLORS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-label={`${option.label} ink`}
+                  className={cn(
+                    'size-4 rounded-full ring-1 ring-white/30 transition-transform hover:scale-110',
+                    color === option.value && 'ring-2 ring-white',
+                  )}
+                  style={{ backgroundColor: option.value }}
+                  onClick={() => setColor(option.value)}
+                />
+              ))}
 
-            <Tooltip delay={400}>
+              <span className="mx-0.5 h-4 w-px bg-white/10" />
+
               <Button
-                className="h-7 min-h-7 rounded-full border border-white/15 bg-white/[0.08] px-2.5 text-[12px] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-md hover:bg-white/[0.14] disabled:opacity-40"
-                isDisabled={!ready}
+                isIconOnly
+                aria-label="Cancel capture"
+                className="size-7 min-w-7 text-white/65"
                 size="sm"
                 variant="ghost"
-                onPress={() => void attach()}
+                onPress={() => void closeScreenCapture()}
               >
-                <Check className="size-3" />
-                Attach
+                <X className="size-3.5" />
               </Button>
-              <Tooltip.Content>Attach · Enter</Tooltip.Content>
-            </Tooltip>
-          </div>
+
+              <Tooltip delay={400}>
+                <Button
+                  className="h-7 min-h-7 rounded-full border border-white/15 bg-white/[0.08] px-2.5 text-[12px] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-md hover:bg-white/[0.14] disabled:opacity-40"
+                  isDisabled={!ready || capturing}
+                  size="sm"
+                  variant="ghost"
+                  onPress={() => void attach()}
+                >
+                  <Check className="size-3" />
+                  Attach
+                </Button>
+                <Tooltip.Content>Attach · Enter</Tooltip.Content>
+              </Tooltip>
+            </div>
+          ) : null}
         </>
+      ) : null}
+
+      {error && !capturing ? (
+        <div className="pointer-events-none absolute inset-x-0 top-5 flex justify-center">
+          <p className="max-w-[80vw] truncate rounded-full border border-red-300/20 bg-red-950/70 px-2.5 py-1 text-[11px] text-red-200 backdrop-blur-md">
+            {error}
+          </p>
+        </div>
       ) : null}
     </div>
   )

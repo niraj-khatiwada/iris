@@ -1,4 +1,5 @@
 import { Button, Tooltip } from '@heroui/react'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Check, Pencil, RotateCcw, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
@@ -6,9 +7,11 @@ import CopyButton from '@/components/CopyButton'
 import Markdown from '@/components/Markdown'
 import ReadAloudButton from '@/components/ReadAloudButton'
 import { useChatStore } from '@/stores/chatStore'
+import { showImagePreview } from '@/tauri/commands/preview'
 import type { ChatMessage } from '@/types/chat'
 import { formatMessageTime } from '@/utils/format'
 import { cn } from '@/utils/tailwind'
+import { isTauri } from '@/utils/tauri'
 
 type MessageBubbleProps = {
   message: ChatMessage
@@ -49,7 +52,7 @@ function MessageBubble({
     input.focus({ preventScroll: true })
     input.setSelectionRange(input.value.length, input.value.length)
     input.style.height = '0px'
-    input.style.height = `${Math.min(input.scrollHeight, 200)}px`
+    input.style.height = `${input.scrollHeight}px`
   }, [editing, draft])
 
   const startEditing = () => {
@@ -82,6 +85,7 @@ function MessageBubble({
         className={cn(
           'flex min-w-0 max-w-[min(88%,46rem)] flex-col',
           isUser ? 'items-end' : 'items-start',
+          editing && 'w-full',
         )}
       >
         <div
@@ -101,6 +105,15 @@ function MessageBubble({
                   alt={attachment.name}
                   className="max-h-64 max-w-[min(100%,24rem)] rounded-lg object-cover"
                   src={attachment.dataUrl}
+                  title={`${attachment.name} — double-click to preview`}
+                  onDoubleClick={() => {
+                    if (isTauri()) {
+                      void showImagePreview(
+                        getCurrentWindow().label,
+                        attachment.dataUrl,
+                      )
+                    }
+                  }}
                 />
               ))}
             </div>
@@ -110,7 +123,7 @@ function MessageBubble({
             <textarea
               ref={inputRef}
               aria-label="Edit message"
-              className="max-h-[200px] min-h-9 w-full resize-none border-0 bg-transparent p-0 text-[14px] leading-6 text-inherit shadow-none outline-none"
+              className="block min-h-9 w-full resize-none border-0 bg-transparent p-0 text-[14px] leading-6 text-inherit shadow-none outline-none"
               rows={1}
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
@@ -159,6 +172,7 @@ function MessageBubble({
 
           {editing ? (
             <>
+              <CopyButton text={draft} />
               <Tooltip delay={400}>
                 <Button
                   isIconOnly
@@ -187,6 +201,10 @@ function MessageBubble({
                 <Tooltip.Content>Cancel · Esc</Tooltip.Content>
               </Tooltip>
             </>
+          ) : null}
+
+          {!editing && isUser && message.content ? (
+            <CopyButton text={message.content} />
           ) : null}
 
           {!editing && canEdit && message.status !== 'streaming' ? (

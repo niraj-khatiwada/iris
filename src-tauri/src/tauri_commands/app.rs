@@ -35,6 +35,15 @@ pub fn show_main_window(app: AppHandle) {
     }
 }
 
+/// Hides the history window without quitting Iris, the same result as the red close button and
+/// Cmd+W in the history window.
+#[tauri::command]
+pub fn hide_main_window(app: AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+}
+
 #[tauri::command]
 pub fn reload_app_windows(app: AppHandle) {
     // Reload both webviews so every Zustand store and the localStorage cache start clean. The

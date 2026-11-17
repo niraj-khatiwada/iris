@@ -2,8 +2,10 @@ import { Button, Tooltip } from '@heroui/react'
 import { LoaderCircle, Square } from 'lucide-react'
 
 import VoiceWave from '@/components/VoiceWave'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { useSpeechStore } from '@/stores/speechStore'
 import { stopSpeaking } from '@/tauri/commands/voice'
+import { formatShortcut } from '@/utils/shortcut'
 import { cn } from '@/utils/tailwind'
 
 /**
@@ -13,6 +15,9 @@ import { cn } from '@/utils/tailwind'
 function SpeechControl({ className }: { className?: string }) {
   const preparing = useSpeechStore((state) => state.preparing)
   const speaking = useSpeechStore((state) => state.speaking)
+  const stopShortcut = useSettingsStore(
+    (state) => state.overlayShortcuts.stopSpeaking,
+  )
 
   if (!preparing && !speaking) {
     return null
@@ -43,7 +48,9 @@ function SpeechControl({ className }: { className?: string }) {
         >
           <Square className="size-3 fill-current" />
         </Button>
-        <Tooltip.Content>Stop reading aloud</Tooltip.Content>
+        <Tooltip.Content>
+          Stop reading aloud · {formatShortcut(stopShortcut)}
+        </Tooltip.Content>
       </Tooltip>
     </span>
   )

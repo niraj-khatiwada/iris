@@ -10,6 +10,11 @@ export function showMainWindow() {
   return invoke<void>('show_main_window')
 }
 
+/** Hides the history window without quitting Iris, matching its red close button. */
+export function hideMainWindow() {
+  return invoke<void>('hide_main_window')
+}
+
 /** Reloads the main and overlay webviews without restarting the Iris process. */
 export function reloadAppWindows() {
   return invoke<void>('reload_app_windows')

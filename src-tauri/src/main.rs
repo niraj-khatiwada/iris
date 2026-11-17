@@ -30,8 +30,8 @@ fn main() {
         }))
         .plugin(
             tauri_plugin_window_state::Builder::default()
-                // The overlay is positioned and sized by Iris on every show.
-                .with_denylist(&["overlay", "canvas", "capture"])
+                // The overlay, canvas, capture, and preview are positioned and sized by Iris.
+                .with_denylist(&["overlay", "canvas", "capture", "preview"])
                 // The main history window starts hidden; do not restore it as visible.
                 .with_state_flags(
                     tauri_plugin_window_state::StateFlags::all()
@@ -58,6 +58,7 @@ fn main() {
             app.manage(crate::sys::overlay::OverlayPosition::load(app.handle()));
             crate::sys::menu::remove_close_window_items(app.handle());
             app.manage(crate::sys::speech::SpeechState::default());
+            app.manage(crate::tauri_commands::preview::PreviewState::default());
             let storage =
                 crate::core::storage::Storage::open(app.handle()).map_err(std::io::Error::other)?;
             app.manage(storage);
@@ -162,6 +163,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             tauri_commands::app::get_app_info,
             tauri_commands::app::show_main_window,
+            tauri_commands::app::hide_main_window,
             tauri_commands::app::reload_app_windows,
             tauri_commands::app::reset_app_data,
             tauri_commands::chat::send_message,
@@ -176,7 +178,10 @@ fn main() {
             tauri_commands::overlay::hide_overlay,
             tauri_commands::overlay::toggle_overlay,
             tauri_commands::overlay::resize_overlay,
+            tauri_commands::preview::show_image_preview,
+            tauri_commands::preview::close_image_preview,
             tauri_commands::screen::start_screen_capture,
+            tauri_commands::screen::capture_annotated_screen,
             tauri_commands::screen::close_screen_capture,
             tauri_commands::screen::get_screen_capture_permission,
             tauri_commands::screen::request_screen_capture_permission,

@@ -39,6 +39,12 @@ function normalizeOverlayShortcuts(saved: unknown): OverlayShortcuts {
     }
   }
 
+  // Screen capture moved from ⌘C to ⌘⇧S to leave Copy alone; carry the untouched old default
+  // over so existing installs follow the new binding.
+  if (shortcuts.capture === 'CommandOrControl+KeyC') {
+    shortcuts.capture = DEFAULT_OVERLAY_SHORTCUTS.capture
+  }
+
   // Web search moved from ⌘W to ⌘S; carry the untouched old default over.
   if (shortcuts.webSearch === 'CommandOrControl+KeyW') {
     shortcuts.webSearch = DEFAULT_OVERLAY_SHORTCUTS.webSearch

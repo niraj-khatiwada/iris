@@ -63,8 +63,9 @@ fn window(app: &AppHandle) -> Option<WebviewWindow> {
     app.get_webview_window(CAPTURE_LABEL)
 }
 
-/// Covers the captured display with the screenshot and waits for a selection.
-pub fn show(app: &AppHandle, monitor: &tauri::Monitor, image: &str) -> Result<(), String> {
+/// Covers the display with the live capture panel and waits for a selection. The screen continues
+/// playing behind the transparent selection UI; nothing is screenshotted until the user attaches.
+pub fn show(app: &AppHandle, monitor: &tauri::Monitor) -> Result<(), String> {
     let Some(window) = window(app) else {
         return Err("The Iris capture window is not available.".to_string());
     };
@@ -106,7 +107,7 @@ pub fn show(app: &AppHandle, monitor: &tauri::Monitor, image: &str) -> Result<()
     }
 
     // The capture webview is created at startup, so the listener is already mounted.
-    let _ = app.emit(event::CAPTURE_START, serde_json::json!({ "image": image }));
+    let _ = app.emit(event::CAPTURE_START, ());
     Ok(())
 }
 

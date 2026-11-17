@@ -4,6 +4,7 @@ import { Square, Volume2 } from 'lucide-react'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useSpeechStore } from '@/stores/speechStore'
 import { speakText, stopSpeaking } from '@/tauri/commands/voice'
+import { formatShortcut } from '@/utils/shortcut'
 import { cn } from '@/utils/tailwind'
 import { isTauri } from '@/utils/tauri'
 
@@ -23,6 +24,9 @@ function ReadAloudButton({
   className,
 }: ReadAloudButtonProps) {
   const activeConversationId = useSpeechStore((state) => state.conversationId)
+  const stopShortcut = useSettingsStore(
+    (state) => state.overlayShortcuts.stopSpeaking,
+  )
   const playing = useSpeechStore((state) => state.preparing || state.speaking)
   // Read-aloud is conversation-scoped in the backend. While this conversation is being prepared
   // or played, the button is a Stop control; clicking again must not restart the same audio.
@@ -78,7 +82,9 @@ function ReadAloudButton({
         )}
       </Button>
       <Tooltip.Content>
-        {active ? 'Stop reading aloud' : 'Read aloud'}
+        {active
+          ? `Stop reading aloud · ${formatShortcut(stopShortcut)}`
+          : 'Read aloud'}
       </Tooltip.Content>
     </Tooltip>
   )

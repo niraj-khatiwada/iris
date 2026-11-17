@@ -2,6 +2,8 @@ import { useEffect } from 'react'
 
 import { useChatStore } from '@/stores/chatStore'
 import { useUIStore } from '@/stores/uiStore'
+import { hideMainWindow } from '@/tauri/commands/app'
+import { isTauri } from '@/utils/tauri'
 
 /** Global desktop shortcuts, matched to the habits of a macOS assistant. */
 export function useKeyboardShortcuts() {
@@ -9,6 +11,7 @@ export function useKeyboardShortcuts() {
   const stopStreaming = useChatStore((state) => state.stopStreaming)
   const toggleSidebar = useUIStore((state) => state.toggleSidebar)
   const openSettings = useUIStore((state) => state.openSettings)
+  const closeSettings = useUIStore((state) => state.closeSettings)
   const focusComposer = useUIStore((state) => state.focusComposer)
 
   useEffect(() => {
@@ -54,6 +57,17 @@ export function useKeyboardShortcuts() {
         return
       }
 
+      if (modifier && !event.shiftKey && !event.altKey && key === 'w') {
+        event.preventDefault()
+        // The menu's Close Window accelerator is deliberately removed, so the history window
+        // handles Cmd+W itself and hides the same way the red close button does.
+        closeSettings()
+        if (isTauri()) {
+          void hideMainWindow()
+        }
+        return
+      }
+
       if (event.key === 'Escape') {
         void stopStreaming()
       }
@@ -62,6 +76,7 @@ export function useKeyboardShortcuts() {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [
+    closeSettings,
     createConversation,
     focusComposer,
     openSettings,

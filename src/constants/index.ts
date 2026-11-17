@@ -50,15 +50,16 @@ export const QUICK_CONVERSATION_ID = 'iris:quick'
 export const QUICK_CONVERSATION_TITLE = 'Quick chat'
 export const CHAT_STORAGE_KEY = 'iris.chat'
 export const SETTINGS_STORAGE_KEY = 'iris.settings'
-/** Overlay-local shortcuts, recorded and matched in the quick chat only. */
+/** In-app shortcuts recorded in Settings; stopping read-aloud also works in the history window. */
 export const DEFAULT_OVERLAY_SHORTCUTS = {
-  capture: 'CommandOrControl+KeyC',
+  capture: 'CommandOrControl+Shift+KeyS',
   newChat: 'CommandOrControl+KeyN',
   restorePrevious: 'CommandOrControl+Shift+KeyN',
   toggleResponse: 'CommandOrControl+KeyB',
   deepThink: 'CommandOrControl+KeyD',
   webSearch: 'CommandOrControl+KeyS',
   voiceInput: 'CommandOrControl+KeyI',
+  stopSpeaking: 'CommandOrControl+KeyX',
 } as const
 export const THEME_LABELS: Record<ThemeMode, string> = {
   light: 'Light',

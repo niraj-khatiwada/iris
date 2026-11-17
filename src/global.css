@@ -275,6 +275,26 @@ html[data-window="canvas"] body {
   overflow: hidden;
 }
 
+html[data-window="capture"],
+html[data-window="capture"] body,
+html[data-window="capture"] #app {
+  background: transparent;
+}
+
+html[data-window="capture"] body {
+  overflow: hidden;
+}
+
+html[data-window="preview"],
+html[data-window="preview"] body,
+html[data-window="preview"] #app {
+  background: transparent;
+}
+
+html[data-window="preview"] body {
+  overflow: hidden;
+}
+
 .iris-panel {
   transition:
     background-color 160ms ease,

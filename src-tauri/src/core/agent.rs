@@ -137,8 +137,7 @@ pub async fn stream_reply(
                 let tts_url = config.tts_url.clone();
                 let voice = config.tts_voice;
                 tauri::async_runtime::spawn(async move {
-                    speech::speak(speech_app, conversation_id, api_key, tts_url, voice, text)
-                        .await;
+                    speech::speak(speech_app, conversation_id, api_key, tts_url, voice, text).await;
                 });
             }
         }
@@ -174,7 +173,8 @@ async fn run(
         return Ok(Outcome::Cancelled);
     };
 
-    let body = build_body(prepared.system, prepared.messages, config);
+    let read_url = newest_user_message(&request.messages).is_some_and(contains_url);
+    let body = build_body(prepared.system, prepared.messages, config, read_url);
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(300))
@@ -571,8 +571,9 @@ async fn summarize_chunk(
     Ok(Some(summary.trim().to_string()))
 }
 
-/// Builds the streaming request body for a reply. Both composer toggles only affect the request.
-fn build_body(system: String, messages: Vec<Value>, config: &AgentConfig) -> Value {
+/// Builds the streaming request body for a reply. Both composer toggles only affect the request,
+/// and URL reading is enabled automatically when the newest user message contains a link.
+fn build_body(system: String, messages: Vec<Value>, config: &AgentConfig, read_url: bool) -> Value {
     let mut body = json!({
         "model": config.model,
         // Required by the Messages API; omitting it is rejected with a 400.
@@ -589,14 +590,44 @@ fn build_body(system: String, messages: Vec<Value>, config: &AgentConfig) -> Val
         json!({ "type": "disabled" })
     };
 
-    if config.web_search {
-        // The standard server-side search tool runs on DeepSeek's Messages endpoint.
-        body["tools"] = json!([
-            { "type": "web_search_20250305", "name": "web_search" }
-        ]);
+    // DeepSeek's own server tools. They cannot be mixed with other server tools, so the legacy
+    // `web_search_20250305` is gone. With thinking and search both on, DeepSeek runs deep thinking
+    // search and skips the user's links, so URL reading takes precedence in that case.
+    let mut tools = Vec::new();
+    if config.web_search && !(read_url && config.deep_think) {
+        tools.push(json!({ "type": "deepseek_web_search", "name": "deepseek_web_search" }));
+    }
+    if read_url {
+        tools.push(json!({ "type": "deepseek_read_url", "name": "deepseek_read_url" }));
+    }
+    if !tools.is_empty() {
+        body["tools"] = Value::Array(tools);
     }
 
     body
+}
+
+/// DeepSeek reads links only from the newest user message, so only that message is checked.
+fn newest_user_message(messages: &[ChatMessageInput]) -> Option<&str> {
+    messages
+        .iter()
+        .rev()
+        .find(|message| message.role == "user")
+        .map(|message| message.content.as_str())
+}
+
+/// Presence check for a link, not a URL parser: the service decides which links to read. Bare
+/// `www.` links are included because people often paste them without a scheme.
+fn contains_url(text: &str) -> bool {
+    let lowered = text.to_ascii_lowercase();
+    ["https://", "http://", "www."].iter().any(|prefix| {
+        lowered.match_indices(prefix).any(|(index, _)| {
+            lowered[index + prefix.len()..]
+                .chars()
+                .next()
+                .is_some_and(|next| next.is_ascii_alphanumeric())
+        })
+    })
 }
 
 fn emit_token(app: &AppHandle, request_id: &str, token: &str) {
@@ -712,8 +743,8 @@ mod tests {
     use serde_json::Value;
 
     use super::{
-        build_body, chunk_end, prepare_with, split_index, to_api_messages, trim_to_user,
-        AgentConfig, SummaryCache, Turn, RECENT_BUDGET_CHARS,
+        build_body, chunk_end, contains_url, newest_user_message, prepare_with, split_index,
+        to_api_messages, trim_to_user, AgentConfig, SummaryCache, Turn, RECENT_BUDGET_CHARS,
     };
     use crate::tauri_commands::chat::{ChatAttachmentInput, ChatMessageInput};
 
@@ -834,17 +865,81 @@ mod tests {
         };
 
         // Off: thinking is explicitly disabled and no tool is sent.
-        let off = build_body("system".to_string(), vec![], &config);
+        let off = build_body("system".to_string(), vec![], &config, false);
         assert_eq!(off["thinking"]["type"], "disabled");
         assert!(off.get("tools").is_none());
 
         config.deep_think = true;
         config.web_search = true;
-        let on = build_body("system".to_string(), vec![], &config);
+        let on = build_body("system".to_string(), vec![], &config, false);
         assert_eq!(on["thinking"]["type"], "adaptive");
         let tools = on["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0]["name"], "web_search");
+        assert_eq!(tools[0]["name"], "deepseek_web_search");
+    }
+
+    #[test]
+    fn links_enable_url_reading() {
+        let mut config = AgentConfig {
+            api_key: "test-key".to_string(),
+            base_url: "http://127.0.0.1".to_string(),
+            model: "deepseek-flash".to_string(),
+            auto_speak: false,
+            deep_think: false,
+            web_search: false,
+            tts_voice: "stella".to_string(),
+            tts_url: String::new(),
+        };
+
+        assert!(contains_url("Read https://example.com/a?b=1 for me."));
+        assert!(contains_url("Try WWW.Example.com"));
+        assert!(!contains_url("There is no link here."));
+        assert!(!contains_url("https://"));
+
+        let read = build_body("system".to_string(), vec![], &config, true);
+        let tools = read["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["name"], "deepseek_read_url");
+
+        // Search and URL reading can be declared together in normal mode.
+        config.web_search = true;
+        let both = build_body("system".to_string(), vec![], &config, true);
+        let tools = both["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0]["name"], "deepseek_web_search");
+        assert_eq!(tools[1]["name"], "deepseek_read_url");
+
+        // With thinking on, search would turn into deep thinking search and skip the links, so
+        // URL reading is the only tool declared.
+        config.deep_think = true;
+        let read_only = build_body("system".to_string(), vec![], &config, true);
+        let tools = read_only["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["name"], "deepseek_read_url");
+    }
+
+    #[test]
+    fn only_the_newest_user_message_is_checked_for_links() {
+        let messages = vec![
+            ChatMessageInput {
+                role: "user".to_string(),
+                content: "https://example.com".to_string(),
+                attachments: Vec::new(),
+            },
+            ChatMessageInput {
+                role: "assistant".to_string(),
+                content: "I read it.".to_string(),
+                attachments: Vec::new(),
+            },
+            ChatMessageInput {
+                role: "user".to_string(),
+                content: "And what about this?".to_string(),
+                attachments: Vec::new(),
+            },
+        ];
+
+        assert_eq!(newest_user_message(&messages), Some("And what about this?"));
+        assert!(!newest_user_message(&messages).is_some_and(contains_url));
     }
 
     #[tokio::test]
@@ -968,13 +1063,13 @@ mod format_tests {
     /// The reply body uses the Messages API shape and only sends extras when toggled on.
     #[test]
     fn the_body_uses_the_messages_shape() {
-        let body = build_body("sys".to_string(), vec![], &config());
+        let body = build_body("sys".to_string(), vec![], &config(), false);
         assert_eq!(body["system"], "sys");
         // Required by the Messages API.
         assert_eq!(body["max_tokens"], MAX_OUTPUT_TOKENS);
         // The fixture enables thinking and web search.
         assert_eq!(body["thinking"]["type"], "adaptive");
-        assert_eq!(body["tools"][0]["name"], "web_search");
+        assert_eq!(body["tools"][0]["name"], "deepseek_web_search");
         assert!(body.get("reasoning_effort").is_none());
     }
 
@@ -985,7 +1080,7 @@ mod format_tests {
         off.deep_think = false;
         off.web_search = false;
 
-        let body = build_body("sys".to_string(), vec![], &off);
+        let body = build_body("sys".to_string(), vec![], &off, false);
         assert_eq!(body["thinking"]["type"], "disabled");
         assert!(body.get("tools").is_none());
         assert_eq!(body["max_tokens"], MAX_OUTPUT_TOKENS);

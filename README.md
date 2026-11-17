@@ -206,16 +206,18 @@ feature-parity plan, not just a custom URL.
   `bun run tauri:dev` and `bun run tauri:build:debug`. Dev chats and settings therefore live in
   separate `Application Support` and WebKit folders and never clash with the installed app.
 - The quick overlay has configurable local shortcuts in Settings → Shortcuts: Capture screen
-  (`⌘C`), New chat (`⌘N`), Previous conversation (`⌘⇧N`), Show / hide response (`⌘B`), DeepThink
-  (`⌘D`), Web search (`⌘S`), and Voice input (`⌘I`). They are overlay-only and never register with
-  the OS.
+  (`⌘⇧S`), New chat (`⌘N`), Previous conversation (`⌘⇧N`), Show / hide response (`⌘B`), DeepThink
+  (`⌘D`), Web search (`⌘S`), Voice input (`⌘I`), and Stop read-aloud (`⌘X`). They never register
+  with the OS. Stop read-aloud also works in the history window, and only claims `⌘X` while a reply
+  is being prepared or spoken so Cut keeps working otherwise.
 - Settings → Storage has two separate actions: **Clear** deletes only conversations, while
   **Reset Iris** wipes conversations, compressed summaries, speech audio, settings, the API key,
   and the pre-rename data copies, then reloads both webviews. The SQLite file is vacuumed and its
   WAL truncated so cleared messages are not recoverable from the database files.
-- The quick overlay can be dragged by its header or input-row background. Its frame is saved to
-  `overlay-position.json` in the app data directory, restored on launch, and cleared by Reset Iris.
-  The bottom edge stays fixed while the panel grows or shrinks.
+- The quick overlay can be dragged by its header or input-row background. While dragging, two
+  dashed guides mark the horizontal center of the display and turn primary green when the panel
+  snaps there. Its frame is saved to `overlay-position.json` in the app data directory, restored on
+  launch, and cleared by Reset Iris. The bottom edge stays fixed while the panel grows or shrinks.
 - Deleting a conversation archives it (`archivedAt`). The sidebar shows a collapsible Archives
   section while anything is archived; archived chats open read-only and can be restored or
   permanently deleted. They never accept new messages or renames. Empty conversations are deleted
@@ -225,15 +227,21 @@ feature-parity plan, not just a custom URL.
 - Settings live in `localStorage`; the DeepSeek API key lives in the SQLite `credential` table and
   is read only inside Rust.
 - The composer has two request toggles: **DeepThink** sends `thinking: { type: "adaptive" }`, and
-  **Search** adds the `web_search_20250305` server tool. Both apply to the next message only.
+  **Search** adds DeepSeek's `deepseek_web_search` server tool. When the newest message contains a
+  link, `deepseek_read_url` is added automatically so the model can read the page; with DeepThink
+  and Search both on, URL reading wins so the links are actually read. Both toggles apply to the
+  next message only.
 - Images can be pasted or dropped into the composer or the quick overlay; there is no attach
-  button. They are resized to 1280px JPEGs, kept as attachments on the user message, and sent to
-  the Messages API as base64 image blocks. The database stores them in `messages.attachments`.
-- The quick overlay also supports **screen context** (overlay only): a capture button freezes the
-  current display, lets you drag a region, resize it with eight handles, drag the toolbar handle to
-  move it, and annotate it with a pen, rectangle, or arrow in four colours. `Cmd+Z` undoes the last
-  stroke; **Attach** or **Enter** sends the flattened JPEG into the overlay draft like any other image. Escape
-  or Cancel returns to the overlay.
+  button, and non-image files are ignored until document support lands. They are resized to 1280px JPEGs, kept as attachments on the user message, and sent to
+  the Messages API as base64 image blocks. Double-click a thumbnail or a sent image to open it in
+  Iris's full-screen preview; Escape or a click outside closes it. The database stores them in
+  `messages.attachments`.
+- The quick overlay also supports **screen context** (overlay only): a capture button opens a live
+  selection overlay without freezing the screen, lets you drag a region, resize it with eight
+  handles, drag the toolbar handle to move it, and annotate it with a pen, rectangle, or arrow in
+  four colours. `Cmd+Z` undoes the last stroke; **Attach** or **Enter** captures the selected region
+  (with annotations) at native resolution and puts the JPEG into the overlay draft like any other
+  image. Escape or Cancel returns to the overlay.
 - Automatic read-aloud has a preparing phase: `speech:preparing` arrives when the reply ends and its
   audio starts downloading, so the blob and its wave turn blue while it waits. Playback then emits `speech:start`, and `speech:end` covers completion, Stop,
   or a TTS failure.
@@ -268,7 +276,7 @@ SQLite. The API key is stored in plain text in `credential`; the webview still n
   Space with `CanJoinAllSpaces | FullScreenAuxiliary`; the input panel sits above it at a higher
   window level.
 - The configured summon shortcut toggles the overlay. `Esc` hides it. The history window's
-  shortcuts still work once it is open.
+  shortcuts still work once it is open, and `⌘W` hides it like its red close button.
 - The overlay is always dark; the history window follows light/dark/system.
 - Screen Recording and Microphone permissions are declared in `src-tauri/Info.plist`.
   Screen Recording is exposed through `src-tauri/src/sys/screen.rs` +

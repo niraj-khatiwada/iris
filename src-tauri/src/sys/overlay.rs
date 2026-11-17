@@ -15,9 +15,13 @@ pub const CANVAS_LABEL: &str = "canvas";
 static OVERLAY_READY: AtomicBool = AtomicBool::new(false);
 
 const OVERLAY_WIDTH: f64 = 792.0;
+/// The visible panel inside the 792px overlay window (16px shadow gutter on each side).
+const OVERLAY_PANEL_WIDTH: f64 = OVERLAY_WIDTH - 32.0;
 const OVERLAY_MIN_HEIGHT: f64 = 100.0;
 const OVERLAY_MAX_HEIGHT: f64 = 720.0;
 const BOTTOM_MARGIN: f64 = 96.0;
+/// How close the window center must be to the display center to snap and show blue guides.
+const SNAP_DISTANCE: f64 = 24.0;
 const POSITION_FILE: &str = "overlay-position.json";
 const POSITION_WRITE_INTERVAL: Duration = Duration::from_millis(350);
 
@@ -27,6 +31,17 @@ const POSITION_WRITE_INTERVAL: Duration = Duration::from_millis(350);
 struct OverlayBounds {
     x: i32,
     bottom: i32,
+}
+
+/// Screen-space snap guides for the canvas window. `left` and `right` are CSS pixels inside the
+/// canvas webview; they mark the centered panel's edges, not the window's current edges.
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OverlayGuides {
+    left: f64,
+    right: f64,
+    snapped: bool,
+    visible: bool,
 }
 
 /// Window position is native state, not conversation data, so it lives in Rust and survives
@@ -160,6 +175,10 @@ pub fn setup_panels(app: &AppHandle) -> Result<(), String> {
         log::warn!("Could not prepare the Iris capture panel: {error}");
     }
 
+    if let Err(error) = crate::sys::preview::setup(app) {
+        log::warn!("Could not prepare the Iris preview panel: {error}");
+    }
+
     log::info!("Iris windows are ready as non-activating panels");
     Ok(())
 }
@@ -283,6 +302,7 @@ pub fn show_passive(app: &AppHandle) -> Result<(), String> {
 
 pub fn hide(app: &AppHandle) -> Result<(), String> {
     log::debug!("Hiding Iris overlay");
+    hide_guides(app);
     persist_position(app);
     if let Some(canvas) = app.get_webview_window(CANVAS_LABEL) {
         #[cfg(target_os = "macos")]
@@ -460,6 +480,85 @@ fn elevate(window: &WebviewWindow, interactive: bool) {
     }
 }
 
+/// The x position of a centered overlay on the display it currently occupies.
+fn centered_x(window: &WebviewWindow, size: PhysicalSize<u32>) -> Option<(i32, f64)> {
+    let monitor = window.current_monitor().ok().flatten()?;
+    let target_x = monitor.position().x + (monitor.size().width as i32 - size.width as i32) / 2;
+    Some((target_x, monitor.scale_factor()))
+}
+
+/// Snaps the overlay to the display center when it is close enough, and returns the x to persist.
+fn snap_horizontally(
+    app: &AppHandle,
+    position: PhysicalPosition<i32>,
+    size: PhysicalSize<u32>,
+) -> i32 {
+    let Ok(window) = overlay_window(app) else {
+        return position.x;
+    };
+    let Some((target_x, scale)) = centered_x(&window, size) else {
+        return position.x;
+    };
+
+    if (position.x - target_x).abs() as f64 > SNAP_DISTANCE * scale {
+        return position.x;
+    }
+
+    if position.x != target_x {
+        let _ = window.set_position(Position::Physical(PhysicalPosition::new(
+            target_x, position.y,
+        )));
+    }
+    target_x
+}
+
+/// Draws the snap guide lines on the full-screen canvas, mapped into its CSS coordinates.
+fn show_guides(app: &AppHandle, position: PhysicalPosition<i32>, size: PhysicalSize<u32>) {
+    let Ok(window) = overlay_window(app) else {
+        return;
+    };
+    let Some((target_x, scale)) = centered_x(&window, size) else {
+        return;
+    };
+    let Some(canvas) = app.get_webview_window(CANVAS_LABEL) else {
+        return;
+    };
+    let Ok(canvas_position) = canvas.outer_position() else {
+        return;
+    };
+    let Ok(canvas_scale) = canvas.scale_factor() else {
+        return;
+    };
+
+    let center = target_x as f64 + size.width as f64 / 2.0;
+    let half_panel = OVERLAY_PANEL_WIDTH * scale / 2.0;
+    let left = (center - half_panel - canvas_position.x as f64) / canvas_scale;
+    let right = (center + half_panel - canvas_position.x as f64) / canvas_scale;
+
+    let _ = app.emit(
+        crate::utils::event::OVERLAY_GUIDES,
+        OverlayGuides {
+            left,
+            right,
+            snapped: (position.x - target_x).abs() as f64 <= SNAP_DISTANCE * scale,
+            visible: true,
+        },
+    );
+}
+
+/// Removes the canvas guides immediately, e.g. when the overlay is hidden.
+fn hide_guides(app: &AppHandle) {
+    let _ = app.emit(
+        crate::utils::event::OVERLAY_GUIDES,
+        OverlayGuides {
+            left: 0.0,
+            right: 0.0,
+            snapped: false,
+            visible: false,
+        },
+    );
+}
+
 /// Persists the position recorded by the last Moved event.
 pub fn persist_position(app: &AppHandle) {
     let Some(state) = app.try_state::<OverlayPosition>() else {
@@ -488,8 +587,13 @@ pub fn record_move(app: &AppHandle, position: PhysicalPosition<i32>, size: Physi
         return;
     }
 
+    // Dragging near the horizontal center of the display snaps the panel and turns the guides
+    // blue. The canvas draws them at the centered target's edges.
+    let x = snap_horizontally(app, position, size);
+    show_guides(app, position, size);
+
     let bounds = OverlayBounds {
-        x: position.x,
+        x,
         bottom: position.y + size.height as i32,
     };
     *state

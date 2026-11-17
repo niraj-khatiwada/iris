@@ -32,6 +32,7 @@
     "windows": [
       {
         "label": "overlay",
+        "dragDropEnabled": false,
         "title": "Iris",
         "url": "overlay.html",
         "width": 792,
@@ -75,6 +76,27 @@
         "fullscreen": false
       },
       {
+        "label": "preview",
+        "title": "Iris Preview",
+        "url": "preview.html",
+        "width": 100,
+        "height": 100,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "closable": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "visibleOnAllWorkspaces": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "focus": true,
+        "acceptFirstMouse": true,
+        "fullscreen": false
+      },
+      {
         "label": "canvas",
         "title": "Iris Canvas",
         "url": "canvas.html",
@@ -98,6 +120,7 @@
       },
       {
         "label": "main",
+        "dragDropEnabled": false,
         "title": "Iris",
         "width": 1240,
         "height": 840,

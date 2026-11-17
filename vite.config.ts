@@ -42,6 +42,7 @@ export default defineConfig(({ mode }) => ({
         overlay: resolve('overlay.html'),
         canvas: resolve('canvas.html'),
         capture: resolve('capture.html'),
+        preview: resolve('preview.html'),
       },
     },
   },

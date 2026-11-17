@@ -5,11 +5,17 @@ import { newId } from '@/utils/id'
 const MAX_DIMENSION = 1280
 const JPEG_QUALITY = 0.8
 const MAX_FILE_BYTES = 12 * 1024 * 1024
+const IMAGE_NAME = /\.(avif|bmp|gif|heic|heif|jpe?g|png|tiff?|webp)$/i
+
+/** Dropped files do not always carry a MIME type, so fall back to the file name. */
+export function isImageFile(file: File) {
+  return file.type.startsWith('image/') || IMAGE_NAME.test(file.name)
+}
 
 export async function fileToAttachment(
   file: File,
 ): Promise<ChatAttachment | null> {
-  if (!file.type.startsWith('image/') || file.size > MAX_FILE_BYTES) {
+  if (!isImageFile(file) || file.size > MAX_FILE_BYTES) {
     return null
   }
 

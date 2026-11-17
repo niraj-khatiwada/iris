@@ -142,6 +142,32 @@ function keyFromCode(code: string): string | null {
   return null
 }
 
+const COMMAND_MODIFIERS = new Set([
+  'commandorcontrol',
+  'commandorctrl',
+  'cmdorctrl',
+  'cmdorcontrol',
+  'command',
+  'cmd',
+  'super',
+  'meta',
+])
+
+/** True for a plain Command+key binding, which macOS also uses for its Edit menu accelerators. */
+export function isPlainCommandKey(shortcut: string, code: string): boolean {
+  const parts = shortcut
+    .toLowerCase()
+    .split('+')
+    .map((part) => part.trim())
+    .filter(Boolean)
+
+  return (
+    parts.length === 2 &&
+    COMMAND_MODIFIERS.has(parts[0]) &&
+    parts[1] === code.toLowerCase()
+  )
+}
+
 /**
  * Matches a keydown against a shortcut recorded by `shortcutFromEvent` (Tauri syntax). Used for
  * the overlay-local shortcuts, which never register with the OS.

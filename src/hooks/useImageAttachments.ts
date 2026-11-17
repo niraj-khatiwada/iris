@@ -2,7 +2,7 @@ import type { ClipboardEvent, DragEvent } from 'react'
 import { useCallback, useRef, useState } from 'react'
 
 import type { ChatAttachment } from '@/types/chat'
-import { fileToAttachment } from '@/utils/image'
+import { fileToAttachment, isImageFile } from '@/utils/image'
 
 const MAX_ATTACHMENTS = 4
 
@@ -16,9 +16,7 @@ export function useImageAttachments() {
   const depth = useRef(0)
 
   const addFiles = useCallback(async (files: Iterable<File>) => {
-    const images = Array.from(files).filter((file) =>
-      file.type.startsWith('image/'),
-    )
+    const images = Array.from(files).filter(isImageFile)
     if (images.length === 0) {
       return
     }

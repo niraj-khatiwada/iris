@@ -9,6 +9,7 @@ import { useHistorySync } from '@/hooks/useHistorySync'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 import { useSettingsSync } from '@/hooks/useSettingsSync'
 import { useShortcutSync } from '@/hooks/useShortcutSync'
+import { useStopSpeakingShortcut } from '@/hooks/useStopSpeakingShortcut'
 import { useThemeSync } from '@/hooks/useThemeSync'
 import { useChatStore } from '@/stores/chatStore'
 
@@ -19,6 +20,7 @@ function ChatWorkspace() {
 
   useThemeSync()
   useKeyboardShortcuts()
+  useStopSpeakingShortcut()
   useHistorySync()
   useChatStorage()
   useSettingsSync()

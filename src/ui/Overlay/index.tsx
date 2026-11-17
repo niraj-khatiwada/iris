@@ -41,6 +41,7 @@ import { useImageAttachments } from '@/hooks/useImageAttachments'
 import { useOverlayWindow } from '@/hooks/useOverlayWindow'
 import { useSettingsSync } from '@/hooks/useSettingsSync'
 import { useSpeechPlayback } from '@/hooks/useSpeechPlayback'
+import { useStopSpeakingShortcut } from '@/hooks/useStopSpeakingShortcut'
 import { useVoiceInput } from '@/hooks/useVoiceInput'
 import { useChatStore } from '@/stores/chatStore'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -55,7 +56,11 @@ import {
 } from '@/tauri/commands/screen'
 import { stopSpeaking } from '@/tauri/commands/voice'
 import { newId } from '@/utils/id'
-import { formatShortcut, matchesShortcut } from '@/utils/shortcut'
+import {
+  formatShortcut,
+  isPlainCommandKey,
+  matchesShortcut,
+} from '@/utils/shortcut'
 import { cn } from '@/utils/tailwind'
 import { isTauri } from '@/utils/tauri'
 
@@ -72,22 +77,6 @@ const contentSpring = {
   damping: 40,
   mass: 0.6,
 } as const
-
-function isPlainCommandC(shortcut: string) {
-  const parts = shortcut
-    .toLowerCase()
-    .split('+')
-    .map((part) => part.trim())
-    .filter(Boolean)
-
-  return (
-    parts.length === 2 &&
-    ['commandorcontrol', 'command', 'cmd', 'meta', 'super'].includes(
-      parts[0],
-    ) &&
-    parts[1] === 'keyc'
-  )
-}
 
 function isTypingTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) {
@@ -136,6 +125,7 @@ function Overlay() {
   useChatStorage()
   useSettingsSync()
   useSpeechPlayback()
+  useStopSpeakingShortcut()
   const speaking = useSpeechStore((state) => state.speaking)
   const preparing = useSpeechStore((state) => state.preparing)
   const speechError = useSpeechStore((state) => state.error)
@@ -157,7 +147,10 @@ function Overlay() {
   const finishVoiceRef = useRef<(forceSend?: boolean) => void>(() => {})
   const startCaptureRef = useRef<() => void>(() => {})
   const captureGuard = useRef(0)
-  const captureShortcutIsCopy = isPlainCommandC(overlayShortcuts.capture)
+  const captureShortcutIsCopy = isPlainCommandKey(
+    overlayShortcuts.capture,
+    'KeyC',
+  )
   const triggerCapture = useCallback(() => {
     const now = Date.now()
     if (now - captureGuard.current < 600) {
@@ -281,9 +274,9 @@ function Overlay() {
     element.style.height = `${Math.min(element.scrollHeight, 120)}px`
   }, [value, inputRef])
 
-  // Overlay-local shortcuts: "/" focuses the input, Cmd+, opens Settings, and the six
-  // configurable bindings drive capture, new chat, show/hide response, thinking mode, web search,
-  // and voice input.
+  // Overlay-local shortcuts: "/" focuses the input, Cmd+, opens Settings, and the configurable
+  // bindings drive capture, new chat, show/hide response, thinking mode, web search, voice input,
+  // and stopping read-aloud.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const modifier = event.metaKey || event.ctrlKey
@@ -654,6 +647,7 @@ function Overlay() {
         )}
         initial={false}
         transition={panelSpring}
+        {...images.dragHandlers}
       >
         <div ref={contentRef} className="relative">
           <AnimatePresence>
@@ -971,7 +965,6 @@ function Overlay() {
                       images.dragging && 'bg-foreground/[0.03]',
                     )}
                     data-tauri-drag-region="deep"
-                    {...images.dragHandlers}
                   >
                     <AttachmentStrip
                       attachments={images.attachments}

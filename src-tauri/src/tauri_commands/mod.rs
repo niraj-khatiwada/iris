@@ -3,6 +3,7 @@ pub mod chat;
 pub mod credentials;
 pub mod models;
 pub mod overlay;
+pub mod preview;
 pub mod screen;
 pub mod shortcut;
 pub mod storage;

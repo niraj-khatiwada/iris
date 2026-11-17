@@ -1,9 +1,12 @@
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { X } from 'lucide-react'
 
+import { showImagePreview } from '@/tauri/commands/preview'
 import type { ChatAttachment } from '@/types/chat'
 import { cn } from '@/utils/tailwind'
+import { isTauri } from '@/utils/tauri'
 
-/** Thumbnails for pasted or dropped images, with a quiet remove control. */
+/** Thumbnails for pasted or dropped images; double-click one to preview it at full size. */
 function AttachmentStrip({
   attachments,
   onRemove,
@@ -19,6 +22,12 @@ function AttachmentStrip({
     return null
   }
 
+  const preview = (attachment: ChatAttachment) => {
+    if (isTauri()) {
+      void showImagePreview(getCurrentWindow().label, attachment.dataUrl)
+    }
+  }
+
   return (
     <div
       aria-label="Attached images"
@@ -26,15 +35,28 @@ function AttachmentStrip({
     >
       {attachments.map((attachment) => (
         <div key={attachment.id} className="relative">
-          <img
-            alt={attachment.name}
-            className={cn(
-              'rounded-xl border border-border/60 object-cover',
-              compact ? 'size-12' : 'size-14',
-            )}
-            src={attachment.dataUrl}
-            title={attachment.name}
-          />
+          <button
+            type="button"
+            aria-label={`Preview ${attachment.name}`}
+            className="block rounded-xl focus-visible:outline-none"
+            title={`${attachment.name} — double-click to preview`}
+            onDoubleClick={() => preview(attachment)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                preview(attachment)
+              }
+            }}
+          >
+            <img
+              alt={attachment.name}
+              className={cn(
+                'rounded-xl border border-border/60 object-cover',
+                compact ? 'size-12' : 'size-14',
+              )}
+              src={attachment.dataUrl}
+            />
+          </button>
           <button
             type="button"
             aria-label={`Remove ${attachment.name}`}
