@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import CopyButton from '@/components/CopyButton'
 import Markdown from '@/components/Markdown'
+import ReadAloudButton from '@/components/ReadAloudButton'
 import { useChatStore } from '@/stores/chatStore'
 import type { ChatMessage } from '@/types/chat'
 import { formatMessageTime } from '@/utils/format'
@@ -205,6 +206,19 @@ function MessageBubble({
             </Tooltip>
           ) : null}
 
+          {!editing &&
+          !isUser &&
+          message.status === 'complete' &&
+          message.content ? (
+            <>
+              <CopyButton text={message.content} />
+              <ReadAloudButton
+                conversationId={conversationId}
+                text={message.content}
+              />
+            </>
+          ) : null}
+
           {!editing && canRegenerate ? (
             <Tooltip delay={400}>
               <Button
@@ -220,13 +234,6 @@ function MessageBubble({
               </Button>
               <Tooltip.Content>Regenerate</Tooltip.Content>
             </Tooltip>
-          ) : null}
-
-          {!editing &&
-          !isUser &&
-          message.status === 'complete' &&
-          message.content ? (
-            <CopyButton text={message.content} />
           ) : null}
         </div>
       </div>

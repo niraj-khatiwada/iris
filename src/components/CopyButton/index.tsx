@@ -3,8 +3,9 @@ import { Check, Copy } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import Button from '@/components/Button'
+import { cn } from '@/utils/tailwind'
 
-function CopyButton({ text }: { text: string }) {
+function CopyButton({ text, className }: { text: string; className?: string }) {
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
@@ -28,7 +29,7 @@ function CopyButton({ text }: { text: string }) {
       <Button
         isIconOnly
         aria-label={copied ? 'Copied' : 'Copy message'}
-        className="size-6 min-w-6 text-muted"
+        className={cn('size-6 min-w-6 text-muted', className)}
         size="sm"
         variant="ghost"
         onPress={copy}

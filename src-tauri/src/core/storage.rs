@@ -1,5 +1,5 @@
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection, Transaction};
 use serde::{Deserialize, Serialize};
@@ -40,6 +40,10 @@ pub struct StoredConversation {
     pub messages: Vec<StoredMessage>,
 }
 
+/// The single credential row Iris uses for every outbound request. The keys are provider-neutral,
+/// so one row covers chat, read-aloud, and voice input.
+const API_KEY_CREDENTIAL: &str = "api-key";
+
 /// SQLite-backed conversation storage shared by the overlay and history windows.
 pub struct Storage {
     connection: Mutex<Connection>,
@@ -59,52 +63,7 @@ impl Storage {
         connection
             .busy_timeout(Duration::from_secs(5))
             .map_err(|error| error.to_string())?;
-        connection
-            .execute_batch(
-                "
-                PRAGMA journal_mode = WAL;
-                PRAGMA foreign_keys = ON;
-
-                CREATE TABLE IF NOT EXISTS conversations (
-                    id TEXT PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    created_at INTEGER NOT NULL,
-                    updated_at INTEGER NOT NULL,
-                    archived_at INTEGER
-                );
-
-                CREATE TABLE IF NOT EXISTS messages (
-                    id TEXT PRIMARY KEY,
-                    conversation_id TEXT NOT NULL
-                        REFERENCES conversations(id) ON DELETE CASCADE,
-                    role TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    created_at INTEGER NOT NULL,
-                    status TEXT NOT NULL,
-                    error TEXT,
-                    attachments TEXT
-                );
-
-                CREATE INDEX IF NOT EXISTS messages_by_conversation
-                    ON messages(conversation_id, created_at);
-                ",
-            )
-            .map_err(|error| format!("Could not prepare the Iris database: {error}"))?;
-
-        // Older databases predate archiving and image attachments.
-        if !has_column(&connection, "conversations", "archived_at")? {
-            connection
-                .execute(
-                    "ALTER TABLE conversations ADD COLUMN archived_at INTEGER",
-                    [],
-                )
-                .map_err(|error| format!("Could not add conversation archiving: {error}"))?;
-        }
-        if !has_column(&connection, "messages", "attachments")? {
-            connection
-                .execute("ALTER TABLE messages ADD COLUMN attachments TEXT", [])
-                .map_err(|error| format!("Could not add message attachments: {error}"))?;
-        }
+        prepare(&connection)?;
 
         Ok(Self {
             connection: Mutex::new(connection),
@@ -196,10 +155,150 @@ impl Storage {
             .map_err(|error| error.to_string())?;
         Ok(())
     }
+
+    /// Reads the stored API key. `Ok(None)` means no key has been saved yet.
+    pub fn api_key(&self) -> Result<Option<String>, String> {
+        let connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        match connection.query_row(
+            "SELECT api_key FROM credential WHERE name = ?1",
+            params![API_KEY_CREDENTIAL],
+            |row| row.get::<_, String>(0),
+        ) {
+            Ok(value) => Ok(Some(value)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(error) => Err(format!("Could not read the API key: {error}")),
+        }
+    }
+
+    /// The key every outbound request is authenticated with.
+    pub fn require_api_key(&self) -> Result<String, String> {
+        self.api_key()?
+            .ok_or_else(|| "Add your API key in Settings.".to_string())
+    }
+
+    /// Whether a key is stored. Used by Settings so it can offer Replace/Remove.
+    pub fn has_api_key(&self) -> bool {
+        self.connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .query_row(
+                "SELECT 1 FROM credential WHERE name = ?1",
+                params![API_KEY_CREDENTIAL],
+                |_| Ok(()),
+            )
+            .is_ok()
+    }
+
+    /// Saves the key, replacing any key already stored.
+    pub fn save_api_key(&self, value: &str) -> Result<(), String> {
+        self.connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .execute(
+                "INSERT INTO credential (name, api_key, updated_at)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(name) DO UPDATE SET
+                    api_key = excluded.api_key,
+                    updated_at = excluded.updated_at",
+                params![API_KEY_CREDENTIAL, value, now_ms()],
+            )
+            .map_err(|error| format!("Could not save the API key: {error}"))?;
+        Ok(())
+    }
+
+    /// Removes the stored key so nothing sent to the API can be authenticated.
+    pub fn remove_api_key(&self) -> Result<(), String> {
+        self.connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .execute(
+                "DELETE FROM credential WHERE name = ?1",
+                params![API_KEY_CREDENTIAL],
+            )
+            .map_err(|error| format!("Could not remove the API key: {error}"))?;
+        Ok(())
+    }
+
+    /// Drops every credential row. Used by Reset Iris; Clear conversations leaves the key alone.
+    pub fn clear_credentials(&self) -> Result<(), String> {
+        self.connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .execute("DELETE FROM credential", [])
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
 }
 
-fn has_column(connection: &Connection, table: &str, column: &str) -> Result<bool, String> {
-    let mut statement = connection
+/// Creates the current schema and upgrades databases written by older builds.
+fn prepare(connection: &Connection) -> Result<(), String> {
+    connection
+        .execute_batch(
+            "
+            PRAGMA journal_mode = WAL;
+            PRAGMA foreign_keys = ON;
+
+            CREATE TABLE IF NOT EXISTS conversations (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                archived_at INTEGER
+            );
+
+            CREATE TABLE IF NOT EXISTS messages (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL
+                    REFERENCES conversations(id) ON DELETE CASCADE,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                error TEXT,
+                attachments TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS messages_by_conversation
+                ON messages(conversation_id, created_at);
+
+            CREATE TABLE IF NOT EXISTS credential (
+                name TEXT PRIMARY KEY,
+                api_key TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            ",
+        )
+        .map_err(|error| format!("Could not prepare the Iris database: {error}"))?;
+
+    // Older databases predate archiving and image attachments.
+    if !has_column(connection, "conversations", "archived_at")? {
+        connection
+            .execute(
+                "ALTER TABLE conversations ADD COLUMN archived_at INTEGER",
+                [],
+            )
+            .map_err(|error| format!("Could not add conversation archiving: {error}"))?;
+    }
+    if !has_column(connection, "messages", "attachments")? {
+        connection
+            .execute("ALTER TABLE messages ADD COLUMN attachments TEXT", [])
+            .map_err(|error| format!("Could not add message attachments: {error}"))?;
+    }
+
+    Ok(())
+}
+
+fn now_ms() -> i64 {    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or_default()
+}
+
+fn has_column(connection: &Connection, table: &str, column: &str) -> Result<bool, String> {    let mut statement = connection
         .prepare(&format!("PRAGMA table_info({table})"))
         .map_err(|error| error.to_string())?;
     let columns = statement
@@ -310,4 +409,58 @@ fn messages_for(
         .map_err(|error| error.to_string())?;
 
     Ok(messages)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{prepare, Storage};
+    use rusqlite::Connection;
+    use std::sync::Mutex;
+
+    /// An in-memory database keeps the credential tests away from the real iris.db.
+    fn storage() -> Storage {
+        let connection = Connection::open_in_memory().expect("open an in-memory database");
+        prepare(&connection).expect("create the schema");
+        Storage {
+            connection: Mutex::new(connection),
+        }
+    }
+
+    #[test]
+    fn the_api_key_round_trips_and_is_removed() {
+        let storage = storage();
+        assert!(!storage.has_api_key());
+        assert_eq!(storage.api_key().expect("read"), None);
+        assert!(storage.require_api_key().is_err());
+
+        storage.save_api_key("sk-first").expect("save");
+        assert!(storage.has_api_key());
+        assert_eq!(
+            storage.api_key().expect("read").as_deref(),
+            Some("sk-first")
+        );
+
+        // Saving again replaces the row instead of adding a second credential.
+        storage.save_api_key("sk-second").expect("replace");
+        assert_eq!(
+            storage.api_key().expect("read").as_deref(),
+            Some("sk-second")
+        );
+
+        storage.remove_api_key().expect("remove");
+        assert!(!storage.has_api_key());
+        assert_eq!(storage.api_key().expect("read"), None);
+    }
+
+    #[test]
+    fn clearing_conversations_keeps_the_key_but_reset_removes_it() {
+        let storage = storage();
+        storage.save_api_key("sk-keep").expect("save");
+
+        storage.clear().expect("clear conversations");
+        assert!(storage.has_api_key());
+
+        storage.clear_credentials().expect("clear credentials");
+        assert!(!storage.has_api_key());
+    }
 }

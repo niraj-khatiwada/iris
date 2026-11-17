@@ -2,7 +2,10 @@ use std::time::Duration;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::Value;
-use tauri::AppHandle;
+use tauri::{AppHandle, State};
+
+use crate::core::endpoints;
+use crate::core::storage::Storage;
 
 /// Stops the current read-aloud. Also called when a new message starts or generation is cancelled.
 #[tauri::command]
@@ -10,20 +13,56 @@ pub fn stop_speaking(app: AppHandle) {
     crate::sys::speech::stop(&app);
 }
 
-/// Sends a recorded WAV to the configured ASR endpoint and returns the transcript.
+/// Reads a specific message aloud on demand, e.g. a reply picked from history.
+///
+/// Automatic read-aloud is still backend-owned; this command lets the UI speak any completed
+/// reply, not just the newest one. Playback reports through the same `speech:*` events.
+#[tauri::command]
+pub fn speak_text(
+    app: AppHandle,
+    storage: State<'_, Storage>,
+    conversation_id: String,
+    text: String,
+    base_url: String,
+    voice: String,
+) -> Result<(), String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Err("There is nothing to read aloud.".to_string());
+    }
+    if base_url.trim().is_empty() {
+        return Err("Add a base URL in Settings.".to_string());
+    }
+
+    let api_key = storage.require_api_key()?;
+    let voice = if voice == "tide" { "tide" } else { "stella" };
+
+    tauri::async_runtime::spawn(crate::sys::speech::speak(
+        app,
+        conversation_id,
+        api_key,
+        endpoints::url(&base_url, endpoints::TTS_PATH),
+        voice.to_string(),
+        text.to_string(),
+    ));
+    Ok(())
+}
+
+/// Sends a recorded WAV to DeepSeek's ASR tool under the configured base URL.
 #[tauri::command]
 pub async fn transcribe_audio(
-    asr_url: String,
+    storage: State<'_, Storage>,
+    base_url: String,
     audio_base64: String,
 ) -> Result<String, String> {
-    // The key lives in the Keychain and is read here, never sent from the webview.
-    let api_key = crate::tauri_commands::keychain::api_key()?;
+    // The key is read from the credential table here, never sent from the webview.
+    let api_key = storage.require_api_key()?;
 
-    // The full endpoint comes from Settings, so providers can host transcription elsewhere.
-    let asr_url = asr_url.trim().to_string();
-    if asr_url.is_empty() {
-        return Err("Add a voice transcription URL in Settings.".to_string());
+    if base_url.trim().is_empty() {
+        return Err("Add a base URL in Settings.".to_string());
     }
+
+    let asr_url = endpoints::url(&base_url, endpoints::ASR_PATH);
 
     let audio = STANDARD
         .decode(audio_base64.as_bytes())

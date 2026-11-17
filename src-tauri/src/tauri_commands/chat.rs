@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 use crate::core::agent::AgentConfig;
+use crate::core::endpoints;
+use crate::core::storage::Storage;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -12,11 +14,6 @@ pub struct ChatAttachmentInput {
     pub media_type: String,
     /// Base64 payload without the `data:` prefix.
     pub data: String,
-}
-
-/// Anthropic is the historical default; a provider that speaks OpenAI sets this explicitly.
-fn default_api_format() -> String {
-    "anthropic".to_string()
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -36,9 +33,6 @@ pub struct SendMessageRequest {
     pub conversation_id: String,
     pub messages: Vec<ChatMessageInput>,
     pub base_url: String,
-    /// `anthropic` or `openai`: the wire format this provider speaks.
-    #[serde(default = "default_api_format")]
-    pub api_format: String,
     pub model: String,
     pub auto_speak: bool,
     /// Enables DeepSeek's DeepThink before the reply.
@@ -48,9 +42,6 @@ pub struct SendMessageRequest {
     #[serde(default)]
     pub web_search: bool,
     pub tts_voice: String,
-    /// Full TTS endpoint, so providers can host speech generation anywhere.
-    #[serde(default)]
-    pub tts_url: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -131,6 +122,7 @@ impl GenerationState {
 pub fn send_message(
     app: AppHandle,
     state: State<'_, GenerationState>,
+    storage: State<'_, Storage>,
     request: SendMessageRequest,
 ) -> Result<(), String> {
     if request.request_id.trim().is_empty() {
@@ -140,8 +132,8 @@ pub fn send_message(
         return Err("There is nothing to send yet.".to_string());
     }
 
-    // The key lives in the Keychain and is read here, never sent from the webview.
-    let api_key = crate::tauri_commands::keychain::api_key()?;
+    // The key is read from the credential table here, never sent from the webview.
+    let api_key = storage.require_api_key()?;
 
     let base_url = request.base_url.trim().to_string();
     if base_url.is_empty() {
@@ -161,14 +153,13 @@ pub fn send_message(
     };
     let config = AgentConfig {
         api_key,
-        base_url,
-        api_format: request.api_format.clone(),
+        base_url: base_url.clone(),
         model,
         auto_speak: request.auto_speak,
         deep_think: request.deep_think,
         web_search: request.web_search,
         tts_voice,
-        tts_url: request.tts_url.clone(),
+        tts_url: endpoints::url(&base_url, endpoints::TTS_PATH),
     };
 
     crate::sys::speech::stop(&app);

@@ -159,32 +159,35 @@ activities and wrappers in `src/components/dynamic-island` instead of editing th
 
 1. `src/stores/chatStore.ts` adds the user message and an empty assistant message.
 2. `src/services/agent.ts` starts a run and subscribes to `chat:token` / `chat:done` / `chat:error`.
-3. The Rust command `send_message` calls DeepSeek's Anthropic-compatible Messages API
-   (`/anthropic/v1/messages`) and streams the response.
+3. The Rust command `send_message` calls DeepSeek's Messages API (`/v1/messages`) and streams the
+   response.
 4. Tokens are emitted back to the webview and appended to the active message, which stays hidden
    in the overlay. `cancel_generation` stops the stream.
 5. On completion, the backend automatically sends the reply to DeepSeek TTS
    (`/v1/tools/tts`), wraps the 24 kHz PCM in a WAV, and plays it with `afplay`. The overlay shows
    **Response ready** with a **Show response** control instead of the text.
 
-The event contract is deliberately small, so replacing the preview with a streaming HTTP provider only touches `src-tauri/src/core/agent.rs`.
+The event contract is deliberately small, so the transport in `src-tauri/src/core/agent.rs` can
+change without touching the UI.
 
 ## DeepSeek backend
 
-`src-tauri/src/core/agent.rs` is the DeepSeek integration point. It uses the demo's
-Anthropic-compatible Messages protocol and includes the read-link tool and safety check. The
-settings provide the API key, origin, and model; the default is `deepseek-flash`.
+`src-tauri/src/core/agent.rs` is the DeepSeek integration point. Iris supports only DeepSeek: the
+base URL defaults to `https://api.deepseek.com` and can point at a DeepSeek-compatible proxy, but
+there is no provider picker or wire-format switch. `core/endpoints.rs` derives `/v1/messages`,
+`/v1/models`, `/v1/tools/tts`, and `/v1/tools/asr` from that single origin.
 
 `src-tauri/src/sys/speech.rs` owns automatic read-aloud. It calls `/v1/tools/tts` with the selected
 voice, wraps the raw PCM in a WAV, and plays it with macOS `afplay`. A new message, Cancel, New
-chat, or quitting stops the current speech.
+chat, or quitting stops the current speech. The manual **Read aloud** button uses the same pipeline
+through `speak_text`, so any completed reply can be spoken without regenerating it.
 
-The API key lives in the macOS Keychain, saved from Settings → AI. The webview never receives it:
-`send_message` and `transcribe_audio` read it inside Rust, and once saved Settings shows a "Key
-saved" badge with Replace and Remove instead of the key itself.
+The API key is stored in the Iris SQLite database (`credential`), saved from Settings → AI. The
+webview never receives it: `send_message`, `speak_text`, and `transcribe_audio` read it inside Rust,
+and once saved Settings shows a "Key saved" badge with Replace and Remove instead of the key itself.
 
-Anthropic and Codex providers are planned later; keep provider-specific protocol code inside
-`core/agent.rs` so the frontend and event contract do not change.
+Supporting another provider later is a product decision, not a settings toggle: it needs a full
+feature-parity plan, not just a custom URL.
 
 ## Local data
 
@@ -214,8 +217,8 @@ Anthropic and Codex providers are planned later; keep provider-specific protocol
   outright instead of being archived.
 - New quick chats archive the previous quick conversation under a new id, so old messages stay in
   History instead of being discarded.
-- Settings live in `localStorage`; the DeepSeek API key lives in the macOS Keychain and is read
-  only inside Rust.
+- Settings live in `localStorage`; the DeepSeek API key lives in the SQLite `credential` table and
+  is read only inside Rust.
 - The composer has two request toggles, matching the DeepSeek demo: **DeepThink** sends
   `thinking: { type: "enabled" }`, and **Search** adds the `deepseek_web_search` tool (reading links
   is always available). Both are off by default and apply to the next message only.
@@ -235,7 +238,7 @@ Anthropic and Codex providers are planned later; keep provider-specific protocol
   new block of history, cached per conversation), so a chat keeps working past the context window.
   The summary only affects the request; the stored messages stay untouched.
 - No telemetry, no cloud sync, no network requests in the preview build.
-- The future provider integration is the only thing that should talk to the network.
+- Only `core/agent.rs` and the DeepSeek tool calls in Rust talk to the network.
 
 ### Storage
 
@@ -243,12 +246,13 @@ Chat history is stored in Rust with `rusqlite`, not by reaching into SQL from th
 
 - `conversations` — id, title, created_at, updated_at, archived_at
 - `messages` — id, conversation_id, role, content, created_at, status, error
+- `credential` — name, api_key, updated_at (the single key used for every request)
 
 The database lives at `Application Support/com.iris.desktop/iris.db`. Conversations are saved
 individually after a short debounce; `localStorage` remains the immediate cross-window cache and
 is merged by `updatedAt` on launch/focus. Attachments and FTS5 search are still planned. Store
 screenshots and other large attachments as files under Application Support, with their paths in
-SQLite. Keep API keys in the macOS Keychain, never in the database.
+SQLite. The API key is stored in plain text in `credential`; the webview still never reads it.
 
 ## Notes
 

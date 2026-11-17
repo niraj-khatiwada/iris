@@ -14,7 +14,6 @@ import type {
   ChatMessage,
   Conversation,
 } from '@/types/chat'
-import { resolveEndpoint } from '@/utils/endpoint'
 import { newId } from '@/utils/id'
 import { attachmentToAgent } from '@/utils/image'
 import { titleFromMessage } from '@/utils/string'
@@ -177,8 +176,6 @@ async function runAssistantReply({
     deepThink: settings.deepThink,
     webSearch: settings.webSearch,
     ttsVoice: settings.ttsVoice,
-    apiFormat: settings.apiFormat,
-    ttsUrl: resolveEndpoint(settings.ttsUrl, settings.baseUrl),
     onToken: (token) => {
       if (get().streamingRequestId !== requestId) {
         return

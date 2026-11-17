@@ -1,15 +1,11 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
-import type { ApiFormat } from '@/constants'
 import {
-  DEFAULT_API_FORMAT,
-  DEFAULT_ASR_URL,
   DEFAULT_BASE_URL,
   DEFAULT_MODEL,
   DEFAULT_OPEN_SHORTCUT,
   DEFAULT_OVERLAY_SHORTCUTS,
-  DEFAULT_TTS_URL,
   DEFAULT_TTS_VOICE,
   SETTINGS_STORAGE_KEY,
 } from '@/constants'
@@ -17,6 +13,14 @@ import type { ThemeMode, TtsVoice } from '@/types/settings'
 
 export type OverlayShortcutAction = keyof typeof DEFAULT_OVERLAY_SHORTCUTS
 export type OverlayShortcuts = Record<OverlayShortcutAction, string>
+
+/** Fields from older builds that are no longer settings: only DeepSeek is supported. */
+type LegacySettings = {
+  apiKey?: unknown
+  apiFormat?: unknown
+  ttsUrl?: unknown
+  asrUrl?: unknown
+}
 
 /**
  * Rebuilds the shortcut map from whatever was persisted. Older builds stored a different set of
@@ -50,24 +54,22 @@ function normalizeOverlayShortcuts(saved: unknown): OverlayShortcuts {
 
 type SettingsState = {
   theme: ThemeMode
+  /** DeepSeek API origin. Defaults to the official API; set a proxy if one is required. */
   baseUrl: string
-  /** Wire format of the chat API: providers offer Anthropic-style or OpenAI-style requests. */
-  apiFormat: ApiFormat
   model: string
   /**
-   * A key is stored. The source of truth is `has_api_key` (an attributes-only Keychain query that
-   * never prompts); this cached flag keeps the saved state instant on the first paint.
+   * A key is stored. The source of truth is `has_api_key`; this cached flag keeps the saved state
+   * instant on the first paint.
    */
   apiKeyPresent: boolean
   /**
    * Last four characters of the saved key, when known. Cached so Settings can show which key is
-   * stored without reading the Keychain.
+   * stored without reading the key itself.
    */
   apiKeyHint: string | null
   /**
-   * Bumped whenever the key is saved or removed. Anything derived from the key — the model
-   * catalogue, capability probes — watches this so a new provider is re-checked immediately
-   * instead of leaving the previous provider's results on screen.
+   * Bumped whenever the key is saved or removed. The model catalogue watches this so a new key is
+   * re-checked immediately instead of leaving the previous catalogue on screen.
    */
   apiKeyRevision: number
   autoSpeak: boolean
@@ -79,10 +81,6 @@ type SettingsState = {
   /** Toggle in the composer: let Iris search the web when it needs to. */
   webSearch: boolean
   ttsVoice: TtsVoice
-  /** Full endpoint that synthesizes read-aloud audio. */
-  ttsUrl: string
-  /** Full endpoint that transcribes microphone recordings. */
-  asrUrl: string
   /** Tauri shortcut syntax, chosen with the recorder in Settings → Shortcuts. */
   openShortcut: string
   /** In-app shortcuts while the quick overlay is key; never registered with the OS. */
@@ -92,7 +90,6 @@ type SettingsState = {
   /** Signals that the credential changed, so key-derived results must be refetched. */
   markApiKeyChanged: () => void
   setBaseUrl: (baseUrl: string) => void
-  setApiFormat: (apiFormat: ApiFormat) => void
   setModel: (model: string) => void
   setAutoSpeak: (autoSpeak: boolean) => void
   setRevealResponse: (revealResponse: boolean) => void
@@ -100,8 +97,6 @@ type SettingsState = {
   setDeepThink: (deepThink: boolean) => void
   setWebSearch: (webSearch: boolean) => void
   setTtsVoice: (ttsVoice: TtsVoice) => void
-  setTtsUrl: (ttsUrl: string) => void
-  setAsrUrl: (asrUrl: string) => void
   setOpenShortcut: (openShortcut: string) => void
   setOverlayShortcut: (action: OverlayShortcutAction, shortcut: string) => void
 }
@@ -111,7 +106,6 @@ export const useSettingsStore = create<SettingsState>()(
     (set) => ({
       theme: 'dark',
       baseUrl: DEFAULT_BASE_URL,
-      apiFormat: DEFAULT_API_FORMAT,
       model: DEFAULT_MODEL,
       apiKeyPresent: false,
       apiKeyHint: null,
@@ -122,8 +116,6 @@ export const useSettingsStore = create<SettingsState>()(
       deepThink: false,
       webSearch: false,
       ttsVoice: DEFAULT_TTS_VOICE,
-      ttsUrl: DEFAULT_TTS_URL,
-      asrUrl: DEFAULT_ASR_URL,
       openShortcut: DEFAULT_OPEN_SHORTCUT,
       overlayShortcuts: { ...DEFAULT_OVERLAY_SHORTCUTS },
       setTheme: (theme) => set({ theme }),
@@ -133,7 +125,6 @@ export const useSettingsStore = create<SettingsState>()(
       markApiKeyChanged: () =>
         set((state) => ({ apiKeyRevision: state.apiKeyRevision + 1 })),
       setBaseUrl: (baseUrl) => set({ baseUrl }),
-      setApiFormat: (apiFormat) => set({ apiFormat }),
       setModel: (model) => set({ model }),
       setAutoSpeak: (autoSpeak) => set({ autoSpeak }),
       setRevealResponse: (revealResponse) => set({ revealResponse }),
@@ -141,8 +132,6 @@ export const useSettingsStore = create<SettingsState>()(
       setDeepThink: (deepThink) => set({ deepThink }),
       setWebSearch: (webSearch) => set({ webSearch }),
       setTtsVoice: (ttsVoice) => set({ ttsVoice }),
-      setTtsUrl: (ttsUrl) => set({ ttsUrl }),
-      setAsrUrl: (asrUrl) => set({ asrUrl }),
       setOpenShortcut: (openShortcut) => set({ openShortcut }),
       setOverlayShortcut: (action, shortcut) =>
         set((state) => ({
@@ -151,12 +140,17 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: SETTINGS_STORAGE_KEY,
-      version: 11,
+      version: 12,
       merge: (persisted, current) => {
-        const saved = (persisted ?? {}) as Partial<SettingsState> & {
-          apiKey?: unknown
-        }
-        const { apiKey: _legacyKey, ...rest } = saved
+        const saved = (persisted ?? {}) as Partial<SettingsState> &
+          LegacySettings
+        const {
+          apiKey: _legacyKey,
+          apiFormat: _legacyFormat,
+          ttsUrl: _legacyTtsUrl,
+          asrUrl: _legacyAsrUrl,
+          ...rest
+        } = saved
         return {
           ...current,
           ...rest,
@@ -164,11 +158,15 @@ export const useSettingsStore = create<SettingsState>()(
         }
       },
       migrate: (persisted) => {
-        const saved = persisted as Partial<SettingsState> & {
-          apiKey?: unknown
-        }
-        // Drop any key saved by an older build; it now belongs in the Keychain.
-        const { apiKey: _legacyKey, ...rest } = saved
+        const saved = persisted as Partial<SettingsState> & LegacySettings
+        // Drop the settings a provider-neutral build stored; only DeepSeek is supported now.
+        const {
+          apiKey: _legacyKey,
+          apiFormat: _legacyFormat,
+          ttsUrl: _legacyTtsUrl,
+          asrUrl: _legacyAsrUrl,
+          ...rest
+        } = saved
         const openShortcut =
           typeof rest.openShortcut === 'string' &&
           rest.openShortcut.trim().length > 0
@@ -177,11 +175,10 @@ export const useSettingsStore = create<SettingsState>()(
 
         return {
           ...rest,
-          baseUrl: rest.baseUrl ?? DEFAULT_BASE_URL,
-          apiFormat:
-            rest.apiFormat === 'openai' || rest.apiFormat === 'anthropic'
-              ? rest.apiFormat
-              : DEFAULT_API_FORMAT,
+          baseUrl:
+            typeof rest.baseUrl === 'string' && rest.baseUrl.trim().length > 0
+              ? rest.baseUrl
+              : DEFAULT_BASE_URL,
           model:
             rest.model === 'local-preview'
               ? DEFAULT_MODEL
@@ -196,14 +193,6 @@ export const useSettingsStore = create<SettingsState>()(
           deepThink: rest.deepThink ?? false,
           webSearch: rest.webSearch ?? false,
           ttsVoice: rest.ttsVoice === 'tide' ? 'tide' : DEFAULT_TTS_VOICE,
-          ttsUrl:
-            typeof rest.ttsUrl === 'string' && rest.ttsUrl.trim().length > 0
-              ? rest.ttsUrl
-              : DEFAULT_TTS_URL,
-          asrUrl:
-            typeof rest.asrUrl === 'string' && rest.asrUrl.trim().length > 0
-              ? rest.asrUrl
-              : DEFAULT_ASR_URL,
           openShortcut,
           overlayShortcuts: normalizeOverlayShortcuts(rest.overlayShortcuts),
         } as SettingsState

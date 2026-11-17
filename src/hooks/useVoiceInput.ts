@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { ASR_PATH } from '@/constants'
 import { startVoiceRecording, type VoiceRecording } from '@/services/recorder'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { stopSpeaking, transcribeAudio } from '@/tauri/commands/voice'
-import { resolveEndpoint } from '@/utils/endpoint'
 import { isTauri } from '@/utils/tauri'
 
 export type VoiceInputStatus = 'idle' | 'recording' | 'transcribing'
@@ -142,13 +142,13 @@ export function useVoiceInput() {
 
 async function transcribe(audio: Blob) {
   await useSettingsStore.persist.rehydrate()
-  const { asrUrl, baseUrl } = useSettingsStore.getState()
-  const endpoint = resolveEndpoint(asrUrl, baseUrl)
+  const { baseUrl } = useSettingsStore.getState()
+  const endpoint = `${baseUrl.trim().replace(/\/+$/, '')}${ASR_PATH}`
 
   if (isTauri()) {
-    // The Keychain key is added by Rust; the webview never sees it.
+    // The stored key is added by Rust; the webview never sees it.
     return transcribeAudio({
-      asrUrl: endpoint,
+      baseUrl,
       audioBase64: await blobToBase64(audio),
     })
   }

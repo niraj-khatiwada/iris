@@ -21,7 +21,6 @@ import {
   type LucideIcon,
   Monitor,
   Moon,
-  PlugZap,
   RefreshCw,
   SearchX,
   Settings2,
@@ -34,14 +33,11 @@ import { type ReactNode, useCallback, useEffect, useState } from 'react'
 import { useDynamicIslandNotice } from '@/components/dynamic-island/notifications'
 import IrisBlob from '@/components/IrisBlob'
 import ShortcutRecorder from '@/components/ShortcutRecorder'
-import type { ApiFormat } from '@/constants'
 import {
   CHAT_STORAGE_KEY,
-  DEFAULT_ASR_URL,
   DEFAULT_BASE_URL,
   DEFAULT_MODEL,
   DEFAULT_OPEN_SHORTCUT,
-  DEFAULT_TTS_URL,
   DEFAULT_TTS_VOICE,
   SETTINGS_STORAGE_KEY,
   THEME_LABELS,
@@ -58,19 +54,13 @@ import { useUIStore } from '@/stores/uiStore'
 import { resetAppData, restartApp } from '@/tauri/commands/app'
 import { setOpenShortcut as applyOpenShortcut } from '@/tauri/commands/shortcut'
 import {
-  type CapabilityReport,
-  type EndpointTest,
   hasApiKey,
   listModels,
   type ModelEntry,
   removeApiKey,
   saveApiKey,
-  testAsrUrl,
-  testCapabilities,
-  testTtsUrl,
 } from '@/tauri/commands/voice'
 import type { ThemeMode } from '@/types/settings'
-import { resolveEndpoint } from '@/utils/endpoint'
 import { formatShortcut } from '@/utils/shortcut'
 import { cn } from '@/utils/tailwind'
 import { isTauri } from '@/utils/tauri'
@@ -519,11 +509,11 @@ function ShortcutsPanel({ query }: { query: string }) {
 }
 
 /**
- * The API key lives in the macOS Keychain, so it is write-only from the app's point of view: once
- * saved, Settings shows that a key is stored and offers Replace or Remove, never the key itself.
+ * The API key is stored in the Iris database, so it is write-only from the app's point of view:
+ * once saved, Settings shows that a key is stored and offers Replace or Remove, never the key itself.
  *
- * The saved hint is cached in localStorage rather than read back from the Keychain, because a read
- * prompts for Keychain access; opening this panel should never do that.
+ * The saved hint is cached in localStorage rather than read back from the database, so the panel
+ * renders instantly without a round trip.
  */
 function ApiKeyField({ query }: { query: string }) {
   const apiKeyPresent = useSettingsStore((state) => state.apiKeyPresent)
@@ -536,7 +526,7 @@ function ApiKeyField({ query }: { query: string }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Presence comes from an attributes-only query: it never decrypts the key, so no prompt.
+  // Presence comes from the credential table, so opening this panel never reads the key itself.
   useEffect(() => {
     if (!isTauri()) {
       return
@@ -601,9 +591,9 @@ function ApiKeyField({ query }: { query: string }) {
   return (
     <SettingField
       title="API key"
-      description="Kept in your macOS Keychain. Used for chat, read-aloud, and voice input."
+      description="Stored in the Iris database. Used for chat, read-aloud, and voice input."
       query={query}
-      search={['ai', 'api', 'api key', 'key', 'keychain', 'connection']}
+      search={['ai', 'api', 'api key', 'key', 'credential', 'database']}
     >
       <div className="flex w-full flex-col gap-2">
         {showField ? (
@@ -687,18 +677,16 @@ function ApiKeyField({ query }: { query: string }) {
 function AiPanel({ query }: { query: string }) {
   const baseUrl = useSettingsStore((state) => state.baseUrl)
   const setBaseUrl = useSettingsStore((state) => state.setBaseUrl)
-  const apiFormat = useSettingsStore((state) => state.apiFormat)
-  const setApiFormat = useSettingsStore((state) => state.setApiFormat)
 
   return (
-    <SettingsSection title="Connection">
+    <SettingsSection title="DeepSeek">
       <ApiKeyField query={query} />
 
       <SettingField
         title="Base URL"
-        description="API origin. Speech and transcription URLs can inherit it with {{base_url}}."
+        description="The official DeepSeek API by default. Change it only for a proxy that still speaks DeepSeek's API."
         query={query}
-        search={['ai', 'base url', 'url', 'endpoint', 'connection']}
+        search={['ai', 'base url', 'url', 'endpoint', 'proxy', 'connection']}
       >
         <TextField
           className="w-full"
@@ -707,179 +695,17 @@ function AiPanel({ query }: { query: string }) {
           variant="secondary"
           onChange={setBaseUrl}
         >
-          <Input aria-label="Base URL" placeholder="https://api.example.com" />
+          <Input aria-label="Base URL" placeholder={DEFAULT_BASE_URL} />
         </TextField>
       </SettingField>
 
-      <SettingField
-        title="API format"
-        description="How Iris talks to this provider. Anthropic uses /v1/messages; OpenAI uses /v1/chat/completions."
-        query={query}
-        search={[
-          'ai',
-          'api',
-          'format',
-          'anthropic',
-          'openai',
-          'wire',
-          'connection',
-        ]}
-      >
-        <Tabs
-          className="w-fit"
-          selectedKey={apiFormat}
-          onSelectionChange={(key) => {
-            if (key === 'anthropic' || key === 'openai') {
-              setApiFormat(key)
-            }
-          }}
-        >
-          <Tabs.ListContainer className="w-fit rounded-none bg-transparent p-0">
-            <Tabs.List
-              aria-label="API format"
-              className="w-fit gap-0.5 rounded-full border border-border/50 bg-surface/40 p-0.5"
-            >
-              {API_FORMATS.map((format) => (
-                <Tabs.Tab
-                  key={format.id}
-                  className="h-7 w-24 rounded-full px-0 text-[11px] font-medium text-muted data-[selected=true]:text-foreground"
-                  id={format.id}
-                >
-                  {format.label}
-                  <Tabs.Indicator className="rounded-full bg-foreground/10 shadow-none" />
-                </Tabs.Tab>
-              ))}
-            </Tabs.List>
-          </Tabs.ListContainer>
-          {API_FORMATS.map((format) => (
-            <Tabs.Panel key={format.id} className="sr-only" id={format.id}>
-              {format.label} format
-            </Tabs.Panel>
-          ))}
-        </Tabs>
-      </SettingField>
-
       <ModelField query={query} />
-      <CapabilitiesField query={query} />
     </SettingsSection>
   )
 }
 
-const API_FORMATS: ReadonlyArray<{ id: ApiFormat; label: string }> = [
-  { id: 'anthropic', label: 'Anthropic' },
-  { id: 'openai', label: 'OpenAI' },
-]
-
-/** The capability rows, in display order. */
-const CAPABILITY_ROWS: ReadonlyArray<{
-  key: 'text' | 'image' | 'thinking' | 'webSearch'
-  label: string
-}> = [
-  { key: 'text', label: 'Text' },
-  { key: 'image', label: 'Images' },
-  { key: 'thinking', label: 'Thinking' },
-  { key: 'webSearch', label: 'Web search' },
-]
-
 /**
- * Probes the provider with real requests, because most do not advertise what they accept in their
- * model catalogue. Knowing whether images and search work avoids sending requests that cannot
- * succeed.
- */
-function CapabilitiesField({ query }: { query: string }) {
-  const baseUrl = useSettingsStore((state) => state.baseUrl)
-  const apiFormat = useSettingsStore((state) => state.apiFormat)
-  const model = useSettingsStore((state) => state.model)
-  const apiKeyPresent = useSettingsStore((state) => state.apiKeyPresent)
-  const apiKeyRevision = useSettingsStore((state) => state.apiKeyRevision)
-  const [busy, setBusy] = useState(false)
-  const [report, setReport] = useState<CapabilityReport | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  // A report describes one provider, model, and format; any of those changing invalidates it.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset when the target changes
-  useEffect(() => {
-    setReport(null)
-    setError(null)
-  }, [apiKeyRevision, baseUrl, apiFormat, model])
-
-  const run = async () => {
-    if (busy) {
-      return
-    }
-
-    setBusy(true)
-    setError(null)
-    setReport(null)
-    try {
-      setReport(await testCapabilities({ baseUrl, apiFormat, model }))
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <SettingField
-      title="Capabilities"
-      description="Checks what this provider accepts for the selected model: text, images, thinking, and web search. Iris sends a few tiny test requests."
-      query={query}
-      search={[
-        'capabilities',
-        'image',
-        'vision',
-        'thinking',
-        'web search',
-        'support',
-        'test',
-        'connection',
-      ]}
-    >
-      <div className="flex w-full flex-col gap-2">
-        <Button
-          aria-label="Test capabilities"
-          isDisabled={busy || !isTauri() || !apiKeyPresent}
-          size="sm"
-          variant="secondary"
-          onPress={() => void run()}
-        >
-          {busy ? (
-            <LoaderCircle className="size-3.5 animate-spin" />
-          ) : (
-            <PlugZap className="size-3.5" />
-          )}
-          Test
-        </Button>
-
-        {report ? (
-          <div className="flex flex-col gap-1 text-[11px]">
-            {CAPABILITY_ROWS.map(({ key, label }) => (
-              <p className="text-muted" key={key}>
-                <span className="text-foreground">{label}</span> ·{' '}
-                {report[key] ? 'supported' : 'not supported'}
-              </p>
-            ))}
-            <p
-              className={
-                CAPABILITY_ROWS.every(({ key }) => report[key])
-                  ? 'text-muted'
-                  : 'text-danger'
-              }
-            >
-              {report.message}
-            </p>
-          </div>
-        ) : null}
-
-        {error ? <p className="text-[11px] text-danger">{error}</p> : null}
-      </div>
-    </SettingField>
-  )
-}
-
-/**
- * Model selection: the API's catalogue becomes a dropdown, so nobody has to type a model id.
+ * Model selection: DeepSeek's catalogue becomes a dropdown, so nobody has to type a model id.
  * The list loads when the panel opens, and Refresh re-fetches it after a key or URL change.
  */
 function ModelField({ query }: { query: string }) {
@@ -887,40 +713,15 @@ function ModelField({ query }: { query: string }) {
   const setModel = useSettingsStore((state) => state.setModel)
   const baseUrl = useSettingsStore((state) => state.baseUrl)
   const apiKeyPresent = useSettingsStore((state) => state.apiKeyPresent)
-  const apiFormat = useSettingsStore((state) => state.apiFormat)
-  // A new key means a new provider: refetch rather than trust the previous catalogue.
+  // A new key means a new account: refetch rather than trust the previous catalogue.
   const apiKeyRevision = useSettingsStore((state) => state.apiKeyRevision)
-  const setApiFormat = useSettingsStore((state) => state.setApiFormat)
   const [models, setModels] = useState<ModelEntry[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  /**
-   * Picks the wire format a model declares. Providers that report `supported_endpoints` are
-   * authoritative: an OSS model answers on `/chat/completions`, Claude only on `/messages`.
-   */
-  const applyFormat = useCallback(
-    (id: string, available: ModelEntry[]) => {
-      const entry = available.find((candidate) => candidate.id === id)
-      if (!entry || entry.endpoints.length === 0) {
-        return
-      }
-
-      if (entry.endpoints.includes('/messages')) {
-        setApiFormat('anthropic')
-      } else if (
-        entry.endpoints.includes('/chat/completions') ||
-        entry.endpoints.includes('/responses')
-      ) {
-        setApiFormat('openai')
-      }
-    },
-    [setApiFormat],
-  )
-
   // biome-ignore lint/correctness/useExhaustiveDependencies: apiKeyRevision forces a refetch on a new key
   const load = useCallback(async () => {
-    // Without a key the catalogue cannot be fetched, and a read would prompt for Keychain access.
+    // Without a key the catalogue cannot be fetched.
     if (!isTauri() || !apiKeyPresent) {
       setModels([])
       return
@@ -934,19 +735,15 @@ function ModelField({ query }: { query: string }) {
 
       // Never overwrite a model the user already chose: Refresh exists to update the list, not to
       // reset the preference. Only pick one when nothing is selected yet, or when the saved model
-      // is no longer offered by this provider.
+      // is no longer offered.
       const chosen = useSettingsStore.getState().model
       const offered = available.some((entry) => entry.id === chosen)
       const selected = offered ? chosen : available[0]?.id
       if (selected && !offered) {
         setModel(selected)
       }
-      // The API format is the user's setting and is deliberately left alone here: deriving it
-      // from the model on every load silently reverted a manual choice whenever the panel
-      // remounted (for example after switching settings tabs).
     } catch (reason) {
-      // A failed fetch must not leave the previous provider's list on screen, which would look
-      // like the new key returned those models.
+      // A failed fetch must not leave the previous catalogue on screen.
       setModels([])
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
@@ -965,24 +762,10 @@ function ModelField({ query }: { query: string }) {
       : // Before the catalogue loads, keep the stored model selectable — but only once a key can
         // actually use it. Without a key, showing a model would imply one is configured.
         apiKeyPresent && model
-        ? [{ id: model, endpoints: [] }]
+        ? [{ id: model }]
         : []
 
   const modelIds = options.map((entry) => entry.id)
-
-  // Warn, without changing the setting, when the provider says this model does not speak the
-  // chosen format. The user keeps control; the mismatch is just visible before sending.
-  const chosenEntry = models.find((entry) => entry.id === model)
-  const mismatch =
-    chosenEntry && chosenEntry.endpoints.length > 0
-      ? apiFormat === 'anthropic' &&
-        !chosenEntry.endpoints.includes('/messages')
-        ? 'This model does not offer /v1/messages. Pick OpenAI, or choose a model that does.'
-        : apiFormat === 'openai' &&
-            !chosenEntry.endpoints.includes('/chat/completions')
-          ? 'This model does not offer /v1/chat/completions. Pick Anthropic, or choose a model that does.'
-          : null
-      : null
 
   if (!apiKeyPresent) {
     return (
@@ -1000,7 +783,7 @@ function ModelField({ query }: { query: string }) {
   return (
     <SettingField
       title="Model"
-      description="AI model used for replies, chosen from the models your key can use."
+      description="DeepSeek model used for replies, chosen from the models your key can use."
       query={query}
       search={['ai', 'api', 'model', 'refresh', 'connection']}
     >
@@ -1016,8 +799,6 @@ function ModelField({ query }: { query: string }) {
             onChange={(key) => {
               if (typeof key === 'string') {
                 setModel(key)
-                // Keep the wire format in step with the chosen model.
-                applyFormat(key, models)
               }
             }}
           >
@@ -1059,10 +840,6 @@ function ModelField({ query }: { query: string }) {
           </p>
         ) : null}
 
-        {mismatch ? (
-          <p className="text-[11px] text-danger">{mismatch}</p>
-        ) : null}
-
         {error ? <p className="text-xs text-danger">{error}</p> : null}
       </div>
     </SettingField>
@@ -1076,21 +853,6 @@ function VoicePanel({ query }: { query: string }) {
   const setAutoSendVoice = useSettingsStore((state) => state.setAutoSendVoice)
   const ttsVoice = useSettingsStore((state) => state.ttsVoice)
   const setTtsVoice = useSettingsStore((state) => state.setTtsVoice)
-  const ttsUrl = useSettingsStore((state) => state.ttsUrl)
-  const setTtsUrl = useSettingsStore((state) => state.setTtsUrl)
-  const asrUrl = useSettingsStore((state) => state.asrUrl)
-  const setAsrUrl = useSettingsStore((state) => state.setAsrUrl)
-  const baseUrl = useSettingsStore((state) => state.baseUrl)
-  const apiKeyRevision = useSettingsStore((state) => state.apiKeyRevision)
-  const [ttsResult, setTtsResult] = useState<EndpointTest | null>(null)
-  const [asrResult, setAsrResult] = useState<EndpointTest | null>(null)
-
-  // Test results describe one key and base URL, so a credential change invalidates them.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset when the target changes
-  useEffect(() => {
-    setTtsResult(null)
-    setAsrResult(null)
-  }, [apiKeyRevision, baseUrl])
 
   return (
     <>
@@ -1103,37 +865,6 @@ function VoicePanel({ query }: { query: string }) {
           search={['voice', 'speak', 'read aloud', 'tts']}
           onChange={setAutoSpeak}
         />
-
-        <SettingField
-          title="Speech URL"
-          description="Endpoint that turns a reply into audio. Use {{base_url}} to inherit the Base URL."
-          query={query}
-          search={['tts', 'speech', 'url', 'endpoint', 'playback', 'audio']}
-        >
-          <div className="flex w-full flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <TextField
-                className="w-full"
-                name="ttsUrl"
-                value={ttsUrl}
-                variant="secondary"
-                onChange={setTtsUrl}
-              >
-                <Input aria-label="Speech URL" placeholder={DEFAULT_TTS_URL} />
-              </TextField>
-              <TestButton
-                onResult={setTtsResult}
-                run={() =>
-                  testTtsUrl(resolveEndpoint(ttsUrl, baseUrl), ttsVoice)
-                }
-              />
-            </div>
-            <EndpointHint
-              resolved={resolveEndpoint(ttsUrl, baseUrl)}
-              result={ttsResult}
-            />
-          </div>
-        </SettingField>
 
         <SettingRow
           title="Voice"
@@ -1185,114 +916,8 @@ function VoicePanel({ query }: { query: string }) {
           search={['voice input', 'microphone', 'listen', 'transcribe', 'send']}
           onChange={setAutoSendVoice}
         />
-
-        <SettingField
-          title="Transcription URL"
-          description="Endpoint that turns a recording into text. Use {{base_url}} to inherit the Base URL."
-          query={query}
-          search={[
-            'asr',
-            'transcribe',
-            'url',
-            'endpoint',
-            'microphone',
-            'voice input',
-          ]}
-        >
-          <div className="flex w-full flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <TextField
-                className="w-full"
-                name="asrUrl"
-                value={asrUrl}
-                variant="secondary"
-                onChange={setAsrUrl}
-              >
-                <Input
-                  aria-label="Transcription URL"
-                  placeholder={DEFAULT_ASR_URL}
-                />
-              </TextField>
-              <TestButton
-                onResult={setAsrResult}
-                run={() => testAsrUrl(resolveEndpoint(asrUrl, baseUrl))}
-              />
-            </div>
-            <EndpointHint
-              resolved={resolveEndpoint(asrUrl, baseUrl)}
-              result={asrResult}
-            />
-          </div>
-        </SettingField>
       </SettingsSection>
     </>
-  )
-}
-
-/** Runs an endpoint probe and renders the button; the result is reported through `onResult`. */
-function TestButton({
-  run,
-  onResult,
-}: {
-  run: () => Promise<EndpointTest>
-  onResult: (result: EndpointTest | null) => void
-}) {
-  const [busy, setBusy] = useState(false)
-
-  const test = async () => {
-    if (busy) {
-      return
-    }
-
-    setBusy(true)
-    onResult(null)
-    try {
-      onResult(await run())
-    } catch (reason) {
-      onResult({
-        ok: false,
-        message: reason instanceof Error ? reason.message : String(reason),
-      })
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <Button
-      aria-label="Test endpoint"
-      isDisabled={busy || !isTauri()}
-      size="sm"
-      variant="secondary"
-      onPress={() => void test()}
-    >
-      {busy ? (
-        <LoaderCircle className="size-3.5 animate-spin" />
-      ) : (
-        <PlugZap className="size-3.5" />
-      )}
-      Test
-    </Button>
-  )
-}
-
-/** One line under an endpoint row: the resolved URL, plus a test result when there is one. */
-function EndpointHint({
-  resolved,
-  result,
-}: {
-  resolved: string
-  result: EndpointTest | null
-}) {
-  return (
-    <div className="flex w-full flex-col gap-0.5 text-[11px]">
-      <p className="truncate text-muted">Currently {resolved}</p>
-      {result ? (
-        <p className={result.ok ? 'text-primary' : 'text-danger'}>
-          {result.message}
-        </p>
-      ) : null}
-    </div>
   )
 }
 
@@ -1366,7 +991,7 @@ function StoragePanel({ query }: { query: string }) {
             // conversations that are about to be erased.
             suspendChatStorage()
             useChatStore.getState().clearAll()
-            // Reset removes the Keychain key too, so no request can be authenticated afterwards.
+            // Reset removes the stored API key too, so no request can be authenticated afterwards.
             useSettingsStore.setState({
               theme: 'dark',
               baseUrl: DEFAULT_BASE_URL,

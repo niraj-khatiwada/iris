@@ -1,4 +1,3 @@
-import type { ApiFormat } from '@/constants'
 import {
   cancelGeneration,
   sendMessage,
@@ -20,10 +19,6 @@ export type AgentRunOptions = {
   deepThink: boolean
   webSearch: boolean
   ttsVoice: TtsVoice
-  /** Wire format the provider speaks. */
-  apiFormat: ApiFormat
-  /** Full TTS endpoint, resolved from the `{{base_url}}` template. */
-  ttsUrl: string
   onToken: (token: string) => void
   onDone: (result: { cancelled: boolean }) => void
   onError: (message: string) => void
@@ -111,8 +106,6 @@ export function startAgentRun(options: AgentRunOptions): string {
           deepThink: options.deepThink,
           webSearch: options.webSearch,
           ttsVoice: options.ttsVoice,
-          apiFormat: options.apiFormat,
-          ttsUrl: options.ttsUrl,
         })
       } catch (error) {
         finish(

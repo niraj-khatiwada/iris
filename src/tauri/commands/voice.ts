@@ -1,16 +1,24 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
-import type { ApiFormat } from '@/constants'
-
 /** Stops the automatic read-aloud currently playing. */
 export function stopSpeaking() {
   return invoke<void>('stop_speaking')
 }
 
-/** Transcribes a WAV recording through the Rust backend at the configured endpoint. */
+/** Reads one message aloud through DeepSeek's TTS tool under the configured base URL. */
+export function speakText(request: {
+  conversationId: string
+  text: string
+  baseUrl: string
+  voice: string
+}) {
+  return invoke<void>('speak_text', request)
+}
+
+/** Transcribes a WAV recording through DeepSeek's ASR tool under the configured base URL. */
 export function transcribeAudio(request: {
-  asrUrl: string
+  baseUrl: string
   audioBase64: string
 }) {
   return invoke<string>('transcribe_audio', request)
@@ -22,7 +30,7 @@ export type ApiKeyHint = {
   present: boolean
 }
 
-/** Saves a key to the macOS Keychain, replacing any key already stored. */
+/** Saves a key to the Iris database, replacing any key already stored. */
 export function saveApiKey(apiKey: string) {
   return invoke<ApiKeyHint>('save_api_key', { apiKey })
 }
@@ -33,55 +41,20 @@ export function removeApiKey() {
 }
 
 /**
- * Whether a key is set. This is an attributes-only Keychain query, so it never decrypts the
- * secret and never prompts — safe to call when Settings opens.
+ * Whether a key is set. This reads the credential table, so it is safe to call when Settings opens.
  */
 export function hasApiKey() {
   return invoke<boolean>('has_api_key')
 }
 
-/** One catalogue entry: the id, plus the endpoints the provider declares for it. */
+/** One catalogue entry: the model id DeepSeek reports. */
 export type ModelEntry = {
   id: string
-  endpoints: string[]
 }
 
 /** Lists the models the stored key can use. The key is read in Rust, never sent from here. */
 export function listModels(baseUrl: string) {
   return invoke<ModelEntry[]>('list_models', { baseUrl })
-}
-
-/** What the configured provider accepts, probed with real requests. */
-export type CapabilityReport = {
-  text: boolean
-  image: boolean
-  thinking: boolean
-  webSearch: boolean
-  message: string
-}
-
-/** Checks whether the provider accepts text and images for the selected model. */
-export function testCapabilities(request: {
-  baseUrl: string
-  apiFormat: ApiFormat
-  model: string
-}) {
-  return invoke<CapabilityReport>('test_capabilities', request)
-}
-
-export type EndpointTest = {
-  ok: boolean
-  message: string
-}
-
-/** Sends a short line to the speech endpoint to confirm it returns audio. */
-export function testTtsUrl(ttsUrl: string, voice: string) {
-  return invoke<EndpointTest>('test_tts_url', { ttsUrl, voice })
-}
-
-/** Sends a generated sample recording to the transcription endpoint. */
-export function testAsrUrl(asrUrl: string) {
-  return invoke<EndpointTest>('test_asr_url', { asrUrl })
 }
 
 export type SpeechEventPayload = {

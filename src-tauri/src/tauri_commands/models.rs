@@ -1,22 +1,30 @@
 use std::time::Duration;
 
 use serde_json::Value;
+use tauri::State;
 
-/// Fetches the models the configured key can use, in the API's own order.
+use crate::core::endpoints;
+use crate::core::storage::Storage;
+
+/// Fetches the models the configured key can use, in DeepSeek's own order.
 ///
-/// The key stays in Rust: this command reads the Keychain just like a chat request, so the
-/// webview never sees it.
+/// The key stays in Rust: this command reads it from the credential table just like a chat request,
+/// so the webview never sees it.
 #[tauri::command]
-pub async fn list_models(base_url: String) -> Result<Vec<ModelEntry>, String> {
-    let api_key = crate::tauri_commands::keychain::api_key()?;
+pub async fn list_models(
+    storage: State<'_, Storage>,
+    base_url: String,
+) -> Result<Vec<ModelEntry>, String> {
+    let api_key = storage.require_api_key()?;
+    fetch_models(&base_url, &api_key).await
+}
 
-    let base_url = base_url.trim().trim_end_matches('/').to_string();
-    if base_url.is_empty() {
+async fn fetch_models(base_url: &str, api_key: &str) -> Result<Vec<ModelEntry>, String> {
+    if base_url.trim().is_empty() {
         return Err("Add the API base URL in Settings.".to_string());
     }
 
-    // Both wire formats expose the catalogue at `/v1/models`; verified against the live API.
-    let url = format!("{base_url}/v1/models");
+    let url = endpoints::url(base_url, endpoints::MODELS_PATH);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
@@ -44,17 +52,14 @@ pub async fn list_models(base_url: String) -> Result<Vec<ModelEntry>, String> {
     Ok(models)
 }
 
-/// Reads a model list from whichever shape the API returns, keeping the API's own order.
-/// One catalogue entry: the id to send, plus the endpoints it accepts when the provider says so.
+/// One catalogue entry: the id to send.
 #[derive(serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelEntry {
     pub id: String,
-    /// Endpoint paths the provider declares for this model, e.g. `/messages` or
-    /// `/chat/completions`. Empty when the provider does not report them.
-    pub endpoints: Vec<String>,
 }
 
+/// Reads a model list from whichever shape DeepSeek returns, keeping the API's own order.
 fn parse_models(body: &str) -> Vec<ModelEntry> {
     let Ok(value) = serde_json::from_str::<Value>(body) else {
         return Vec::new();
@@ -71,7 +76,6 @@ fn parse_models(body: &str) -> Vec<ModelEntry> {
             .filter_map(|entry| match entry {
                 Value::String(id) => Some(ModelEntry {
                     id: id.trim().to_string(),
-                    endpoints: Vec::new(),
                 }),
                 Value::Object(fields) => fields
                     .get("id")
@@ -79,17 +83,6 @@ fn parse_models(body: &str) -> Vec<ModelEntry> {
                     .and_then(Value::as_str)
                     .map(|id| ModelEntry {
                         id: id.trim().to_string(),
-                        endpoints: fields
-                            .get("supported_endpoints")
-                            .and_then(Value::as_array)
-                            .map(|items| {
-                                items
-                                    .iter()
-                                    .filter_map(Value::as_str)
-                                    .map(|endpoint| endpoint.trim().to_string())
-                                    .collect()
-                            })
-                            .unwrap_or_default(),
                     }),
                 _ => None,
             })
@@ -101,7 +94,6 @@ fn parse_models(body: &str) -> Vec<ModelEntry> {
                 .filter_map(|entry| {
                     entry.as_str().map(|id| ModelEntry {
                         id: id.trim().to_string(),
-                        endpoints: Vec::new(),
                     })
                 })
                 .collect(),
@@ -136,14 +128,14 @@ fn describe_error(status: u16, body: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_models, ModelEntry};
+    use super::parse_models;
 
     fn ids(body: &str) -> Vec<String> {
         parse_models(body).into_iter().map(|m| m.id).collect()
     }
 
     #[test]
-    fn reads_the_anthropic_data_shape() {
+    fn reads_the_deepseek_data_shape() {
         let body = r#"{"data":[{"id":"deepseek-flash"},{"id":"deepseek-pro"}]}"#;
         assert_eq!(ids(body), ["deepseek-flash", "deepseek-pro"]);
     }
@@ -160,69 +152,30 @@ mod tests {
         assert!(parse_models(r#"{"unexpected":true}"#).is_empty());
         assert!(parse_models("not json").is_empty());
     }
-
-    /// The provider declares which endpoint each model accepts; that decides the request format.
-    #[test]
-    fn reads_the_supported_endpoints_for_each_model() {
-        let body = r#"{"data":[
-            {"id":"claude-sonnet-5-5","supported_endpoints":["/messages"]},
-            {"id":"deepseek/deepseek-v4-flash","supported_endpoints":["/chat/completions","/responses"]}
-        ]}"#;
-
-        assert_eq!(
-            parse_models(body),
-            vec![
-                ModelEntry {
-                    id: "claude-sonnet-5-5".to_string(),
-                    endpoints: vec!["/messages".to_string()],
-                },
-                ModelEntry {
-                    id: "deepseek/deepseek-v4-flash".to_string(),
-                    endpoints: vec![
-                        "/chat/completions".to_string(),
-                        "/responses".to_string(),
-                    ],
-                },
-            ]
-        );
-    }
 }
 
-/// Exercises the real command against a live API, so the URL and auth header are verified rather
-/// than assumed. The base URL comes from the environment, because Iris is provider-neutral now and
-/// the stored key may belong to any provider. Skipped when unset or no key is stored.
+/// Exercises the real command against the live DeepSeek API, so the URL and auth header are
+/// verified rather than assumed. The base URL and key come from the environment because the stored
+/// credential is not exposed to tests. Skipped when either is unset.
 #[cfg(test)]
 mod live_tests {
     #[test]
     fn list_models_returns_the_live_catalogue() {
-        use std::process::Command;
-
         let Ok(base_url) = std::env::var("IRIS_TEST_BASE_URL") else {
-            eprintln!("Skipping: set IRIS_TEST_BASE_URL to exercise a live provider");
+            eprintln!("Skipping: set IRIS_TEST_BASE_URL to exercise the live API");
             return;
         };
 
-        let key = Command::new("/usr/bin/security")
-            .args([
-                "find-generic-password",
-                "-s",
-                "com.iris.desktop",
-                "-a",
-                "deepseek-api-key",
-                "-w",
-            ])
-            .output()
-            .ok()
-            .filter(|out| out.status.success())
-            .and_then(|out| String::from_utf8(out.stdout).ok())
-            .map(|value| value.trim().to_string());
-
-        if key.filter(|value| !value.is_empty()).is_none() {
-            eprintln!("Skipping: no API key in the Keychain");
+        let Ok(key) = std::env::var("IRIS_TEST_API_KEY") else {
+            eprintln!("Skipping: set IRIS_TEST_API_KEY to exercise the live API");
+            return;
+        };
+        if key.trim().is_empty() {
+            eprintln!("Skipping: IRIS_TEST_API_KEY is empty");
             return;
         }
 
-        let models = tauri::async_runtime::block_on(super::list_models(base_url))
+        let models = tauri::async_runtime::block_on(super::fetch_models(&base_url, key.trim()))
             .expect("the live catalogue should load");
 
         assert!(!models.is_empty(), "no models returned");

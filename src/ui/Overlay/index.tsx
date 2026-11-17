@@ -2,12 +2,11 @@ import { Button, TextArea, Tooltip } from '@heroui/react'
 import { invoke } from '@tauri-apps/api/core'
 import { emit, listen } from '@tauri-apps/api/event'
 import {
-  Check,
   ChevronDown,
   ChevronUp,
-  Copy,
   Mic,
   Plus,
+  RotateCcw,
   Scan,
   Square,
   X,
@@ -23,8 +22,10 @@ import {
 
 import AttachmentStrip from '@/components/AttachmentStrip'
 import ChatToggles from '@/components/ChatToggles'
+import CopyButton from '@/components/CopyButton'
 import IrisBlob, { type IrisTone } from '@/components/IrisBlob'
 import Markdown from '@/components/Markdown'
+import ReadAloudButton from '@/components/ReadAloudButton'
 import SendButton from '@/components/SendButton'
 import SpeechControl from '@/components/SpeechControl'
 import VoiceStrip from '@/components/VoiceStrip'
@@ -108,6 +109,7 @@ function Overlay() {
   )
   const sendMessage = useChatStore((state) => state.sendMessage)
   const stopStreaming = useChatStore((state) => state.stopStreaming)
+  const regenerate = useChatStore((state) => state.regenerate)
   const conversation = useChatStore((state) =>
     state.conversations.find((item) => item.id === QUICK_CONVERSATION_ID),
   )
@@ -140,14 +142,12 @@ function Overlay() {
   const [ignoredResponseId, setIgnoredResponseId] = useState<string | null>(
     null,
   )
-  const [copied, setCopied] = useState(false)
   const [errorVisible, setErrorVisible] = useState(false)
   const [captureError, setCaptureError] = useState<string | null>(null)
   const [capturing, setCapturing] = useState(false)
   const [sendingTick, setSendingTick] = useState(0)
   const [contentHeight, setContentHeight] = useState<number | null>(null)
   const contentRef = useRef<HTMLDivElement>(null)
-  const copyTimer = useRef<number | null>(null)
   const finishVoiceRef = useRef<(forceSend?: boolean) => void>(() => {})
   const startCaptureRef = useRef<() => void>(() => {})
   const captureGuard = useRef(0)
@@ -274,15 +274,6 @@ function Overlay() {
     element.style.height = '0px'
     element.style.height = `${Math.min(element.scrollHeight, 120)}px`
   }, [value, inputRef])
-
-  useEffect(
-    () => () => {
-      if (copyTimer.current) {
-        window.clearTimeout(copyTimer.current)
-      }
-    },
-    [],
-  )
 
   // Overlay-local shortcuts: "/" focuses the input, Cmd+, opens Settings, and the five
   // configurable bindings drive capture, new chat, thinking mode, web search, and voice input.
@@ -594,21 +585,17 @@ function Overlay() {
     window.location.assign('/')
   }
 
-  const copyResponse = () => {
-    if (!assistant?.content) {
+  const canRegenerate = Boolean(assistant && !streaming && !isIgnored)
+
+  const regenerateResponse = () => {
+    if (!assistant || streaming || isIgnored) {
       return
     }
 
-    navigator.clipboard
-      .writeText(assistant.content)
-      .then(() => {
-        setCopied(true)
-        if (copyTimer.current) {
-          window.clearTimeout(copyTimer.current)
-        }
-        copyTimer.current = window.setTimeout(() => setCopied(false), 1500)
-      })
-      .catch(() => setCopied(false))
+    if (isTauri()) {
+      void stopSpeaking()
+    }
+    void regenerate(QUICK_CONVERSATION_ID, assistant.id)
   }
 
   return (
@@ -719,28 +706,6 @@ function Overlay() {
                     ) : null}
 
                     <div className="ml-auto flex items-center gap-0.5">
-                      {showResponse && assistant?.content ? (
-                        <Tooltip delay={500}>
-                          <Button
-                            isIconOnly
-                            aria-label={copied ? 'Copied' : 'Copy response'}
-                            className="size-7 min-w-7 text-foreground/45"
-                            size="sm"
-                            variant="ghost"
-                            onPress={copyResponse}
-                          >
-                            {copied ? (
-                              <Check className="size-3.5 text-primary" />
-                            ) : (
-                              <Copy className="size-3.5" />
-                            )}
-                          </Button>
-                          <Tooltip.Content>
-                            {copied ? 'Copied' : 'Copy'}
-                          </Tooltip.Content>
-                        </Tooltip>
-                      ) : null}
-
                       {streaming ? (
                         <Tooltip delay={500}>
                           <Button
@@ -844,18 +809,51 @@ function Overlay() {
                   </header>
 
                   {showResponse ? (
-                    <div
-                      aria-live="polite"
-                      className="iris-response max-h-[320px] overflow-y-auto px-5 pb-2 pt-1.5"
-                    >
-                      {assistant?.status === 'error' ? (
-                        <p className="text-[13px] leading-6 text-danger">
-                          {assistant.error ??
-                            'Iris could not finish that response. Try again in a moment.'}
-                        </p>
-                      ) : assistant?.content ? (
-                        <Markdown>{assistant.content}</Markdown>
-                      ) : null}
+                    <div className="iris-response px-5 pb-2 pt-1.5">
+                      <div
+                        aria-live="polite"
+                        className="max-h-[320px] overflow-y-auto"
+                      >
+                        {assistant?.status === 'error' ? (
+                          <p className="text-[13px] leading-6 text-danger">
+                            {assistant.error ??
+                              'Iris could not finish that response. Try again in a moment.'}
+                          </p>
+                        ) : assistant?.content ? (
+                          <Markdown>{assistant.content}</Markdown>
+                        ) : null}
+                      </div>
+
+                      <div className="mt-1 flex items-center gap-0.5">
+                        {assistant?.content ? (
+                          <CopyButton
+                            className="size-7 min-w-7 text-foreground/45"
+                            text={assistant.content}
+                          />
+                        ) : null}
+                        {assistant?.content ? (
+                          <ReadAloudButton
+                            className="size-7 min-w-7 text-foreground/45"
+                            conversationId={QUICK_CONVERSATION_ID}
+                            text={assistant.content}
+                          />
+                        ) : null}
+                        {canRegenerate ? (
+                          <Tooltip delay={500}>
+                            <Button
+                              isIconOnly
+                              aria-label="Regenerate response"
+                              className="size-7 min-w-7 text-foreground/45"
+                              size="sm"
+                              variant="ghost"
+                              onPress={regenerateResponse}
+                            >
+                              <RotateCcw className="size-3.5" />
+                            </Button>
+                            <Tooltip.Content>Regenerate</Tooltip.Content>
+                          </Tooltip>
+                        ) : null}
+                      </div>
                     </div>
                   ) : null}
 

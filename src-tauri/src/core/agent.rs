@@ -97,14 +97,12 @@ impl SummaryCache {
 pub struct AgentConfig {
     pub api_key: String,
     pub base_url: String,
-    /// `anthropic` or `openai`: the two wire formats Iris supports.
-    pub api_format: String,
     pub model: String,
     pub auto_speak: bool,
     pub deep_think: bool,
     pub web_search: bool,
     pub tts_voice: String,
-    /// Full TTS endpoint, so providers can host speech generation anywhere.
+    /// Full TTS endpoint derived from the base URL.
     pub tts_url: String,
 }
 
@@ -169,13 +167,9 @@ async fn run(
     config: &AgentConfig,
     cancelled: &AtomicBool,
 ) -> Result<Outcome, String> {
-    // Anthropic speaks `{base}/v1/messages`; OpenAI speaks `{base}/v1/chat/completions`.
+    // DeepSeek's Messages endpoint; the base URL only changes the origin (e.g. a proxy).
     let base = config.base_url.trim_end_matches('/');
-    let (url, openai_format) = if config.api_format == "openai" {
-        (format!("{base}/v1/chat/completions"), true)
-    } else {
-        (format!("{base}/v1/messages"), false)
-    };
+    let url = crate::core::endpoints::url(base, crate::core::endpoints::MESSAGES_PATH);
     let Some(prepared) = prepare(app, request, config, cancelled).await? else {
         return Ok(Outcome::Cancelled);
     };
@@ -276,31 +270,6 @@ async fn run(
                         .and_then(Value::as_str)
                         .unwrap_or("Stream error");
                     return Err(message.to_string());
-                }
-                // OpenAI streams events without a `type`; the text lives in `choices[].delta`.
-                None if openai_format => {
-                    if let Some(text) = event
-                        .get("choices")
-                        .and_then(Value::as_array)
-                        .and_then(|choices| choices.first())
-                        .and_then(|choice| choice.get("delta"))
-                        .and_then(|delta| delta.get("content"))
-                        .and_then(Value::as_str)
-                    {
-                        emit_token(app, &request.request_id, text);
-                        full_text.push_str(text);
-                    }
-                    // OpenAI has no `message_stop`; the terminator is a `finish_reason`.
-                    if event
-                        .get("choices")
-                        .and_then(Value::as_array)
-                        .and_then(|choices| choices.first())
-                        .and_then(|choice| choice.get("finish_reason"))
-                        .is_some_and(|reason| !reason.is_null())
-                    {
-                        stopped = true;
-                        break 'stream;
-                    }
                 }
                 _ => {}
             }
@@ -554,32 +523,15 @@ async fn summarize_chunk(
         )
     };
 
-    let base = config.base_url.trim_end_matches('/');
-    let openai_format = config.api_format == "openai";
-    let url = if openai_format {
-        format!("{base}/v1/chat/completions")
-    } else {
-        format!("{base}/v1/messages")
-    };
-    let body = if openai_format {
-        json!({
-            "model": config.model,
-            "messages": [
-                { "role": "system", "content": SUMMARY_SYSTEM_PROMPT },
-                { "role": "user", "content": prompt }
-            ],
-            "stream": false
-        })
-    } else {
-        json!({
-            "model": config.model,
-            "system": SUMMARY_SYSTEM_PROMPT,
-            "messages": [{ "role": "user", "content": prompt }],
-            "max_tokens": 700,
-            "thinking": { "type": "disabled" },
-            "stream": false
-        })
-    };
+    let url = crate::core::endpoints::url(&config.base_url, crate::core::endpoints::MESSAGES_PATH);
+    let body = json!({
+        "model": config.model,
+        "system": SUMMARY_SYSTEM_PROMPT,
+        "messages": [{ "role": "user", "content": prompt }],
+        "max_tokens": 700,
+        "thinking": { "type": "disabled" },
+        "stream": false
+    });
 
     let response = tokio::select! {
         response = client
@@ -600,28 +552,17 @@ async fn summarize_chunk(
         .json()
         .await
         .map_err(|error| format!("Could not read the conversation summary: {error}"))?;
-    let summary = if openai_format {
-        // OpenAI places the text in `choices[].message.content`.
-        body.get("choices")
-            .and_then(Value::as_array)
-            .and_then(|choices| choices.first())
-            .and_then(|choice| choice.get("message"))
-            .and_then(|message| message.get("content"))
-            .and_then(Value::as_str)
-            .map(str::to_string)
-            .unwrap_or_default()
-    } else {
-        body.get("content")
-            .and_then(Value::as_array)
-            .map(|blocks| {
-                blocks
-                    .iter()
-                    .filter_map(|block| block.get("text").and_then(Value::as_str))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            })
-            .unwrap_or_default()
-    };
+    let summary = body
+        .get("content")
+        .and_then(Value::as_array)
+        .map(|blocks| {
+            blocks
+                .iter()
+                .filter_map(|block| block.get("text").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default();
 
     if summary.trim().is_empty() {
         return Err("The model returned an empty summary.".to_string());
@@ -630,18 +571,8 @@ async fn summarize_chunk(
     Ok(Some(summary.trim().to_string()))
 }
 
-/// Builds the streaming request body for the configured wire format. Both composer toggles only
-/// affect the request.
-///
-/// The Anthropic branch sends only standard Messages fields: vendor extensions like DeepSeek's
-/// `thinking: disabled`, `safety_check`, and `deepseek_read_url` tools are rejected by other
-/// Anthropic-compatible providers (verified: they return 400). Thinking and web search map to the
-/// standard `adaptive` thinking and `web_search` server tool instead.
+/// Builds the streaming request body for a reply. Both composer toggles only affect the request.
 fn build_body(system: String, messages: Vec<Value>, config: &AgentConfig) -> Value {
-    if config.api_format == "openai" {
-        return build_openai_body(system, messages, config);
-    }
-
     let mut body = json!({
         "model": config.model,
         // Required by the Messages API; omitting it is rejected with a 400.
@@ -656,98 +587,13 @@ fn build_body(system: String, messages: Vec<Value>, config: &AgentConfig) -> Val
     }
 
     if config.web_search {
-        // The standard server-side search tool. DeepSeek executes it on its Anthropic endpoint, so
-        // this stays portable across providers that implement the Messages API.
+        // The standard server-side search tool runs on DeepSeek's Messages endpoint.
         body["tools"] = json!([
             { "type": "web_search_20250305", "name": "web_search" }
         ]);
     }
 
     body
-}
-
-/// OpenAI Chat Completions: the system prompt is the first message and text lives in `content`
-/// strings, so the Anthropic content blocks are flattened to plain text.
-fn build_openai_body(system: String, messages: Vec<Value>, config: &AgentConfig) -> Value {
-    let mut out = Vec::with_capacity(messages.len() + 1);
-    if !system.trim().is_empty() {
-        out.push(json!({ "role": "system", "content": system }));
-    }
-    out.extend(messages.into_iter().map(flatten_to_openai));
-
-    let mut body = json!({
-        "model": config.model,
-        "messages": out,
-        "stream": true
-    });
-
-    if config.deep_think {
-        // DeepSeek takes Anthropic's thinking block in every format. `adaptive` is accepted by
-        // providers that implement the Messages API, so this stays portable.
-        body["thinking"] = json!({ "type": "enabled" });
-        body["reasoning_effort"] = json!("high");
-    }
-
-    if config.web_search {
-        // Chat Completions has no standard search tool, and DeepSeek rejects anything but
-        // `function`, so its own server-side tool is the only one that runs here.
-        body["tools"] = json!([{ "type": "deepseek_web_search" }]);
-    }
-
-    body
-}
-
-/// Flattens an Anthropic-style turn into OpenAI's `{role, content}` shape.
-///
-/// Images must survive the conversion: OpenAI takes them as `image_url` parts, so a turn with
-/// attachments becomes a content array instead of a plain string.
-fn flatten_to_openai(message: Value) -> Value {
-    let role = message
-        .get("role")
-        .and_then(Value::as_str)
-        .unwrap_or("user");
-
-    let blocks = match message.get("content") {
-        Some(Value::Array(blocks)) => blocks.clone(),
-        Some(Value::String(text)) => return json!({ "role": role, "content": text }),
-        _ => return json!({ "role": role, "content": "" }),
-    };
-
-    let has_image = blocks
-        .iter()
-        .any(|block| block.get("type").and_then(Value::as_str) == Some("image"));
-
-    if !has_image {
-        // Text-only turns stay a simple string, which every compatible endpoint accepts.
-        let content = blocks
-            .iter()
-            .filter_map(|block| block.get("text").and_then(Value::as_str))
-            .collect::<Vec<_>>()
-            .join("\n");
-        return json!({ "role": role, "content": content });
-    }
-
-    let parts: Vec<Value> = blocks
-        .iter()
-        .filter_map(|block| match block.get("type").and_then(Value::as_str) {
-            Some("text") => block
-                .get("text")
-                .and_then(Value::as_str)
-                .map(|text| json!({ "type": "text", "text": text })),
-            Some("image") => {
-                let source = block.get("source")?;
-                let media_type = source.get("media_type").and_then(Value::as_str)?;
-                let data = source.get("data").and_then(Value::as_str)?;
-                Some(json!({
-                    "type": "image_url",
-                    "image_url": { "url": format!("data:{media_type};base64,{data}") }
-                }))
-            }
-            _ => None,
-        })
-        .collect();
-
-    json!({ "role": role, "content": parts })
 }
 
 fn emit_token(app: &AppHandle, request_id: &str, token: &str) {
@@ -863,8 +709,8 @@ mod tests {
     use serde_json::Value;
 
     use super::{
-        build_body, chunk_end, flatten_to_openai, prepare_with, split_index, to_api_messages,
-        trim_to_user, AgentConfig, SummaryCache, Turn, RECENT_BUDGET_CHARS,
+        build_body, chunk_end, prepare_with, split_index, to_api_messages, trim_to_user,
+        AgentConfig, SummaryCache, Turn, RECENT_BUDGET_CHARS,
     };
     use crate::tauri_commands::chat::{ChatAttachmentInput, ChatMessageInput};
 
@@ -972,49 +818,10 @@ mod tests {
     }
 
     #[test]
-    fn openai_conversion_keeps_images() {
-        let turn = Turn {
-            role: "user".to_string(),
-            content: "What is this?".to_string(),
-            attachments: vec![ChatAttachmentInput {
-                media_type: "image/jpeg".to_string(),
-                data: "abc".to_string(),
-            }],
-        };
-
-        let messages = to_api_messages(&[turn]);
-        let converted = flatten_to_openai(messages[0].clone());
-        let parts = converted["content"].as_array().expect("content parts");
-        assert_eq!(parts[0]["type"], "image_url");
-        assert_eq!(
-            parts[0]["image_url"]["url"],
-            "data:image/jpeg;base64,abc"
-        );
-        assert_eq!(parts[1]["type"], "text");
-        assert_eq!(parts[1]["text"], "What is this?");
-    }
-
-    /// A turn with no attachments stays a plain string, which is the most compatible shape.
-    #[test]
-    fn openai_conversion_keeps_text_only_turns_simple() {
-        let turn = Turn {
-            role: "user".to_string(),
-            content: "hello".to_string(),
-            attachments: Vec::new(),
-        };
-
-        let messages = to_api_messages(&[turn]);
-        let converted = flatten_to_openai(messages[0].clone());
-        assert!(converted["content"].is_string());
-        assert_eq!(converted["content"], "hello");
-    }
-
-    #[test]
     fn toggles_shape_the_request() {
         let mut config = AgentConfig {
             api_key: "test-key".to_string(),
             base_url: "http://127.0.0.1".to_string(),
-            api_format: "anthropic".to_string(),
             model: "deepseek-flash".to_string(),
             auto_speak: false,
             deep_think: false,
@@ -1044,7 +851,6 @@ mod tests {
         let config = AgentConfig {
             api_key: "test-key".to_string(),
             base_url: server.base_url.clone(),
-            api_format: "anthropic".to_string(),
             model: "deepseek-flash".to_string(),
             auto_speak: false,
             deep_think: false,
@@ -1143,11 +949,10 @@ mod tests {
 mod format_tests {
     use super::*;
 
-    fn config(api_format: &str) -> AgentConfig {
+    fn config() -> AgentConfig {
         AgentConfig {
             api_key: "k".to_string(),
             base_url: "https://example.test".to_string(),
-            api_format: api_format.to_string(),
             model: "m".to_string(),
             auto_speak: false,
             deep_think: true,
@@ -1157,25 +962,23 @@ mod format_tests {
         }
     }
 
-    /// Anthropic wants a top-level `system` and keeps content blocks as they are.
+    /// The reply body uses the Messages API shape and only sends extras when toggled on.
     #[test]
-    fn the_anthropic_body_uses_only_standard_fields() {
-        let body = build_body("sys".to_string(), vec![], &config("anthropic"));
+    fn the_body_uses_the_messages_shape() {
+        let body = build_body("sys".to_string(), vec![], &config());
         assert_eq!(body["system"], "sys");
         // Required by the Messages API.
         assert_eq!(body["max_tokens"], MAX_OUTPUT_TOKENS);
-        // DeepSeek-only extensions must not be sent to other providers.
-        assert!(body.get("safety_check").is_none());
-        // The fixture enables thinking and web search, which map to standard equivalents.
+        // The fixture enables thinking and web search.
         assert_eq!(body["thinking"]["type"], "adaptive");
         assert_eq!(body["tools"][0]["name"], "web_search");
         assert!(body.get("reasoning_effort").is_none());
     }
 
-    /// With the toggles off the body carries no vendor or thinking fields at all.
+    /// With the toggles off the body carries no thinking or tool fields at all.
     #[test]
-    fn the_anthropic_body_omits_optional_fields_when_toggles_are_off() {
-        let mut off = config("anthropic");
+    fn the_body_omits_optional_fields_when_toggles_are_off() {
+        let mut off = config();
         off.deep_think = false;
         off.web_search = false;
 
@@ -1183,30 +986,5 @@ mod format_tests {
         assert!(body.get("thinking").is_none());
         assert!(body.get("tools").is_none());
         assert_eq!(body["max_tokens"], MAX_OUTPUT_TOKENS);
-    }
-
-    /// OpenAI wants the system prompt inside `messages` and no Anthropic-only fields.
-    #[test]
-    fn the_openai_body_moves_the_system_prompt_into_messages() {
-        let messages = vec![json!({
-            "role": "user",
-            "content": [
-                { "type": "text", "text": "hello" },
-                { "type": "text", "text": "world" }
-            ]
-        })];
-        let body = build_body("sys".to_string(), messages, &config("openai"));
-
-        assert!(body.get("system").is_none(), "OpenAI has no top-level system");
-        // Thinking and search travel as the Anthropic fields here too: this provider reads them in
-        // both formats, and the fixture enables both toggles.
-        assert_eq!(body["thinking"]["type"], "enabled");
-        assert_eq!(body["tools"][0]["type"], "deepseek_web_search");
-        let out = body["messages"].as_array().expect("messages");
-        assert_eq!(out[0]["role"], "system");
-        assert_eq!(out[0]["content"], "sys");
-        // Anthropic blocks are flattened to one string, in order.
-        assert_eq!(out[1]["content"], "hello\nworld");
-        assert_eq!(body["stream"], true);
     }
 }
