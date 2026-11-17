@@ -9,6 +9,7 @@ import {
   deleteConversation,
   deleteMessages,
   loadConversations,
+  loadQuickConversationId,
   saveConversationMeta,
   saveConversations,
   saveMessage,
@@ -98,7 +99,10 @@ function readLegacyChat(): LegacyChat | null {
           (conversation) =>
             Boolean(conversation) &&
             typeof conversation.id === 'string' &&
-            Array.isArray(conversation.messages),
+            Array.isArray(conversation.messages) &&
+            // The fixed quick id is migrated from SQLite by Rust; importing it again would
+            // recreate the legacy row.
+            conversation.id !== 'iris:quick',
         )
       : []
     return {
@@ -183,12 +187,16 @@ export function useChatStorage() {
       activeConversationId: string | null
       lastQuickConversationId: string | null
     }) => {
+      // The history window owns its active conversation; the overlay owns the quick-chat
+      // back/forward pointer. Each window preserves the other's field.
       const current = readSelection()
       const next: StoredSelection = {
         activeConversationId: isOverlay
           ? (current?.activeConversationId ?? state.activeConversationId)
           : state.activeConversationId,
-        lastQuickConversationId: state.lastQuickConversationId,
+        lastQuickConversationId: isOverlay
+          ? state.lastQuickConversationId
+          : (current?.lastQuickConversationId ?? state.lastQuickConversationId),
       }
       try {
         localStorage.setItem(CHAT_UI_STORAGE_KEY, JSON.stringify(next))
@@ -413,6 +421,16 @@ export function useChatStorage() {
         if (suspended) {
           return
         }
+
+        // The quick overlay's current chat is a normal conversation id stored beside the
+        // database, so every window agrees on which quick chat is open.
+        if (initial) {
+          const quickId = await loadQuickConversationId().catch(() => null)
+          if (quickId) {
+            useChatStore.getState().setQuickConversationId(quickId)
+          }
+        }
+
         useChatStore.getState().hydrateConversations(stored)
 
         const state = useChatStore.getState()

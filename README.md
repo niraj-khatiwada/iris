@@ -69,10 +69,10 @@ Iris launches as a floating quick-chat window, not a normal app window.
 - The clock button opens the history window, where the older conversation UI still lives.
 - The AI blob in the menu bar offers **Ask Iris**, **History**, and **Quit Iris**. Iris keeps
   running when the overlay hides; quit from there.
-- Quick chats are stored as one rolling **Quick chat** conversation, so they remain available in
-  history. **+** starts a fresh one, and `⌘⇧N` restores the previous one. The header shows the same
-  conversation title as the sidebar; new chats get a short DeepSeek-generated title with the first
-  message as an instant fallback.
+- Every quick chat is a normal UUID conversation, so it appears in history and owns its own
+  attachment folder. **+** starts a fresh one and leaves the previous chat in History, while `⌘⇧N`
+  switches back to the previous one. The header shows the same conversation title as the sidebar;
+  new chats get a short DeepSeek-generated title with the first message as an instant fallback.
 - The panel morphs between idle, processing, ready, and revealed states with springs, matching
   the Dynamic Island's motion language.
 - The overlay is only revealed after the webview has painted, so there is no empty native
@@ -177,7 +177,7 @@ change without touching the UI.
 `src-tauri/src/core/agent.rs` is the DeepSeek integration point. Iris supports only DeepSeek: the
 base URL defaults to `https://api.deepseek.com` and can point at a DeepSeek-compatible proxy, but
 there is no provider picker or wire-format switch. `core/endpoints.rs` derives
-`/anthropic/v1/messages`, `/v1/models`, `/v1/tools/tts`, and `/v1/tools/asr` from that single
+`/anthropic/v1/messages`, `/anthropic/v1/files`, `/v1/models`, `/v1/tools/tts`, and `/v1/tools/asr` from that single
 origin. The Messages route is under `/anthropic`; the root `/v1/messages` returns 404.
 
 `src-tauri/src/sys/speech.rs` owns automatic read-aloud. It calls `/v1/tools/tts` with the selected
@@ -227,8 +227,9 @@ feature-parity plan, not just a custom URL.
   section while anything is archived; archived chats open read-only and can be restored or
   permanently deleted. They never accept new messages or renames. Empty conversations are deleted
   outright instead of being archived.
-- New quick chats move the previous quick conversation to a new id, so old messages stay in
-  History instead of being discarded. `⌘⇧N` brings the previous quick conversation back.
+- New quick chats create a fresh UUID conversation and leave the previous one in History; no
+  messages or attachment folders are moved. `⌘⇧N` toggles back to the previous quick chat.
+- The open sidebar footer shows **API key is not set** when the credential table is empty; its arrow opens Settings → AI at the API key field. The check uses the Rust `has_api_key` command so the cached localStorage flag cannot mask a missing key.
 - Settings → AI → **Prompt** edits the Iris Island and main chat system prompts; the main chat follows the island prompt by default. Reset restores the built-in Iris instructions. Settings live in `localStorage`; the DeepSeek API key lives in the SQLite `credential` table and
   is read only inside Rust.
 - The composer has two request toggles: **DeepThink** sends `thinking: { type: "adaptive" }`, and
@@ -236,11 +237,19 @@ feature-parity plan, not just a custom URL.
   link, `deepseek_read_url` is added automatically so the model can read the page; with DeepThink
   and Search both on, URL reading wins so the links are actually read. Both toggles apply to the
   next message only.
-- Images can be pasted or dropped into the composer or the quick overlay; there is no attach
-  button, and non-image files are ignored until document support lands. They are resized to 1280px JPEGs, kept as attachments on the user message, and sent to
-  the Messages API as base64 image blocks. Double-click a thumbnail or a sent image to open it in
-  Iris's full-screen preview; Escape or a click outside closes it. The database stores them in
-  `messages.attachments`.
+- The overlay remembers its current chat in the SQLite `app_meta` table (`quick-conversation`).
+  The old fixed `iris:quick` chat is migrated to a UUID and its attachment folder moves with it.
+- Files can be pasted or dropped into the composer or the quick overlay; there is no attach
+  button. Iris stores originals in `Application Support/<identifier>/attachments/<conversation id>/`
+  and keeps a resized JPEG preview for images; messages reference those files, while legacy
+  inline images remain supported. Images are sent as base64 image blocks, and documents are
+  uploaded to DeepSeek's Files API. Limits are enforced before attaching: 12 MB per image,
+  32 MB for text/spreadsheets/ebooks, 100 MB for PDF/Word/PowerPoint, and 20 documents per draft.
+  Text formats use `user_data`; PDF and Office files use `rich_layout_recognition`. The returned
+  `file_id` is stored with the local original and reused on later turns. Document cards show
+  upload progress and retry failures. Double-click an image to open Iris's full-screen preview;
+  use the download action to save a copy of the original. Permanently deleting a conversation
+  removes its attachment folder; archiving keeps it.
 - The quick overlay also supports **screen context** (overlay only): a capture button opens a live
   selection overlay without freezing the screen, lets you drag a region, resize it with eight
   handles, drag the toolbar handle to move it, and annotate it with a pen, rectangle, or arrow in
@@ -262,14 +271,13 @@ feature-parity plan, not just a custom URL.
 Chat history is stored in Rust with `rusqlite`, not by reaching into SQL from the webview:
 
 - `conversations` — id, title, created_at, updated_at, archived_at
-- `messages` — id, conversation_id, role, content, created_at, status, error
+- `messages` — id, conversation_id, role, content, created_at, status, error, attachments
 - `credential` — name, api_key, updated_at (the single key used for every request)
 
 The database lives at `Application Support/com.iris.desktop/iris.db` and is the only conversation
 store. Conversations are saved individually after a short debounce; the overlay and history window
-reload and merge by `updatedAt` on focus. Attachments and FTS5 search are still planned. Store
-screenshots and other large attachments as files under Application Support, with their paths in
-SQLite. The API key is stored in plain text in `credential`; the webview still never reads it.
+reload and merge by `updatedAt` on focus. Attachments and FTS5 search are supported. The API key is
+stored in plain text in `credential`; the webview still never reads it.
 
 ## Notes
 

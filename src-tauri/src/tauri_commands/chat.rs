@@ -14,8 +14,16 @@ use crate::core::storage::Storage;
 #[serde(rename_all = "camelCase")]
 pub struct ChatAttachmentInput {
     pub media_type: String,
-    /// Base64 payload without the `data:` prefix.
+    /// Base64 payload without the `data:` prefix. Empty for uploaded documents.
+    #[serde(default)]
     pub data: String,
+    /// DeepSeek Files API id for documents.
+    #[serde(default)]
+    pub file_id: Option<String>,
+    /// Stored image preview inside the conversation's attachments folder; Rust reads it into
+    /// `data` before the request.
+    #[serde(default)]
+    pub local_file: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

@@ -4,7 +4,7 @@ import { newId } from '@/utils/id'
 /** Keep pasted screenshots comfortable for localStorage and the API request. */
 const MAX_DIMENSION = 1280
 const JPEG_QUALITY = 0.8
-const MAX_FILE_BYTES = 12 * 1024 * 1024
+export const MAX_IMAGE_FILE_BYTES = 12 * 1024 * 1024
 const IMAGE_NAME = /\.(avif|bmp|gif|heic|heif|jpe?g|png|tiff?|webp)$/i
 
 /** Dropped files do not always carry a MIME type, so fall back to the file name. */
@@ -15,7 +15,7 @@ export function isImageFile(file: File) {
 export async function fileToAttachment(
   file: File,
 ): Promise<ChatAttachment | null> {
-  if (!isImageFile(file) || file.size > MAX_FILE_BYTES) {
+  if (!isImageFile(file) || file.size > MAX_IMAGE_FILE_BYTES) {
     return null
   }
 
@@ -30,14 +30,34 @@ export async function fileToAttachment(
       name: file.name || 'Image',
       mediaType: 'image/jpeg',
       dataUrl,
+      kind: 'image',
+      size: file.size,
     }
   } catch {
     return null
   }
 }
 
-/** Splits a stored data URL into the base64 payload the Messages API expects. */
+/** Maps an attachment to the block data the backend sends to the Messages API. */
 export function attachmentToAgent(attachment: ChatAttachment) {
+  if (attachment.fileId) {
+    return {
+      mediaType: attachment.mediaType,
+      data: '',
+      fileId: attachment.fileId,
+    }
+  }
+  if (attachment.previewName) {
+    return {
+      mediaType: attachment.mediaType,
+      data: '',
+      localFile: attachment.previewName,
+    }
+  }
+  if (!attachment.dataUrl) {
+    return null
+  }
+
   const match = /^data:([^;]+);base64,(.+)$/.exec(attachment.dataUrl)
   if (!match) {
     return null

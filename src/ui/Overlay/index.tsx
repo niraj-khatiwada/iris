@@ -30,15 +30,15 @@ import ReadAloudButton from '@/components/ReadAloudButton'
 import SendButton from '@/components/SendButton'
 import SpeechControl from '@/components/SpeechControl'
 import VoiceStrip from '@/components/VoiceStrip'
-import { NO_WRITING_ASSIST, QUICK_CONVERSATION_ID } from '@/constants'
+import { NO_WRITING_ASSIST } from '@/constants'
 import {
   SENDING_EMOTIONS,
   SENDING_SHAPES,
   SENDING_TICK_MS,
 } from '@/constants/blob'
+import { useAttachments } from '@/hooks/useAttachments'
 import { useChatStorage } from '@/hooks/useChatStorage'
 import { useConversationHistory } from '@/hooks/useConversationHistory'
-import { useImageAttachments } from '@/hooks/useImageAttachments'
 import { useOverlayWindow } from '@/hooks/useOverlayWindow'
 import { useSettingsSync } from '@/hooks/useSettingsSync'
 import { useSpeechPlayback } from '@/hooks/useSpeechPlayback'
@@ -97,10 +97,15 @@ function Overlay() {
     (state) => state.ensureQuickConversation,
   )
   const hydrated = useChatStore((state) => state.hydrated)
-  const hasQuickConversation = useChatStore((state) =>
-    state.conversations.some(
-      (conversation) => conversation.id === QUICK_CONVERSATION_ID,
-    ),
+  const quickConversationId = useChatStore((state) => state.quickConversationId)
+  const hasQuickConversation = useChatStore(
+    (state) =>
+      Boolean(state.quickConversationId) &&
+      state.conversations.some(
+        (conversation) =>
+          conversation.id === state.quickConversationId &&
+          !conversation.archivedAt,
+      ),
   )
   const resetQuickConversation = useChatStore(
     (state) => state.resetQuickConversation,
@@ -112,13 +117,19 @@ function Overlay() {
   const stopStreaming = useChatStore((state) => state.stopStreaming)
   const regenerate = useChatStore((state) => state.regenerate)
   const conversation = useChatStore((state) =>
-    state.conversations.find((item) => item.id === QUICK_CONVERSATION_ID),
+    state.quickConversationId
+      ? state.conversations.find(
+          (item) => item.id === state.quickConversationId,
+        )
+      : undefined,
   )
-  useConversationHistory(QUICK_CONVERSATION_ID)
+  useConversationHistory(quickConversationId ?? undefined)
   const quickLoaded = conversation?.messagesLoaded ?? false
   const selectConversation = useChatStore((state) => state.selectConversation)
   const streaming = useChatStore(
-    (state) => state.streamingConversationId === QUICK_CONVERSATION_ID,
+    (state) =>
+      Boolean(state.quickConversationId) &&
+      state.streamingConversationId === state.quickConversationId,
   )
 
   const { panelRef, inputRef, hide } = useOverlayWindow()
@@ -130,7 +141,10 @@ function Overlay() {
   const setWebSearch = useSettingsStore((state) => state.setWebSearch)
   const voice = useVoiceInput()
   const voiceStart = voice.start
-  const images = useImageAttachments()
+  const files = useAttachments({
+    conversationId: quickConversationId,
+    createConversation: ensureQuickConversation,
+  })
   useChatStorage()
   useSettingsSync()
   useSpeechPlayback()
@@ -215,19 +229,37 @@ function Overlay() {
     await invoke('show_main_window')
   }, [])
 
-  const clearImages = images.clear
+  const clearAttachments = files.clear
 
   const newChat = useCallback(() => {
     if (isTauri()) {
       void stopSpeaking()
     }
     resetQuickConversation()
-    clearImages()
+    clearAttachments()
     setValue('')
     setRevealed(revealResponse)
     setIgnoredResponseId(null)
     requestAnimationFrame(() => inputRef.current?.focus())
-  }, [clearImages, inputRef, resetQuickConversation, revealResponse])
+  }, [clearAttachments, inputRef, resetQuickConversation, revealResponse])
+
+  // Drafts belong to one conversation. When Previous conversation or a fresh quick chat
+  // changes the id, do not carry files or text into the new chat.
+  const previousQuickId = useRef(quickConversationId)
+  useEffect(() => {
+    if (previousQuickId.current === quickConversationId) {
+      return
+    }
+    const previous = previousQuickId.current
+    previousQuickId.current = quickConversationId
+    if (!previous) {
+      return
+    }
+    clearAttachments()
+    setValue('')
+    setRevealed(revealResponse)
+    setIgnoredResponseId(null)
+  }, [clearAttachments, quickConversationId, revealResponse])
 
   useEffect(() => {
     // Wait for SQLite before creating the quick chat, otherwise the empty local one could win
@@ -417,7 +449,7 @@ function Overlay() {
       return
     }
 
-    const addAttachment = images.addAttachment
+    const addAttachment = files.addAttachment
     let disposed = false
     const cleanups: Array<() => void> = []
 
@@ -464,7 +496,7 @@ function Overlay() {
         cleanup()
       }
     }
-  }, [images.addAttachment, inputRef])
+  }, [files.addAttachment, inputRef])
 
   // While the voice strip is open, Enter sends and Escape cancels it instead of hiding Iris.
   useEffect(() => {
@@ -561,7 +593,9 @@ function Overlay() {
   const submit = () => {
     const text = value.trim()
     if (
-      (!text && images.attachments.length === 0) ||
+      (!text && files.attachments.length === 0) ||
+      files.pending ||
+      files.hasError ||
       streaming ||
       !hydrated ||
       !quickLoaded
@@ -569,13 +603,13 @@ function Overlay() {
       return
     }
 
-    const attachments = images.attachments
+    const attachments = files.readyAttachments
     setValue('')
-    images.clear()
+    files.commit()
     setRevealed(revealResponse)
     setIgnoredResponseId(null)
-    ensureQuickConversation()
-    void sendMessage(text, QUICK_CONVERSATION_ID, attachments)
+    const conversationId = ensureQuickConversation()
+    void sendMessage(text, conversationId, attachments)
     requestAnimationFrame(() => inputRef.current?.focus())
   }
 
@@ -591,7 +625,7 @@ function Overlay() {
   // rides along with the transcript so a dictation never drops the rest of the draft.
   const finishVoice = async (forceSend = false) => {
     const transcript = (await voice.stop())?.trim() ?? ''
-    const attachments = images.attachments
+    const attachments = files.readyAttachments
     const text = [value.trim(), transcript].filter(Boolean).join(' ')
 
     if (autoSendVoice || forceSend) {
@@ -602,13 +636,18 @@ function Overlay() {
       if (!text && attachments.length === 0) {
         return
       }
+      if (files.pending || files.hasError) {
+        setValue(text)
+        requestAnimationFrame(() => inputRef.current?.focus())
+        return
+      }
 
       setValue('')
-      images.clear()
+      files.commit()
       setRevealed(revealResponse)
       setIgnoredResponseId(null)
-      ensureQuickConversation()
-      void sendMessage(text, QUICK_CONVERSATION_ID, attachments)
+      const conversationId = ensureQuickConversation()
+      void sendMessage(text, conversationId, attachments)
       return
     }
 
@@ -630,8 +669,12 @@ function Overlay() {
 
   const openHistory = () => {
     // Keep the history window on the quick conversation when it has content.
-    if (conversation && conversation.messages.length > 0) {
-      selectConversation(QUICK_CONVERSATION_ID)
+    if (
+      quickConversationId &&
+      conversation &&
+      conversation.messages.length > 0
+    ) {
+      selectConversation(quickConversationId)
     }
 
     if (isTauri()) {
@@ -645,14 +688,14 @@ function Overlay() {
   const canRegenerate = Boolean(assistant && !streaming && !isIgnored)
 
   const regenerateResponse = () => {
-    if (!assistant || streaming || isIgnored) {
+    if (!assistant || streaming || isIgnored || !quickConversationId) {
       return
     }
 
     if (isTauri()) {
       void stopSpeaking()
     }
-    void regenerate(QUICK_CONVERSATION_ID, assistant.id)
+    void regenerate(quickConversationId, assistant.id)
   }
 
   return (
@@ -666,7 +709,7 @@ function Overlay() {
         )}
         initial={false}
         transition={panelSpring}
-        {...images.dragHandlers}
+        {...files.dragHandlers}
       >
         <div ref={contentRef} className="relative">
           <AnimatePresence>
@@ -949,10 +992,10 @@ function Overlay() {
                             text={assistant.content}
                           />
                         ) : null}
-                        {assistant?.content ? (
+                        {assistant?.content && quickConversationId ? (
                           <ReadAloudButton
                             className="size-7 min-w-7 text-foreground/45"
-                            conversationId={QUICK_CONVERSATION_ID}
+                            conversationId={quickConversationId}
                             text={assistant.content}
                           />
                         ) : null}
@@ -981,15 +1024,18 @@ function Overlay() {
                       hasResponse
                         ? 'border-t border-foreground/[0.06] pt-1.5 pb-2.5'
                         : 'pt-1 pb-2.5',
-                      images.dragging && 'bg-foreground/[0.03]',
+                      files.dragging && 'bg-foreground/[0.03]',
                     )}
                     data-tauri-drag-region="deep"
                   >
                     <AttachmentStrip
-                      attachments={images.attachments}
+                      attachments={files.attachments}
                       className="pb-2"
                       compact
-                      onRemove={images.remove}
+                      error={files.error}
+                      onDismissError={files.clearError}
+                      onRemove={files.remove}
+                      onRetry={files.retry}
                     />
 
                     <div className="flex items-end gap-2">
@@ -1057,7 +1103,9 @@ function Overlay() {
                             streaming ||
                             !hydrated ||
                             !quickLoaded ||
-                            (!value.trim() && images.attachments.length === 0)
+                            files.pending ||
+                            files.hasError ||
+                            (!value.trim() && files.attachments.length === 0)
                           }
                           onPress={submit}
                         />

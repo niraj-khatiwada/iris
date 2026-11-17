@@ -68,6 +68,7 @@ pub fn reset_app_data(app: AppHandle, storage: State<'_, Storage>) -> Result<(),
     // Drop the schema and immediately rebuild an empty one, so the backend is usable during the
     // short window before the webviews reload.
     storage.reset_schema()?;
+    crate::core::attachments::delete_all(&app)?;
 
     if let Ok(directory) = app.path().app_cache_dir() {
         if let Ok(entries) = std::fs::read_dir(&directory) {

@@ -2,12 +2,38 @@ export type ChatRole = 'user' | 'assistant' | 'system'
 
 export type MessageStatus = 'streaming' | 'complete' | 'error'
 
-/** A pasted or dropped image, stored as a data URL so SQLite and the UI share one shape. */
+/** DeepSeek's two parsing purposes for uploaded documents. */
+export type DocumentPurpose = 'user_data' | 'rich_layout_recognition'
+
+/**
+ * A pasted or dropped attachment. Images keep an inline resized data URL; documents are uploaded
+ * to DeepSeek's Files API and keep the returned file id for every later turn.
+ */
 export type ChatAttachment = {
   id: string
   name: string
   mediaType: string
-  dataUrl: string
+  /** Images only. Documents reference `fileId` instead. */
+  dataUrl?: string
+  /** DeepSeek Files API id; present on documents after upload. */
+  fileId?: string
+  /** Original file inside the conversation's local attachments folder. */
+  fileName?: string
+  /** Resized image JPEG used for display and for the model request. */
+  previewName?: string
+  /** Parsing purpose used for a document upload. */
+  purpose?: DocumentPurpose
+  size?: number
+  /** Optional for older stored images; infer from `dataUrl` when absent. */
+  kind?: 'image' | 'document'
+}
+
+export type UploadStatus = 'uploading' | 'ready' | 'error'
+
+/** A draft attachment plus the transient state of its Files API upload. */
+export type DraftAttachment = ChatAttachment & {
+  uploadStatus: UploadStatus
+  error?: string
 }
 
 export type ChatMessage = {
@@ -78,5 +104,10 @@ export type AgentMessage = {
   id: string
   role: ChatRole
   content: string
-  attachments?: Array<{ mediaType: string; data: string }>
+  attachments?: Array<{
+    mediaType: string
+    data: string
+    fileId?: string
+    localFile?: string
+  }>
 }

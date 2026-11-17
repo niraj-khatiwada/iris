@@ -31,9 +31,7 @@ pub fn set_main_window_theme(app: AppHandle, theme: Option<String>) -> Result<()
                     Some("dark") => unsafe {
                         NSAppearance::appearanceNamed(NSAppearanceNameDarkAqua)
                     },
-                    Some("light") => unsafe {
-                        NSAppearance::appearanceNamed(NSAppearanceNameAqua)
-                    },
+                    Some("light") => unsafe { NSAppearance::appearanceNamed(NSAppearanceNameAqua) },
                     _ => None,
                 };
                 ns_window.setAppearance(appearance.as_deref());

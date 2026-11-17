@@ -447,7 +447,9 @@ mod tests {
         let state = SpeechState::default();
         let epoch = state.begin();
 
-        state.epoch.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        state
+            .epoch
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
         assert!(!state.is_current(epoch));
     }

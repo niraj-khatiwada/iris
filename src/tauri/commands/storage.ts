@@ -41,22 +41,14 @@ export function deleteMessages(ids: string[]) {
   return invoke<void>('delete_messages', { ids })
 }
 
-/** Moves every message to another conversation, used when quick chats are archived. */
-export function moveConversationMessages(from: string, to: string) {
-  return invoke<void>('move_conversation_messages', { from, to })
+/** The normal UUID conversation the quick overlay should show. */
+export function loadQuickConversationId() {
+  return invoke<string | null>('quick_conversation_id')
 }
 
-/** Restores a previous quick conversation, optionally retiring the current one first. */
-export function restoreQuickConversation(
-  quick: string,
-  previous: string,
-  retired: string | null,
-) {
-  return invoke<void>('restore_quick_conversation', {
-    quick,
-    previous,
-    retired,
-  })
+/** Points the overlay at a conversation, or clears the pointer with `null`. */
+export function saveQuickConversationId(id: string | null) {
+  return invoke<void>('set_quick_conversation_id', { id })
 }
 
 export function saveConversation(conversation: Conversation) {

@@ -135,6 +135,10 @@
       }
     ],
     "security": {
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$APPDATA/attachments/**"]
+      },
       "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://ipc.localhost ws://localhost:3002 http://localhost:3002; img-src 'self' asset: http://asset.localhost blob: data:; media-src 'self' asset: http://asset.localhost blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
     }
   }

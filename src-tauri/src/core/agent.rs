@@ -9,10 +9,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use base64::Engine;
 use futures_util::StreamExt;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::core::attachments;
 use crate::core::storage::{Storage, StoredMessage};
 use crate::sys::speech;
 use crate::tauri_commands::chat::{
@@ -32,6 +34,20 @@ const RECENT_BUDGET_CHARS: usize = 24_000;
 const SUMMARY_INPUT_CHARS: usize = 40_000;
 /// Anthropic's Messages API requires `max_tokens`; a reply sized for speech fits comfortably.
 const MAX_OUTPUT_TOKENS: u32 = 8_192;
+/// Required whenever a document block references a Files API `file_id`.
+const FILES_BETA: &str = "files-api-2025-04-14";
+/// The Messages API rejects a request that references more than this many document blocks.
+const MAX_DOCUMENTS_PER_REQUEST: usize = 20;
+
+/// Counts document blocks across every prepared turn.
+fn document_count(messages: &[Value]) -> usize {
+    messages
+        .iter()
+        .filter_map(|message| message.get("content").and_then(Value::as_array))
+        .flat_map(|blocks| blocks.iter())
+        .filter(|block| block.get("type").and_then(Value::as_str) == Some("document"))
+        .count()
+}
 
 const SUMMARY_SYSTEM_PROMPT: &str =
     "You compress conversation history for a voice assistant. Write a compact summary in \
@@ -174,6 +190,13 @@ async fn run(
     };
 
     let read_url = newest_user_message(&request.messages).is_some_and(contains_url);
+    let documents = document_count(&prepared.messages);
+    if documents > MAX_DOCUMENTS_PER_REQUEST {
+        return Err(format!(
+            "This conversation references {documents} documents, but the API allows at most {MAX_DOCUMENTS_PER_REQUEST} per request. Start a new chat or remove an older attachment."
+        ));
+    }
+    let includes_document = documents > 0;
     let body = build_body(prepared.system, prepared.messages, config, read_url);
 
     let client = reqwest::Client::builder()
@@ -181,13 +204,16 @@ async fn run(
         .build()
         .map_err(|error| format!("Could not create the AI client: {error}"))?;
 
+    let mut http = client
+        .post(url)
+        .header("x-api-key", &config.api_key)
+        .header("accept", "text/event-stream");
+    if includes_document {
+        http = http.header("anthropic-beta", FILES_BETA);
+    }
+
     let response = tokio::select! {
-        response = client
-            .post(url)
-            .header("x-api-key", &config.api_key)
-            .header("accept", "text/event-stream")
-            .json(&body)
-            .send() => response,
+        response = http.json(&body).send() => response,
         _ = wait_for_cancel(cancelled) => return Ok(Outcome::Cancelled),
     }
     .map_err(|error| format!("Could not reach the AI service: {error}"))?;
@@ -298,7 +324,8 @@ async fn prepare(
     cancelled: &AtomicBool,
 ) -> Result<Option<Prepared>, String> {
     let cache = app.state::<SummaryCache>();
-    let messages = full_history(app, request);
+    let mut messages = full_history(app, request);
+    resolve_local_images(app, &request.conversation_id, &mut messages);
     prepare_with(
         &cache,
         &request.conversation_id,
@@ -356,13 +383,74 @@ fn stored_to_input(message: &StoredMessage) -> ChatMessageInput {
             .attachments
             .iter()
             .filter_map(|attachment| {
+                if let Some(file_id) = attachment
+                    .file_id
+                    .as_deref()
+                    .filter(|file_id| !file_id.is_empty())
+                {
+                    return Some(ChatAttachmentInput {
+                        media_type: attachment.media_type.clone(),
+                        data: String::new(),
+                        file_id: Some(file_id.to_string()),
+                        local_file: None,
+                    });
+                }
+                if let Some(preview) = attachment
+                    .preview_name
+                    .as_deref()
+                    .filter(|preview| !preview.is_empty())
+                {
+                    return Some(ChatAttachmentInput {
+                        media_type: attachment.media_type.clone(),
+                        data: String::new(),
+                        file_id: None,
+                        local_file: Some(preview.to_string()),
+                    });
+                }
                 let (_, data) = attachment.data_url.split_once(";base64,")?;
                 Some(ChatAttachmentInput {
                     media_type: attachment.media_type.clone(),
                     data: data.to_string(),
+                    file_id: None,
+                    local_file: None,
                 })
             })
             .collect(),
+    }
+}
+
+/// New images keep their resized JPEG on disk instead of a data URL in SQLite. Read those files
+/// into the request just before building the turns; legacy data URLs are already inline.
+fn resolve_local_images(app: &AppHandle, conversation_id: &str, messages: &mut [ChatMessageInput]) {
+    for message in messages {
+        for attachment in &mut message.attachments {
+            if attachment.file_id.is_some()
+                || !attachment.media_type.starts_with("image/")
+                || !attachment.data.is_empty()
+            {
+                continue;
+            }
+            let Some(local_file) = attachment
+                .local_file
+                .as_deref()
+                .filter(|file| !file.is_empty())
+            else {
+                continue;
+            };
+            let Ok(path) = attachments::path_for(app, conversation_id, local_file) else {
+                log::warn!("Invalid local attachment path {local_file}");
+                continue;
+            };
+            match std::fs::read(path) {
+                Ok(bytes) if !bytes.is_empty() => {
+                    attachment.data = base64::engine::general_purpose::STANDARD.encode(bytes);
+                }
+                Ok(_) => log::warn!("Image attachment {local_file} is empty"),
+                Err(error) => {
+                    log::warn!("Could not read image attachment {local_file}: {error}");
+                }
+            }
+        }
     }
 }
 
@@ -491,34 +579,42 @@ fn to_api_messages(turns: &[Turn]) -> Vec<Value> {
                 "content": [{ "type": "text", "text": turn.content }]
             }),
             _ => {
-                let images = turn
+                let mut blocks = turn
                     .attachments
                     .iter()
-                    .filter(|attachment| {
-                        attachment.media_type.starts_with("image/") && !attachment.data.is_empty()
+                    .filter_map(|attachment| {
+                        if let Some(file_id) = attachment
+                            .file_id
+                            .as_deref()
+                            .filter(|file_id| !file_id.is_empty())
+                        {
+                            return Some(json!({
+                                "type": "document",
+                                "source": { "type": "file", "file_id": file_id }
+                            }));
+                        }
+                        if attachment.media_type.starts_with("image/")
+                            && !attachment.data.is_empty()
+                        {
+                            return Some(json!({
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": attachment.media_type,
+                                    "data": attachment.data
+                                }
+                            }));
+                        }
+                        None
                     })
                     .collect::<Vec<_>>();
 
-                if images.is_empty() {
+                if blocks.is_empty() {
                     return json!({
                         "role": "user",
                         "content": turn.content
                     });
                 }
-
-                let mut blocks = images
-                    .into_iter()
-                    .map(|attachment| {
-                        json!({
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": attachment.media_type,
-                                "data": attachment.data
-                            }
-                        })
-                    })
-                    .collect::<Vec<_>>();
                 if !turn.content.trim().is_empty() {
                     blocks.push(json!({ "type": "text", "text": turn.content }));
                 }
@@ -809,9 +905,11 @@ mod tests {
     use serde_json::Value;
 
     use super::{
-        build_body, chunk_end, contains_url, newest_user_message, prepare_with, split_index,
-        to_api_messages, trim_to_user, AgentConfig, SummaryCache, Turn, RECENT_BUDGET_CHARS,
+        build_body, chunk_end, contains_url, document_count, newest_user_message, prepare_with,
+        split_index, stored_to_input, to_api_messages, trim_to_user, AgentConfig, SummaryCache,
+        Turn, RECENT_BUDGET_CHARS,
     };
+    use crate::core::storage::{StoredAttachment, StoredMessage};
     use crate::tauri_commands::chat::{ChatAttachmentInput, ChatMessageInput};
 
     /// A tiny DeepSeek stand-in: answers every request with a JSON summary and records the body.
@@ -900,6 +998,106 @@ mod tests {
     }
 
     #[test]
+    fn stored_documents_reuse_the_files_api_id() {
+        let message = StoredMessage {
+            id: "m1".to_string(),
+            role: "user".to_string(),
+            content: "Summarize this.".to_string(),
+            created_at: 1,
+            status: "complete".to_string(),
+            error: None,
+            attachments: vec![
+                StoredAttachment {
+                    id: "doc".to_string(),
+                    name: "report.pdf".to_string(),
+                    media_type: "application/pdf".to_string(),
+                    data_url: String::new(),
+                    file_name: Some("doc-report.pdf".to_string()),
+                    preview_name: None,
+                    file_id: Some("file-api-123".to_string()),
+                    purpose: Some("rich_layout_recognition".to_string()),
+                    size: Some(42),
+                },
+                StoredAttachment {
+                    id: "image".to_string(),
+                    name: "screen.jpg".to_string(),
+                    media_type: "image/jpeg".to_string(),
+                    data_url: "data:image/jpeg;base64,abc".to_string(),
+                    file_name: None,
+                    preview_name: None,
+                    file_id: None,
+                    purpose: None,
+                    size: None,
+                },
+                StoredAttachment {
+                    id: "local-image".to_string(),
+                    name: "photo.png".to_string(),
+                    media_type: "image/jpeg".to_string(),
+                    data_url: String::new(),
+                    file_name: Some("local-image-original.png".to_string()),
+                    preview_name: Some("local-image-preview.jpg".to_string()),
+                    file_id: None,
+                    purpose: None,
+                    size: Some(10),
+                },
+            ],
+        };
+
+        let input = stored_to_input(&message);
+        assert_eq!(input.attachments.len(), 3);
+        assert_eq!(
+            input.attachments[0].file_id.as_deref(),
+            Some("file-api-123")
+        );
+        assert!(input.attachments[0].data.is_empty());
+        assert_eq!(input.attachments[1].data, "abc");
+        assert!(input.attachments[1].file_id.is_none());
+        assert_eq!(
+            input.attachments[2].local_file.as_deref(),
+            Some("local-image-preview.jpg")
+        );
+        assert!(input.attachments[2].data.is_empty());
+    }
+
+    #[test]
+    fn user_documents_become_file_blocks() {
+        let turn = Turn {
+            role: "user".to_string(),
+            content: "Summarize this.".to_string(),
+            attachments: vec![ChatAttachmentInput {
+                media_type: "application/pdf".to_string(),
+                data: String::new(),
+                file_id: Some("file-api-123".to_string()),
+                local_file: None,
+            }],
+        };
+
+        let messages = to_api_messages(&[turn]);
+        let blocks = messages[0]["content"].as_array().unwrap();
+        assert_eq!(blocks[0]["type"], "document");
+        assert_eq!(blocks[0]["source"]["type"], "file");
+        assert_eq!(blocks[0]["source"]["file_id"], "file-api-123");
+        assert_eq!(blocks[1]["type"], "text");
+        assert_eq!(document_count(&messages), 1);
+    }
+
+    #[test]
+    fn inline_images_do_not_require_the_files_beta() {
+        let turn = Turn {
+            role: "user".to_string(),
+            content: "What is this?".to_string(),
+            attachments: vec![ChatAttachmentInput {
+                media_type: "image/jpeg".to_string(),
+                data: "abc".to_string(),
+                file_id: None,
+                local_file: None,
+            }],
+        };
+        let messages = to_api_messages(&[turn]);
+        assert_eq!(document_count(&messages), 0);
+    }
+
+    #[test]
     fn user_images_become_content_blocks() {
         let turn = Turn {
             role: "user".to_string(),
@@ -907,6 +1105,8 @@ mod tests {
             attachments: vec![ChatAttachmentInput {
                 media_type: "image/jpeg".to_string(),
                 data: "abc".to_string(),
+                file_id: None,
+                local_file: None,
             }],
         };
 

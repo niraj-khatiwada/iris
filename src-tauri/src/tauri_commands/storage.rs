@@ -1,8 +1,9 @@
 use tauri::{AppHandle, Emitter, State};
 
+use crate::core::attachments;
 use crate::core::storage::{
-    SearchResults, Storage, StoredConversation, StoredConversationSummary, StoredMessage,
-    StoredMessagePage,
+    SearchResults, Storage, StoredAttachment, StoredConversation, StoredConversationSummary,
+    StoredMessage, StoredMessagePage,
 };
 
 #[tauri::command]
@@ -49,27 +50,48 @@ pub fn save_message(
 }
 
 #[tauri::command]
-pub fn delete_messages(storage: State<'_, Storage>, ids: Vec<String>) -> Result<(), String> {
-    storage.delete_messages(&ids)
+pub fn delete_messages(
+    app: AppHandle,
+    storage: State<'_, Storage>,
+    ids: Vec<String>,
+) -> Result<(), String> {
+    let files = storage.attachments_for_messages(&ids)?;
+    storage.delete_messages(&ids)?;
+    for (conversation_id, attachments) in files {
+        let names = attachment_file_names(&attachments);
+        if let Err(error) = attachments::delete_files(&app, &conversation_id, &names) {
+            log::warn!("Could not remove attachment files for deleted messages: {error}");
+        }
+    }
+    Ok(())
+}
+
+fn attachment_file_names(attachments: &[StoredAttachment]) -> Vec<String> {
+    attachments
+        .iter()
+        .flat_map(|attachment| {
+            [
+                attachment.file_name.clone(),
+                attachment.preview_name.clone(),
+            ]
+        })
+        .flatten()
+        .collect()
+}
+
+/// The conversation the quick overlay should show. Every quick chat is a normal UUID
+/// conversation; this pointer only selects which one is open in the overlay.
+#[tauri::command]
+pub fn quick_conversation_id(storage: State<'_, Storage>) -> Result<Option<String>, String> {
+    storage.quick_conversation_id()
 }
 
 #[tauri::command]
-pub fn move_conversation_messages(
+pub fn set_quick_conversation_id(
     storage: State<'_, Storage>,
-    from: String,
-    to: String,
+    id: Option<String>,
 ) -> Result<(), String> {
-    storage.move_conversation_messages(&from, &to)
-}
-
-#[tauri::command]
-pub fn restore_quick_conversation(
-    storage: State<'_, Storage>,
-    quick: String,
-    previous: String,
-    retired: Option<String>,
-) -> Result<(), String> {
-    storage.restore_quick_conversation(&quick, &previous, retired.as_deref())
+    storage.set_quick_conversation_id(id.as_deref())
 }
 
 #[tauri::command]
@@ -89,13 +111,21 @@ pub fn save_conversations(
 }
 
 #[tauri::command]
-pub fn delete_conversation(storage: State<'_, Storage>, id: String) -> Result<(), String> {
+pub fn delete_conversation(
+    app: AppHandle,
+    storage: State<'_, Storage>,
+    id: String,
+) -> Result<(), String> {
+    // Remove the folder first so a failed delete cannot leave a conversation row that points at
+    // missing files.
+    attachments::delete_conversation(&app, &id)?;
     storage.delete(&id)
 }
 
 #[tauri::command]
 pub fn clear_conversations(app: AppHandle, storage: State<'_, Storage>) -> Result<(), String> {
     storage.clear()?;
+    attachments::delete_all(&app)?;
     let _ = app.emit(crate::utils::event::CHAT_CLEARED, ());
     Ok(())
 }

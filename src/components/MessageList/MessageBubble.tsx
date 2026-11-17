@@ -1,18 +1,18 @@
 import { Button, Tooltip } from '@heroui/react'
-import { getCurrentWindow } from '@tauri-apps/api/window'
-import { Check, Pencil, RotateCcw, X } from 'lucide-react'
+import { Check, Download, FileText, Pencil, RotateCcw, X } from 'lucide-react'
 import { memo, useEffect, useRef, useState } from 'react'
 
 import CopyButton from '@/components/CopyButton'
 import Markdown from '@/components/Markdown'
+import AttachmentImage from '@/components/MessageList/AttachmentImage'
 import ReadAloudButton from '@/components/ReadAloudButton'
 import { NO_WRITING_ASSIST } from '@/constants'
 import { useChatStore } from '@/stores/chatStore'
-import { showImagePreview } from '@/tauri/commands/preview'
 import type { ChatMessage } from '@/types/chat'
+import { downloadAttachment } from '@/utils/download'
+import { formatFileSize } from '@/utils/files'
 import { formatMessageTime } from '@/utils/format'
 import { cn } from '@/utils/tailwind'
-import { isTauri } from '@/utils/tauri'
 
 type MessageBubbleProps = {
   message: ChatMessage
@@ -104,23 +104,51 @@ const MessageBubble = memo(function MessageBubble({
         >
           {isUser && message.attachments?.length ? (
             <div className="mb-2 flex flex-wrap gap-2">
-              {message.attachments.map((attachment) => (
-                <img
-                  key={attachment.id}
-                  alt={attachment.name}
-                  className="max-h-64 max-w-[min(100%,24rem)] rounded-lg object-cover"
-                  src={attachment.dataUrl}
-                  title={`${attachment.name} — double-click to preview`}
-                  onDoubleClick={() => {
-                    if (isTauri()) {
-                      void showImagePreview(
-                        getCurrentWindow().label,
-                        attachment.dataUrl,
-                      )
-                    }
-                  }}
-                />
-              ))}
+              {message.attachments.map((attachment) =>
+                attachment.dataUrl ||
+                attachment.previewName ||
+                attachment.fileName ? (
+                  attachment.dataUrl || attachment.previewName ? (
+                    <AttachmentImage
+                      key={attachment.id}
+                      attachment={attachment}
+                      conversationId={conversationId}
+                    />
+                  ) : (
+                    <div
+                      key={attachment.id}
+                      className="flex max-w-full items-center gap-2 rounded-lg bg-background/25 px-2.5 py-1.5 ring-1 ring-border/30"
+                    >
+                      <FileText className="size-4 shrink-0 opacity-70" />
+                      <div className="flex min-w-0 flex-col">
+                        <span className="max-w-56 truncate text-xs font-medium">
+                          {attachment.name}
+                        </span>
+                        {attachment.size ? (
+                          <span className="text-[10px] opacity-60">
+                            {formatFileSize(attachment.size)}
+                          </span>
+                        ) : null}
+                      </div>
+                      {attachment.fileName ? (
+                        <button
+                          type="button"
+                          aria-label={`Download ${attachment.name}`}
+                          className="shrink-0 rounded-full p-1 text-muted transition-colors hover:bg-foreground/5 hover:text-foreground"
+                          onClick={() => {
+                            void downloadAttachment(
+                              conversationId,
+                              attachment,
+                            ).catch(() => {})
+                          }}
+                        >
+                          <Download className="size-3.5" />
+                        </button>
+                      ) : null}
+                    </div>
+                  )
+                ) : null,
+              )}
             </div>
           ) : null}
 

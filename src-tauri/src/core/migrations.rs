@@ -124,6 +124,7 @@ pub fn reset(connection: &Connection) -> Result<(), String> {
              DROP TABLE IF EXISTS messages;
              DROP TABLE IF EXISTS conversations;
              DROP TABLE IF EXISTS credential;
+             DROP TABLE IF EXISTS app_meta;
              PRAGMA user_version = 0;
              VACUUM;
              PRAGMA wal_checkpoint(TRUNCATE);",
@@ -202,6 +203,7 @@ mod tests {
             columns(&connection, "credential"),
             ["name", "api_key", "updated_at"]
         );
+        assert_eq!(columns(&connection, "app_meta"), ["name", "value"]);
 
         let index: i64 = connection
             .query_row(
@@ -223,7 +225,7 @@ mod tests {
             )
             .expect("read the FTS tables");
         assert_eq!(fts, 2);
-        assert_eq!(version(&connection), 2);
+        assert_eq!(version(&connection), 3);
     }
 
     /// Opening the app twice must not re-run anything or fail on an existing table.
@@ -232,7 +234,7 @@ mod tests {
         let mut connection = Connection::open_in_memory().expect("in-memory database");
         upgrade(&mut connection).expect("first upgrade");
         upgrade(&mut connection).expect("second upgrade");
-        assert_eq!(version(&connection), 2);
+        assert_eq!(version(&connection), 3);
     }
 
     /// The version lives in the file, not in memory: reopening an upgraded database must count as
@@ -246,12 +248,12 @@ mod tests {
         {
             let mut connection = Connection::open(&path).expect("open the database file");
             upgrade(&mut connection).expect("first upgrade");
-            assert_eq!(version(&connection), 2);
+            assert_eq!(version(&connection), 3);
         }
         {
             let mut connection = Connection::open(&path).expect("reopen the database file");
             upgrade(&mut connection).expect("second upgrade");
-            assert_eq!(version(&connection), 2);
+            assert_eq!(version(&connection), 3);
         }
 
         let _ = std::fs::remove_file(&path);
@@ -296,7 +298,7 @@ mod tests {
 
         prepare(&mut connection).expect("adopt the legacy schema");
 
-        assert_eq!(version(&connection), 2);
+        assert_eq!(version(&connection), 3);
         assert!(
             columns(&connection, "conversations").contains(&"archived_at".to_string()),
             "adoption must add archived_at"
@@ -346,13 +348,14 @@ mod tests {
                  DROP TRIGGER messages_fts_update;
                  DROP TABLE conversations_fts;
                  DROP TABLE messages_fts;
+                 DROP TABLE app_meta;
                  PRAGMA user_version = 0;",
             )
             .expect("simulate the pre-versioning release");
 
         prepare(&mut connection).expect("adopt");
 
-        assert_eq!(version(&connection), 2);
+        assert_eq!(version(&connection), 3);
         let api_key: String = connection
             .query_row(
                 "SELECT api_key FROM credential WHERE name = 'api-key'",
@@ -393,7 +396,7 @@ mod tests {
                 "a reset file has no tables, so it must not look unversioned"
             );
             prepare(&mut connection).expect("rebuild after reset");
-            assert_eq!(version(&connection), 2);
+            assert_eq!(version(&connection), 3);
 
             let remaining: i64 = connection
                 .query_row("SELECT count(*) FROM conversations", [], |row| row.get(0))

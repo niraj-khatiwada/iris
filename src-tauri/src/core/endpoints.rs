@@ -5,6 +5,7 @@
 /// `https://api.deepseek.com/anthropic`, and it appends `/v1/messages`. Posting to the root
 /// `/v1/messages` returns 404 even though `/v1/models` works.
 pub const MESSAGES_PATH: &str = "/anthropic/v1/messages";
+pub const FILES_PATH: &str = "/anthropic/v1/files";
 pub const MODELS_PATH: &str = "/v1/models";
 pub const TTS_PATH: &str = "/v1/tools/tts";
 pub const ASR_PATH: &str = "/v1/tools/asr";

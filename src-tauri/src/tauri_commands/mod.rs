@@ -1,6 +1,8 @@
 pub mod app;
+pub mod attachments;
 pub mod chat;
 pub mod credentials;
+pub mod files;
 pub mod models;
 pub mod overlay;
 pub mod preview;

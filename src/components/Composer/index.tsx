@@ -7,7 +7,7 @@ import ChatToggles from '@/components/ChatToggles'
 import SendButton from '@/components/SendButton'
 import SpeechControl from '@/components/SpeechControl'
 import { NO_WRITING_ASSIST } from '@/constants'
-import { useImageAttachments } from '@/hooks/useImageAttachments'
+import { useAttachments } from '@/hooks/useAttachments'
 import { useSpeechPlayback } from '@/hooks/useSpeechPlayback'
 import { useChatStore } from '@/stores/chatStore'
 import { useUIStore } from '@/stores/uiStore'
@@ -29,7 +29,11 @@ function Composer() {
   const activeConversationId = useChatStore(
     (state) => state.activeConversationId,
   )
-  const images = useImageAttachments()
+  const createConversation = useChatStore((state) => state.createConversation)
+  const files = useAttachments({
+    conversationId: activeConversationId,
+    createConversation,
+  })
 
   useEffect(() => {
     if (focusToken > 0) {
@@ -37,11 +41,20 @@ function Composer() {
     }
   }, [focusToken])
 
-  // Attachments are a draft for the conversation they were pasted into.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: clear when the conversation changes
+  // Attachments are a draft for the conversation they were pasted into. Keep the draft when the
+  // hook creates the first conversation for an attachment; only a switch between existing
+  // conversations discards it.
+  const previousConversationId = useRef(activeConversationId)
   useEffect(() => {
-    images.clear()
-  }, [activeConversationId])
+    const previous = previousConversationId.current
+    if (previous === activeConversationId) {
+      return
+    }
+    previousConversationId.current = activeConversationId
+    if (previous !== null) {
+      files.clear()
+    }
+  }, [activeConversationId, files.clear])
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: resizing follows the controlled value
   useEffect(() => {
@@ -57,7 +70,9 @@ function Composer() {
   const submit = () => {
     const text = value.trim()
     if (
-      (!text && images.attachments.length === 0) ||
+      (!text && files.attachments.length === 0) ||
+      files.pending ||
+      files.hasError ||
       streaming ||
       !hydrated ||
       !conversationReady
@@ -65,9 +80,9 @@ function Composer() {
       return
     }
 
-    const attachments = images.attachments
+    const attachments = files.readyAttachments
     setValue('')
-    images.clear()
+    files.commit()
     void sendMessage(text, undefined, attachments)
     requestAnimationFrame(() => textareaRef.current?.focus())
   }
@@ -77,14 +92,17 @@ function Composer() {
       <div
         className={cn(
           'glass-control rounded-3xl p-2 transition-colors focus-within:border-accent/40',
-          images.dragging && 'border-accent/50',
+          files.dragging && 'border-accent/50',
         )}
-        {...images.dragHandlers}
+        {...files.dragHandlers}
       >
         <AttachmentStrip
-          attachments={images.attachments}
+          attachments={files.attachments}
           className="px-2 pt-1.5"
-          onRemove={images.remove}
+          error={files.error}
+          onDismissError={files.clearError}
+          onRemove={files.remove}
+          onRetry={files.retry}
         />
 
         <div className="flex items-end gap-2 px-1.5">
@@ -149,7 +167,9 @@ function Composer() {
                 isDisabled={
                   !hydrated ||
                   !conversationReady ||
-                  (!value.trim() && images.attachments.length === 0)
+                  files.pending ||
+                  files.hasError ||
+                  (!value.trim() && files.attachments.length === 0)
                 }
                 onPress={submit}
               />

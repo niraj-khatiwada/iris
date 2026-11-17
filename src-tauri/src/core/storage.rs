@@ -1,7 +1,8 @@
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use rusqlite::{params, Connection, Transaction};
+use base64::Engine;
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
@@ -11,7 +12,22 @@ pub struct StoredAttachment {
     pub id: String,
     pub name: String,
     pub media_type: String,
+    /// Inline image data URL for legacy messages. New attachments use local files.
+    #[serde(default)]
     pub data_url: String,
+    /// Original file inside `<app data>/attachments/<conversation>/`.
+    #[serde(default)]
+    pub file_name: Option<String>,
+    /// Resized image JPEG used for sending and thumbnails.
+    #[serde(default)]
+    pub preview_name: Option<String>,
+    /// Reused across later turns instead of uploading the document again.
+    #[serde(default)]
+    pub file_id: Option<String>,
+    #[serde(default)]
+    pub purpose: Option<String>,
+    #[serde(default)]
+    pub size: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -95,6 +111,11 @@ pub struct SearchResults {
 /// The single credential row Iris uses for every outbound request. The keys are provider-neutral,
 /// so one row covers chat, read-aloud, and voice input.
 const API_KEY_CREDENTIAL: &str = "api-key";
+/// The conversation the quick overlay is currently showing. Every quick chat is a normal UUID
+/// conversation; this key only remembers which one the overlay should open next.
+const QUICK_CONVERSATION_META: &str = "quick-conversation";
+/// Older builds used one fixed row for the quick overlay. `Storage::open` renames it once.
+const LEGACY_QUICK_CONVERSATION_ID: &str = "iris:quick";
 
 /// SQLite-backed conversation storage shared by the overlay and history windows.
 pub struct Storage {
@@ -125,9 +146,222 @@ impl Storage {
             .execute_batch("PRAGMA foreign_keys = ON;")
             .map_err(|error| format!("Could not prepare the Iris database: {error}"))?;
 
-        Ok(Self {
+        let storage = Self {
             connection: Mutex::new(connection),
-        })
+        };
+        // The quick overlay used to share one fixed `iris:quick` conversation. Give it a real UUID
+        // and move its attachments folder before inline images are migrated into that folder.
+        if let Err(error) = storage.migrate_quick_conversation(app) {
+            log::warn!("Could not migrate the quick conversation: {error}");
+        }
+        // Older builds kept resized images inline. Move them to the conversation folders so the
+        // new asset URLs, downloads, and per-conversation deletion work for existing history too.
+        if let Err(error) = storage.migrate_inline_images(app) {
+            log::warn!("Could not migrate inline image attachments: {error}");
+        }
+        Ok(storage)
+    }
+
+    /// Gives a pre-UUID `iris:quick` row a generated conversation id and remembers that id in
+    /// `app_meta`. Runs once; later launches only make sure any leftover legacy folder is folded
+    /// into the current quick conversation.
+    fn migrate_quick_conversation(&self, app: &AppHandle) -> Result<(), String> {
+        let current = self.quick_conversation_id()?;
+        if let Some(current) = current {
+            crate::core::attachments::adopt_quick_folders(app, &current)?;
+            return Ok(());
+        }
+
+        let new_id = uuid::Uuid::new_v4().to_string();
+        if !self.rename_legacy_quick_conversation(&new_id)? {
+            return Ok(());
+        }
+        crate::core::attachments::adopt_quick_folders(app, &new_id)?;
+        Ok(())
+    }
+
+    /// Moves the fixed legacy quick row (and its messages) onto a new id. Returns false when
+    /// there is no legacy row, which makes the migration safe to run on every launch.
+    fn rename_legacy_quick_conversation(&self, new_id: &str) -> Result<bool, String> {
+        let mut connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let exists: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM conversations WHERE id = ?1)",
+                params![LEGACY_QUICK_CONVERSATION_ID],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
+        if !exists {
+            return Ok(false);
+        }
+
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "INSERT INTO conversations (id, title, created_at, updated_at, archived_at)
+                 SELECT ?1, title, created_at, updated_at, archived_at
+                 FROM conversations WHERE id = ?2",
+                params![new_id, LEGACY_QUICK_CONVERSATION_ID],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "UPDATE messages SET conversation_id = ?1 WHERE conversation_id = ?2",
+                params![new_id, LEGACY_QUICK_CONVERSATION_ID],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "DELETE FROM conversations WHERE id = ?1",
+                params![LEGACY_QUICK_CONVERSATION_ID],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "INSERT INTO app_meta (name, value) VALUES (?1, ?2)
+                 ON CONFLICT(name) DO UPDATE SET value = excluded.value",
+                params![QUICK_CONVERSATION_META, new_id],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction.commit().map_err(|error| error.to_string())?;
+        Ok(true)
+    }
+
+    /// The conversation the quick overlay should open. `None` means the overlay still needs to
+    /// create one.
+    pub fn quick_conversation_id(&self) -> Result<Option<String>, String> {
+        self.connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .query_row(
+                "SELECT value FROM app_meta WHERE name = ?1",
+                params![QUICK_CONVERSATION_META],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())
+    }
+
+    /// Remembers the overlay's current conversation. Passing `None` clears the pointer.
+    pub fn set_quick_conversation_id(&self, id: Option<&str>) -> Result<(), String> {
+        let connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match id {
+            Some(id) => connection
+                .execute(
+                    "INSERT INTO app_meta (name, value) VALUES (?1, ?2)
+                     ON CONFLICT(name) DO UPDATE SET value = excluded.value",
+                    params![QUICK_CONVERSATION_META, id],
+                )
+                .map(|_| ())
+                .map_err(|error| error.to_string()),
+            None => connection
+                .execute(
+                    "DELETE FROM app_meta WHERE name = ?1",
+                    params![QUICK_CONVERSATION_META],
+                )
+                .map(|_| ())
+                .map_err(|error| error.to_string()),
+        }
+    }
+
+    /// One-time (idempotent) move of legacy data URLs into the local attachment store. The old
+    /// data is the resized JPEG, so it becomes both the original and the preview file.
+    fn migrate_inline_images(&self, app: &AppHandle) -> Result<(), String> {
+        let connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let rows = {
+            let mut statement = connection
+                .prepare(
+                    "SELECT id, conversation_id, attachments FROM messages
+                     WHERE attachments LIKE '%dataUrl%'",
+                )
+                .map_err(|error| error.to_string())?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })
+                .map_err(|error| error.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| error.to_string())?;
+            rows
+        };
+
+        for (message_id, conversation_id, json) in rows {
+            let mut attachments: Vec<StoredAttachment> =
+                serde_json::from_str(&json).unwrap_or_default();
+            let mut changed = false;
+            for attachment in &mut attachments {
+                if attachment.file_name.is_some() || attachment.data_url.is_empty() {
+                    continue;
+                }
+                let Some((media_type, data)) = attachment.data_url.split_once(";base64,") else {
+                    continue;
+                };
+                let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data) else {
+                    continue;
+                };
+                if bytes.is_empty() {
+                    continue;
+                }
+                let extension = if media_type.contains("png") {
+                    "png"
+                } else if media_type.contains("webp") {
+                    "webp"
+                } else {
+                    "jpg"
+                };
+                let disk_name = format!("image.{extension}");
+                match crate::core::attachments::store(
+                    app,
+                    &conversation_id,
+                    &attachment.id,
+                    &disk_name,
+                    "image",
+                    &bytes,
+                    Some(&bytes),
+                ) {
+                    Ok(files) => {
+                        attachment.data_url.clear();
+                        attachment.file_name = Some(files.file_name);
+                        attachment.preview_name = files.preview_name;
+                        attachment.size = Some(bytes.len() as u64);
+                        changed = true;
+                    }
+                    Err(error) => {
+                        log::warn!(
+                            "Could not move inline image {} to the attachment store: {error}",
+                            attachment.id
+                        );
+                    }
+                }
+            }
+            if changed {
+                let json =
+                    serde_json::to_string(&attachments).map_err(|error| error.to_string())?;
+                connection
+                    .execute(
+                        "UPDATE messages SET attachments = ?1 WHERE id = ?2",
+                        params![json, message_id],
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
+        }
+
+        Ok(())
     }
 
     pub fn load(&self) -> Result<Vec<StoredConversationSummary>, String> {
@@ -384,72 +618,36 @@ impl Storage {
         Ok(())
     }
 
-    /// Moves every message to another conversation id, inserting that conversation row when
-    /// needed. Quick-chat archiving needs this because the UI only holds the newest page.
-    pub fn move_conversation_messages(&self, from: &str, to: &str) -> Result<(), String> {
-        let mut connection = self
-            .connection
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let transaction = connection
-            .transaction()
-            .map_err(|error| error.to_string())?;
-        transaction
-            .execute(
-                "INSERT OR IGNORE INTO conversations (id, title, created_at, updated_at, archived_at)
-                 SELECT ?2, title, created_at, ?3, ?3 FROM conversations WHERE id = ?1",
-                params![from, to, now_ms()],
-            )
-            .map_err(|error| error.to_string())?;
-        transaction
-            .execute(
-                "UPDATE messages SET conversation_id = ?2 WHERE conversation_id = ?1",
-                params![from, to],
-            )
-            .map_err(|error| error.to_string())?;
-        transaction.commit().map_err(|error| error.to_string())
-    }
-
-    /// Restores the previous quick conversation: optionally retires the current quick, moves the
-    /// previous conversation's messages onto the quick id, then removes the previous row.
-    pub fn restore_quick_conversation(
+    /// Local attachment names for messages that are about to be deleted, so their files can be
+    /// removed as well.
+    pub fn attachments_for_messages(
         &self,
-        quick: &str,
-        previous: &str,
-        retired: Option<&str>,
-    ) -> Result<(), String> {
-        let mut connection = self
+        ids: &[String],
+    ) -> Result<Vec<(String, Vec<StoredAttachment>)>, String> {
+        let connection = self
             .connection
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let transaction = connection
-            .transaction()
+        let mut statement = connection
+            .prepare("SELECT conversation_id, attachments FROM messages WHERE id = ?1")
             .map_err(|error| error.to_string())?;
-        if let Some(retired) = retired {
-            transaction
-                .execute(
-                    "INSERT OR IGNORE INTO conversations (id, title, created_at, updated_at, archived_at)
-                     SELECT ?2, title, created_at, ?3, ?3 FROM conversations WHERE id = ?1",
-                    params![quick, retired, now_ms()],
-                )
-                .map_err(|error| error.to_string())?;
-            transaction
-                .execute(
-                    "UPDATE messages SET conversation_id = ?2 WHERE conversation_id = ?1",
-                    params![quick, retired],
-                )
-                .map_err(|error| error.to_string())?;
+        let mut found = Vec::new();
+        for id in ids {
+            let row = statement.query_row(params![id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+            });
+            match row {
+                Ok((conversation_id, attachments)) => {
+                    let attachments = attachments_from(attachments);
+                    if !attachments.is_empty() {
+                        found.push((conversation_id, attachments));
+                    }
+                }
+                Err(rusqlite::Error::QueryReturnedNoRows) => {}
+                Err(error) => return Err(error.to_string()),
+            }
         }
-        transaction
-            .execute(
-                "UPDATE messages SET conversation_id = ?2 WHERE conversation_id = ?1",
-                params![previous, quick],
-            )
-            .map_err(|error| error.to_string())?;
-        transaction
-            .execute("DELETE FROM conversations WHERE id = ?1", params![previous])
-            .map_err(|error| error.to_string())?;
-        transaction.commit().map_err(|error| error.to_string())
+        Ok(found)
     }
 
     pub fn delete_messages(&self, ids: &[String]) -> Result<(), String> {
@@ -495,10 +693,18 @@ impl Storage {
     }
 
     pub fn delete(&self, id: &str) -> Result<(), String> {
-        self.connection
+        let connection = self
+            .connection
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        connection
             .execute("DELETE FROM conversations WHERE id = ?1", params![id])
+            .map_err(|error| error.to_string())?;
+        connection
+            .execute(
+                "DELETE FROM app_meta WHERE name = ?1 AND value = ?2",
+                params![QUICK_CONVERSATION_META, id],
+            )
             .map_err(|error| error.to_string())?;
         Ok(())
     }
@@ -511,7 +717,11 @@ impl Storage {
         // Messages cascade from their conversation when foreign keys are on. Deleting both
         // explicitly keeps Clear correct even on a connection where the pragma was never applied.
         connection
-            .execute_batch("DELETE FROM messages; DELETE FROM conversations;")
+            .execute_batch(
+                "DELETE FROM messages;
+                 DELETE FROM conversations;
+                 DELETE FROM app_meta WHERE name = 'quick-conversation';",
+            )
             .map_err(|error| error.to_string())?;
         // Rebuild the file and drop old WAL frames so a cleared conversation is not recoverable.
         connection
@@ -1004,41 +1214,70 @@ mod tests {
     }
 
     #[test]
-    fn messages_can_move_between_quick_and_archived_conversations() {
+    fn the_legacy_quick_conversation_is_renamed_to_a_uuid() {
         let storage = storage();
-        let conversation = super::StoredConversation {
-            id: "quick".to_string(),
-            title: "Quick".to_string(),
-            created_at: 0,
-            updated_at: 1,
-            archived_at: None,
-            messages: vec![message("m1", 1, "hello")],
-        };
-        storage.save(&conversation).expect("save");
-
         storage
-            .move_conversation_messages("quick", "retired")
-            .expect("archive quick");
+            .save(&super::StoredConversation {
+                id: "iris:quick".to_string(),
+                title: "Quick chat".to_string(),
+                created_at: 0,
+                updated_at: 1,
+                archived_at: None,
+                messages: vec![message("m1", 1, "hello")],
+            })
+            .expect("save");
+
+        let new_id = "81035a29-a320-4589-b1b4-d98d4f008f0f";
         assert!(storage
-            .load_all_messages("quick")
-            .expect("quick")
-            .is_empty());
+            .rename_legacy_quick_conversation(new_id)
+            .expect("rename"));
         assert_eq!(
-            storage.load_all_messages("retired").expect("retired").len(),
-            1
-        );
-
-        storage
-            .restore_quick_conversation("quick", "retired", None)
-            .expect("restore previous");
-        assert_eq!(
-            storage.load_all_messages("quick").expect("restored").len(),
-            1
+            storage.quick_conversation_id().expect("read").as_deref(),
+            Some(new_id)
         );
         assert!(storage
-            .load_all_messages("retired")
-            .expect("gone")
+            .load_all_messages("iris:quick")
+            .expect("old id")
             .is_empty());
+        assert_eq!(storage.load_all_messages(new_id).expect("new id").len(), 1);
+        assert!(!storage
+            .rename_legacy_quick_conversation("other")
+            .expect("second run"));
+    }
+
+    #[test]
+    fn the_quick_conversation_pointer_follows_deletes_and_clear() {
+        let storage = storage();
+        storage
+            .set_quick_conversation_id(Some("quick"))
+            .expect("store pointer");
+        assert_eq!(
+            storage.quick_conversation_id().expect("read").as_deref(),
+            Some("quick")
+        );
+
+        // Deleting another conversation must leave the pointer alone.
+        storage.delete("other").expect("delete other");
+        assert!(storage.quick_conversation_id().expect("read").is_some());
+
+        storage
+            .save(&super::StoredConversation {
+                id: "quick".to_string(),
+                title: "Quick chat".to_string(),
+                created_at: 0,
+                updated_at: 1,
+                archived_at: None,
+                messages: vec![],
+            })
+            .expect("save quick");
+        storage.delete("quick").expect("delete quick");
+        assert_eq!(storage.quick_conversation_id().expect("read"), None);
+
+        storage
+            .set_quick_conversation_id(Some("quick-again"))
+            .expect("store pointer");
+        storage.clear().expect("clear");
+        assert_eq!(storage.quick_conversation_id().expect("read"), None);
     }
 
     #[test]

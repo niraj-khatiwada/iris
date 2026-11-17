@@ -60,7 +60,7 @@ export const TTS_VOICES: ReadonlyArray<{ id: TtsVoice; label: string }> = [
   { id: 'tide', label: 'Tide' },
 ]
 export const DEFAULT_USER_NAME = 'You'
-export const QUICK_CONVERSATION_ID = 'iris:quick'
+/** Fallback title for a fresh quick chat until the first message names it. */
 export const QUICK_CONVERSATION_TITLE = 'Quick chat'
 export const CHAT_STORAGE_KEY = 'iris.chat'
 /** Only the selected conversation ids; conversations themselves live in SQLite. */
