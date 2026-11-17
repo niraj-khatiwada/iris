@@ -68,12 +68,12 @@ import {
   removeApiKey,
   saveApiKey,
 } from '@/tauri/commands/voice'
-import type { ThemeMode } from '@/types/settings'
+import type { SettingsCategory, ThemeMode } from '@/types/settings'
 import { formatShortcut } from '@/utils/shortcut'
 import { cn } from '@/utils/tailwind'
 import { isTauri } from '@/utils/tauri'
 
-type CategoryId = 'general' | 'shortcuts' | 'ai' | 'voice' | 'storage' | 'about'
+type CategoryId = SettingsCategory
 
 type Category = {
   id: CategoryId
@@ -168,8 +168,21 @@ function matchesQuery(query: string, ...values: string[]) {
 function SettingsDialog() {
   const open = useUIStore((state) => state.settingsOpen)
   const closeSettings = useUIStore((state) => state.closeSettings)
+  const requestedCategory = useUIStore((state) => state.settingsCategory)
+  const clearSettingsCategory = useUIStore(
+    (state) => state.clearSettingsCategory,
+  )
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<CategoryId>('general')
+
+  useEffect(() => {
+    if (!requestedCategory) {
+      return
+    }
+    setQuery('')
+    setSelected(requestedCategory)
+    clearSettingsCategory()
+  }, [clearSettingsCategory, requestedCategory])
 
   const visibleCategories = CATEGORIES.filter((category) =>
     matchesQuery(query, category.label, category.group, ...category.terms),
@@ -392,13 +405,13 @@ const OVERLAY_SHORTCUT_ROWS: Array<{
   {
     id: 'newChat',
     title: 'New chat',
-    description: 'Archive the current quick chat and start fresh.',
+    description: 'Start a fresh quick conversation.',
     search: ['new', 'chat', 'conversation', 'shortcut'],
   },
   {
     id: 'restorePrevious',
     title: 'Previous conversation',
-    description: 'Bring back the quick conversation that New chat moved aside.',
+    description: 'Switch back to the previous quick conversation.',
     search: [
       'previous',
       'restore',
