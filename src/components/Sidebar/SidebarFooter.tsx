@@ -31,6 +31,7 @@ function SettingsButton({ onPress }: { onPress: () => void }) {
       <Button
         isIconOnly
         aria-label="Settings"
+        className="size-8 min-w-8"
         size="sm"
         variant="ghost"
         onPress={onPress}

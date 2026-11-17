@@ -6,6 +6,7 @@ import { memo, useEffect, useRef, useState } from 'react'
 import CopyButton from '@/components/CopyButton'
 import Markdown from '@/components/Markdown'
 import ReadAloudButton from '@/components/ReadAloudButton'
+import { NO_WRITING_ASSIST } from '@/constants'
 import { useChatStore } from '@/stores/chatStore'
 import { showImagePreview } from '@/tauri/commands/preview'
 import type { ChatMessage } from '@/types/chat'
@@ -21,6 +22,8 @@ type MessageBubbleProps = {
   /** Only the final reply can be regenerated. */
   canRegenerate: boolean
   disabled: boolean
+  /** Briefly rings a message that a search result opened. */
+  highlighted?: boolean
 }
 
 const MessageBubble = memo(function MessageBubble({
@@ -29,6 +32,7 @@ const MessageBubble = memo(function MessageBubble({
   canEdit,
   canRegenerate,
   disabled,
+  highlighted = false,
 }: MessageBubbleProps) {
   const isUser = message.role === 'user'
   const isEmptyStream = message.status === 'streaming' && !message.content
@@ -95,6 +99,7 @@ const MessageBubble = memo(function MessageBubble({
               ? 'bg-accent-soft text-accent-soft-foreground'
               : 'bg-surface/45 ring-1 ring-border/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-xl',
             editing && 'w-full',
+            highlighted && 'ring-2 ring-primary/60',
           )}
         >
           {isUser && message.attachments?.length ? (
@@ -121,6 +126,7 @@ const MessageBubble = memo(function MessageBubble({
 
           {editing ? (
             <textarea
+              {...NO_WRITING_ASSIST}
               ref={inputRef}
               aria-label="Edit message"
               className="block min-h-9 w-full resize-none border-0 bg-transparent p-0 text-[14px] leading-6 text-inherit shadow-none outline-none"

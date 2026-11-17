@@ -33,6 +33,15 @@ export const SUGGESTIONS = [
 ] as const
 
 export const APP_NAME = 'Iris'
+export const DEFAULT_SIDEBAR_WIDTH = 280
+export const MIN_SIDEBAR_WIDTH = 220
+export const MAX_SIDEBAR_WIDTH = 420
+/** Keeps macOS autocorrection and spelling suggestions out of Iris text fields. */
+export const NO_WRITING_ASSIST = {
+  autoCapitalize: 'none',
+  autoCorrect: 'off',
+  spellCheck: false,
+} as const
 /** DeepSeek's official API. A proxy can be set in Settings when it still speaks DeepSeek. */
 export const DEFAULT_BASE_URL = 'https://api.deepseek.com'
 export const DEFAULT_MODEL = 'deepseek-flash'
@@ -44,6 +53,8 @@ export const TTS_PATH = '/v1/tools/tts'
 export const ASR_PATH = '/v1/tools/asr'
 export const DEFAULT_TTS_VOICE: TtsVoice = 'stella'
 export const DEFAULT_OPEN_SHORTCUT = 'commandorcontrol+space'
+/** Focuses the sidebar search in the history window; configurable in Settings → Shortcuts. */
+export const DEFAULT_SEARCH_SHORTCUT = 'CommandOrControl+Shift+KeyF'
 export const TTS_VOICES: ReadonlyArray<{ id: TtsVoice; label: string }> = [
   { id: 'stella', label: 'Stella' },
   { id: 'tide', label: 'Tide' },
@@ -54,6 +65,8 @@ export const QUICK_CONVERSATION_TITLE = 'Quick chat'
 export const CHAT_STORAGE_KEY = 'iris.chat'
 /** Only the selected conversation ids; conversations themselves live in SQLite. */
 export const CHAT_UI_STORAGE_KEY = 'iris.chat.ui'
+/** Newest page loaded first; scrolling up keeps fetching this many messages at a time. */
+export const MESSAGE_PAGE_SIZE = 100
 export const SETTINGS_STORAGE_KEY = 'iris.settings'
 /** In-app shortcuts recorded in Settings; stopping read-aloud also works in the history window. */
 export const DEFAULT_OVERLAY_SHORTCUTS = {

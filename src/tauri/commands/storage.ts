@@ -5,6 +5,7 @@ import type {
   Conversation,
   ConversationSummary,
   MessagePage,
+  SearchResults,
 } from '@/types/chat'
 
 export function loadConversations() {
@@ -21,6 +22,11 @@ export function loadMessagePage(
     before,
     limit,
   })
+}
+
+/** Full-text search over conversation titles and message bodies. */
+export function searchHistory(query: string, limit = 50) {
+  return invoke<SearchResults>('search_history', { query, limit })
 }
 
 export function saveConversationMeta(conversation: ConversationSummary) {

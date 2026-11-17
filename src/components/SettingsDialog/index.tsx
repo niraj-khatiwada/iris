@@ -43,6 +43,7 @@ import {
   DEFAULT_OVERLAY_SHORTCUTS,
   DEFAULT_SYSTEM_PROMPT,
   DEFAULT_TTS_VOICE,
+  NO_WRITING_ASSIST,
   SETTINGS_STORAGE_KEY,
   THEME_LABELS,
   TTS_VOICES,
@@ -105,6 +106,8 @@ const CATEGORIES: Category[] = [
       'command',
       'control',
       'space',
+      'search',
+      'find',
     ],
   },
   {
@@ -210,7 +213,10 @@ function SettingsDialog() {
               >
                 <SearchField.Group>
                   <SearchField.SearchIcon />
-                  <SearchField.Input placeholder="Search settings" />
+                  <SearchField.Input
+                    {...NO_WRITING_ASSIST}
+                    placeholder="Search settings"
+                  />
                   <SearchField.ClearButton />
                 </SearchField.Group>
               </SearchField>
@@ -446,19 +452,40 @@ const OVERLAY_SHORTCUT_ROWS: Array<{
 function ShortcutsPanel({ query }: { query: string }) {
   const openShortcut = useSettingsStore((state) => state.openShortcut)
   const setOpenShortcut = useSettingsStore((state) => state.setOpenShortcut)
+  const searchShortcut = useSettingsStore((state) => state.searchShortcut)
+  const setSearchShortcut = useSettingsStore((state) => state.setSearchShortcut)
   const overlayShortcuts = useSettingsStore((state) => state.overlayShortcuts)
   const setOverlayShortcut = useSettingsStore(
     (state) => state.setOverlayShortcut,
   )
   const [recording, setRecording] = useState(false)
+  const [recordingSearch, setRecordingSearch] = useState(false)
   const [recordingAction, setRecordingAction] =
     useState<OverlayShortcutAction | null>(null)
 
   const recordShortcut = async (shortcut: string) => {
+    const conflict = [searchShortcut, ...Object.values(overlayShortcuts)].find(
+      (value) => value.toLowerCase() === shortcut.toLowerCase(),
+    )
+    if (conflict) {
+      throw new Error('That shortcut is already in use.')
+    }
+
     if (isTauri()) {
       await applyOpenShortcut(shortcut)
     }
     setOpenShortcut(shortcut)
+  }
+
+  const recordSearchShortcut = async (shortcut: string) => {
+    const conflict = [openShortcut, ...Object.values(overlayShortcuts)].find(
+      (value) => value.toLowerCase() === shortcut.toLowerCase(),
+    )
+    if (conflict) {
+      throw new Error('That shortcut is already in use.')
+    }
+
+    setSearchShortcut(shortcut)
   }
 
   const recordOverlayShortcut = async (shortcut: string) => {
@@ -468,6 +495,7 @@ function ShortcutsPanel({ query }: { query: string }) {
 
     const conflict = [
       openShortcut,
+      searchShortcut,
       ...Object.entries(overlayShortcuts)
         .filter(([action]) => action !== recordingAction)
         .map(([, value]) => value),
@@ -508,6 +536,31 @@ function ShortcutsPanel({ query }: { query: string }) {
           </Button>
         </SettingRow>
 
+        <SettingRow
+          title="Search chats"
+          description="Focus the search field in the history window."
+          query={query}
+          search={[
+            'search',
+            'find',
+            'chats',
+            'messages',
+            'shortcut',
+            'keyboard',
+          ]}
+        >
+          <Button
+            className="min-w-40 justify-between gap-3"
+            variant="secondary"
+            onPress={() => setRecordingSearch(true)}
+          >
+            <span className="font-medium">
+              {formatShortcut(searchShortcut)}
+            </span>
+            <Keyboard className="size-3.5 shrink-0 text-muted" />
+          </Button>
+        </SettingRow>
+
         {OVERLAY_SHORTCUT_ROWS.map((action) => (
           <SettingRow
             key={action.id}
@@ -534,6 +587,12 @@ function ShortcutsPanel({ query }: { query: string }) {
         open={recording}
         onOpenChange={setRecording}
         onRecord={recordShortcut}
+      />
+
+      <ShortcutRecorder
+        open={recordingSearch}
+        onOpenChange={setRecordingSearch}
+        onRecord={recordSearchShortcut}
       />
 
       <ShortcutRecorder
@@ -647,10 +706,10 @@ function ApiKeyField({ query }: { query: string }) {
               onChange={setDraft}
             >
               <Input
+                {...NO_WRITING_ASSIST}
                 aria-label="API key"
                 autoComplete="off"
                 placeholder="sk-..."
-                spellCheck={false}
                 type="password"
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') {
@@ -737,7 +796,11 @@ function AiPanel({ query }: { query: string }) {
             variant="secondary"
             onChange={setBaseUrl}
           >
-            <Input aria-label="Base URL" placeholder={DEFAULT_BASE_URL} />
+            <Input
+              {...NO_WRITING_ASSIST}
+              aria-label="Base URL"
+              placeholder={DEFAULT_BASE_URL}
+            />
           </TextField>
         </SettingField>
 
@@ -793,6 +856,7 @@ function SystemPromptFields({ query }: { query: string }) {
       >
         <div className="flex w-full flex-col gap-2">
           <TextArea
+            {...NO_WRITING_ASSIST}
             aria-label="Iris Island system prompt"
             className="min-h-32 w-full resize-y text-[13px] leading-5"
             placeholder={DEFAULT_SYSTEM_PROMPT}
@@ -848,6 +912,7 @@ function SystemPromptFields({ query }: { query: string }) {
           </Switch>
 
           <TextArea
+            {...NO_WRITING_ASSIST}
             aria-label="Main chat system prompt"
             className="min-h-32 w-full resize-y text-[13px] leading-5"
             disabled={mainUsesIslandPrompt}

@@ -1,7 +1,8 @@
 use tauri::{AppHandle, Emitter, State};
 
 use crate::core::storage::{
-    Storage, StoredConversation, StoredConversationSummary, StoredMessage, StoredMessagePage,
+    SearchResults, Storage, StoredConversation, StoredConversationSummary, StoredMessage,
+    StoredMessagePage,
 };
 
 #[tauri::command]
@@ -19,6 +20,15 @@ pub fn load_message_page(
     limit: usize,
 ) -> Result<StoredMessagePage, String> {
     storage.load_message_page(&conversation_id, before.as_deref(), limit)
+}
+
+#[tauri::command]
+pub fn search_history(
+    storage: State<'_, Storage>,
+    query: String,
+    limit: Option<usize>,
+) -> Result<SearchResults, String> {
+    storage.search(&query, limit.unwrap_or(50))
 }
 
 #[tauri::command]

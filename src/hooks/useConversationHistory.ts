@@ -1,11 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 
+import { MESSAGE_PAGE_SIZE } from '@/constants'
 import { useChatStore } from '@/stores/chatStore'
 import { loadMessagePage } from '@/tauri/commands/storage'
 import { isTauri } from '@/utils/tauri'
-
-/** Newest page loaded first; scrolling up keeps fetching this many at a time. */
-export const MESSAGE_PAGE_SIZE = 100
 
 /**
  * Loads the active conversation's newest page from SQLite and exposes the next-older page for

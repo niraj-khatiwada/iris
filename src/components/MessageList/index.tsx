@@ -1,5 +1,5 @@
 import { LoaderCircle } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 
 import EmptyState from '@/components/EmptyState'
@@ -12,12 +12,61 @@ function MessageList() {
     state.conversations.find((item) => item.id === state.activeConversationId),
   )
   const streaming = useChatStore((state) => Boolean(state.streamingRequestId))
+  const focusedMessageId = useChatStore((state) => state.focusedMessageId)
+  const clearFocusedMessage = useChatStore((state) => state.clearFocusedMessage)
+  const [highlightedId, setHighlightedId] = useState<string | null>(null)
+  const highlightTimer = useRef<number | null>(null)
   const { hasOlder, loadingOlder, loadOlder } = useConversationHistory(
     conversation?.id,
   )
   const virtuosoRef = useRef<VirtuosoHandle>(null)
   const initialScrolled = useRef(false)
   const conversationId = conversation?.id
+
+  // A search hit asks for one message, so the search flow owns the first scroll there.
+  useEffect(() => {
+    if (!focusedMessageId || !conversationId || !conversation?.messagesLoaded) {
+      return
+    }
+    const index = conversation.messages.findIndex(
+      (message) => message.id === focusedMessageId,
+    )
+    if (index < 0) {
+      return
+    }
+
+    const frame = requestAnimationFrame(() => {
+      virtuosoRef.current?.scrollToIndex({
+        index,
+        align: 'center',
+      })
+      setHighlightedId(focusedMessageId)
+      clearFocusedMessage()
+      if (highlightTimer.current !== null) {
+        window.clearTimeout(highlightTimer.current)
+      }
+      highlightTimer.current = window.setTimeout(
+        () => setHighlightedId(null),
+        2200,
+      )
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [
+    clearFocusedMessage,
+    conversation?.messages,
+    conversation?.messagesLoaded,
+    conversationId,
+    focusedMessageId,
+  ])
+
+  useEffect(
+    () => () => {
+      if (highlightTimer.current !== null) {
+        window.clearTimeout(highlightTimer.current)
+      }
+    },
+    [],
+  )
 
   // Start every conversation at the newest message; older pages prepend above the viewport.
   useEffect(() => {
@@ -99,6 +148,7 @@ function MessageList() {
               }
               conversationId={conversation.id}
               disabled={streaming}
+              highlighted={message.id === highlightedId}
               message={message}
             />
           </div>

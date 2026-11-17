@@ -61,6 +61,37 @@ pub struct StoredMessagePage {
     pub has_more: bool,
 }
 
+/// A conversation whose title matched the search query.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchConversationHit {
+    pub id: String,
+    pub title: String,
+    pub updated_at: i64,
+    pub archived: bool,
+}
+
+/// A message whose body matched the query, with enough context to render one result row.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchMessageHit {
+    pub conversation_id: String,
+    pub conversation_title: String,
+    pub message_id: String,
+    pub role: String,
+    pub snippet: String,
+    pub created_at: i64,
+    pub archived: bool,
+}
+
+/// Title matches and message matches are kept separate so the sidebar can group them.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchResults {
+    pub conversations: Vec<SearchConversationHit>,
+    pub messages: Vec<SearchMessageHit>,
+}
+
 /// The single credential row Iris uses for every outbound request. The keys are provider-neutral,
 /// so one row covers chat, read-aloud, and voice input.
 const API_KEY_CREDENTIAL: &str = "api-key";
@@ -206,6 +237,89 @@ impl Storage {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         messages_for(&connection, conversation_id)
+    }
+
+    /// Full-text search over conversation titles and message bodies. Matching words get FTS5
+    /// prefix queries, so typing half a word already finds it; the caller never sees raw FTS
+    /// syntax errors.
+    pub fn search(&self, query: &str, limit: usize) -> Result<SearchResults, String> {
+        let expression = fts_expression(query);
+        if expression.is_empty() {
+            return Ok(SearchResults {
+                conversations: Vec::new(),
+                messages: Vec::new(),
+            });
+        }
+
+        let limit = limit.clamp(1, 100) as i64;
+        let connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        let conversations = {
+            let mut statement = connection
+                .prepare(
+                    "SELECT c.id, c.title, c.updated_at, c.archived_at
+                     FROM conversations_fts
+                     JOIN conversations c ON c.rowid = conversations_fts.rowid
+                     WHERE conversations_fts MATCH ?1
+                     ORDER BY bm25(conversations_fts), c.updated_at DESC
+                     LIMIT ?2",
+                )
+                .map_err(|error| error.to_string())?;
+
+            let rows = statement
+                .query_map(params![expression, limit], |row| {
+                    Ok(SearchConversationHit {
+                        id: row.get(0)?,
+                        title: row.get(1)?,
+                        updated_at: row.get(2)?,
+                        archived: row.get::<_, Option<i64>>(3)?.is_some(),
+                    })
+                })
+                .map_err(|error| error.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| error.to_string())?;
+            rows
+        };
+
+        let messages = {
+            let mut statement = connection
+                .prepare(
+                    "SELECT m.conversation_id, c.title, m.id, m.role, m.created_at, c.archived_at,
+                            snippet(messages_fts, 0, char(2), char(3), '…', 14)
+                     FROM messages_fts
+                     JOIN messages m ON m.rowid = messages_fts.rowid
+                     JOIN conversations c ON c.id = m.conversation_id
+                     WHERE messages_fts MATCH ?1
+                     ORDER BY bm25(messages_fts), m.created_at DESC
+                     LIMIT ?2",
+                )
+                .map_err(|error| error.to_string())?;
+
+            let rows = statement
+                .query_map(params![expression, limit], |row| {
+                    Ok(SearchMessageHit {
+                        conversation_id: row.get(0)?,
+                        conversation_title: row.get(1)?,
+                        message_id: row.get(2)?,
+                        role: row.get(3)?,
+                        created_at: row.get(4)?,
+                        archived: row.get::<_, Option<i64>>(5)?.is_some(),
+                        snippet: row.get(6)?,
+                    })
+                })
+                .map_err(|error| error.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| error.to_string())?;
+            rows
+        };
+
+        Ok(SearchResults {
+            conversations,
+            messages,
+        })
     }
 
     /// Upserts one conversation's metadata without touching its messages.
@@ -494,6 +608,18 @@ fn now_ms() -> i64 {
         .unwrap_or_default()
 }
 
+/// Turns arbitrary user input into a quoted FTS5 prefix expression. Only alphanumeric runs are
+/// kept, so quotes, `*`, `NEAR`, and other operators can never reach the MATCH parser.
+fn fts_expression(query: &str) -> String {
+    query
+        .split(|character: char| !character.is_alphanumeric())
+        .filter(|term| !term.is_empty())
+        .take(12)
+        .map(|term| format!("\"{term}\"*"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn parse_cursor(cursor: &str) -> Result<(i64, i64), String> {
     let (created_at, rowid) = cursor
         .split_once(':')
@@ -745,6 +871,135 @@ mod tests {
         assert_eq!(
             storage.load_all_messages("c1").expect("after delete").len(),
             4
+        );
+    }
+
+    #[test]
+    fn search_finds_titles_messages_and_tracks_edits() {
+        let storage = storage();
+        let conversation = super::StoredConversation {
+            id: "chat".to_string(),
+            title: "Quarterly planning".to_string(),
+            created_at: 0,
+            updated_at: 3,
+            archived_at: None,
+            messages: vec![
+                message("m1", 1, "We discussed pagination and the sidebar search."),
+                message("m2", 2, "Nothing relevant here."),
+            ],
+        };
+        storage.save(&conversation).expect("save");
+
+        let by_title = storage.search("quarter", 20).expect("title search");
+        assert!(by_title.conversations.iter().any(|hit| hit.id == "chat"));
+        assert!(!by_title.conversations[0].archived);
+        assert!(by_title.messages.is_empty());
+
+        let by_message = storage.search("sidebar", 20).expect("message search");
+        assert_eq!(by_message.messages.len(), 1);
+        let hit = &by_message.messages[0];
+        assert_eq!(hit.conversation_id, "chat");
+        assert_eq!(hit.conversation_title, "Quarterly planning");
+        assert_eq!(hit.message_id, "m1");
+        assert_eq!(hit.role, "user");
+        assert!(hit.snippet.contains("sidebar"));
+
+        // Prefix terms work, and raw FTS operators in the input stay plain words.
+        assert_eq!(
+            storage.search("pagin", 20).expect("prefix").messages.len(),
+            1
+        );
+        assert_eq!(
+            storage
+                .search("\"sidebar\"* ((", 20)
+                .expect("sanitized")
+                .messages
+                .len(),
+            1
+        );
+        assert!(storage
+            .search("+++", 20)
+            .expect("punctuation only")
+            .messages
+            .is_empty());
+
+        // Editing a message replaces its old terms in the index.
+        storage
+            .save_message("chat", &message("m1", 1, "Replaced with telescope notes."))
+            .expect("edit");
+        assert!(storage
+            .search("sidebar", 20)
+            .expect("old term")
+            .messages
+            .is_empty());
+        assert_eq!(
+            storage
+                .search("telescope", 20)
+                .expect("new term")
+                .messages
+                .len(),
+            1
+        );
+
+        // Deleting a message removes its hit.
+        storage
+            .delete_messages(&["m1".to_string()])
+            .expect("delete");
+        assert!(storage
+            .search("telescope", 20)
+            .expect("deleted term")
+            .messages
+            .is_empty());
+
+        // Archived conversations stay searchable and report their state.
+        storage
+            .save_summary(&super::StoredConversationSummary {
+                id: "chat".to_string(),
+                title: "Quarterly planning".to_string(),
+                created_at: 0,
+                updated_at: 9,
+                archived_at: Some(9),
+            })
+            .expect("archive");
+        let archived = storage.search("quarter", 20).expect("archived search");
+        assert!(archived.conversations[0].archived);
+    }
+
+    #[test]
+    fn replaced_conversation_titles_reindex() {
+        let storage = storage();
+        storage
+            .save(&super::StoredConversation {
+                id: "c1".to_string(),
+                title: "Alphabet".to_string(),
+                created_at: 0,
+                updated_at: 1,
+                archived_at: None,
+                messages: vec![],
+            })
+            .expect("save");
+        storage
+            .save_summary(&super::StoredConversationSummary {
+                id: "c1".to_string(),
+                title: "Bravo".to_string(),
+                created_at: 0,
+                updated_at: 2,
+                archived_at: None,
+            })
+            .expect("rename");
+
+        assert!(storage
+            .search("alphabet", 20)
+            .expect("old title")
+            .conversations
+            .is_empty());
+        assert_eq!(
+            storage
+                .search("bravo", 20)
+                .expect("new title")
+                .conversations
+                .len(),
+            1
         );
     }
 

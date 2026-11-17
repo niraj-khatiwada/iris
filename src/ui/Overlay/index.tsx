@@ -30,7 +30,7 @@ import ReadAloudButton from '@/components/ReadAloudButton'
 import SendButton from '@/components/SendButton'
 import SpeechControl from '@/components/SpeechControl'
 import VoiceStrip from '@/components/VoiceStrip'
-import { QUICK_CONVERSATION_ID } from '@/constants'
+import { NO_WRITING_ASSIST, QUICK_CONVERSATION_ID } from '@/constants'
 import {
   SENDING_EMOTIONS,
   SENDING_SHAPES,
@@ -1007,6 +1007,7 @@ function Overlay() {
                       </div>
 
                       <TextArea
+                        {...NO_WRITING_ASSIST}
                         ref={inputRef}
                         aria-label="Ask Iris"
                         className="max-h-[120px] min-h-10 w-full resize-none border-0 bg-transparent px-1 py-2 text-[15px] leading-6 text-foreground shadow-none placeholder:text-foreground/35 focus-visible:ring-0"

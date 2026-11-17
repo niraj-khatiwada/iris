@@ -6,6 +6,7 @@ import AttachmentStrip from '@/components/AttachmentStrip'
 import ChatToggles from '@/components/ChatToggles'
 import SendButton from '@/components/SendButton'
 import SpeechControl from '@/components/SpeechControl'
+import { NO_WRITING_ASSIST } from '@/constants'
 import { useImageAttachments } from '@/hooks/useImageAttachments'
 import { useSpeechPlayback } from '@/hooks/useSpeechPlayback'
 import { useChatStore } from '@/stores/chatStore'
@@ -92,6 +93,7 @@ function Composer() {
           </div>
 
           <TextArea
+            {...NO_WRITING_ASSIST}
             ref={textareaRef}
             aria-label="Message Iris"
             className="max-h-44 min-h-11 w-full resize-none border-0 bg-transparent px-1 py-2.5 text-[15px] leading-6 shadow-none focus-visible:ring-0"

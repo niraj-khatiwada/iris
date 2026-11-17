@@ -15,6 +15,7 @@ function ThemeSwitcher() {
       <Button
         isIconOnly
         aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+        className="size-8 min-w-8"
         size="sm"
         variant="ghost"
         onPress={() => setTheme(isDark ? 'light' : 'dark')}

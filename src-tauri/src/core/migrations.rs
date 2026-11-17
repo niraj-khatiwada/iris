@@ -119,7 +119,9 @@ fn has_column(connection: &Connection, table: &str, column: &str) -> Result<bool
 pub fn reset(connection: &Connection) -> Result<(), String> {
     connection
         .execute_batch(
-            "DROP TABLE IF EXISTS messages;
+            "DROP TABLE IF EXISTS messages_fts;
+             DROP TABLE IF EXISTS conversations_fts;
+             DROP TABLE IF EXISTS messages;
              DROP TABLE IF EXISTS conversations;
              DROP TABLE IF EXISTS credential;
              PRAGMA user_version = 0;
@@ -148,7 +150,7 @@ pub fn is_unversioned(connection: &Connection) -> Result<bool, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{MIGRATIONS, is_unversioned, prepare, reset, upgrade};
+    use super::{is_unversioned, prepare, reset, upgrade, MIGRATIONS};
     use rusqlite::Connection;
 
     fn columns(connection: &Connection, table: &str) -> Vec<String> {
@@ -210,7 +212,18 @@ mod tests {
             )
             .expect("read the index");
         assert_eq!(index, 1);
-        assert_eq!(version(&connection), 1);
+
+        // The search migration adds one external-content FTS table per searchable table.
+        let fts: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM sqlite_master
+                 WHERE type = 'table' AND name IN ('conversations_fts', 'messages_fts')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read the FTS tables");
+        assert_eq!(fts, 2);
+        assert_eq!(version(&connection), 2);
     }
 
     /// Opening the app twice must not re-run anything or fail on an existing table.
@@ -219,7 +232,7 @@ mod tests {
         let mut connection = Connection::open_in_memory().expect("in-memory database");
         upgrade(&mut connection).expect("first upgrade");
         upgrade(&mut connection).expect("second upgrade");
-        assert_eq!(version(&connection), 1);
+        assert_eq!(version(&connection), 2);
     }
 
     /// The version lives in the file, not in memory: reopening an upgraded database must count as
@@ -233,12 +246,12 @@ mod tests {
         {
             let mut connection = Connection::open(&path).expect("open the database file");
             upgrade(&mut connection).expect("first upgrade");
-            assert_eq!(version(&connection), 1);
+            assert_eq!(version(&connection), 2);
         }
         {
             let mut connection = Connection::open(&path).expect("reopen the database file");
             upgrade(&mut connection).expect("second upgrade");
-            assert_eq!(version(&connection), 1);
+            assert_eq!(version(&connection), 2);
         }
 
         let _ = std::fs::remove_file(&path);
@@ -283,7 +296,7 @@ mod tests {
 
         prepare(&mut connection).expect("adopt the legacy schema");
 
-        assert_eq!(version(&connection), 1);
+        assert_eq!(version(&connection), 2);
         assert!(
             columns(&connection, "conversations").contains(&"archived_at".to_string()),
             "adoption must add archived_at"
@@ -298,9 +311,11 @@ mod tests {
         );
 
         let title: String = connection
-            .query_row("SELECT title FROM conversations WHERE id = 'c1'", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT title FROM conversations WHERE id = 'c1'",
+                [],
+                |row| row.get(0),
+            )
             .expect("conversation survived");
         assert_eq!(title, "Old chat");
         let content: String = connection
@@ -323,13 +338,21 @@ mod tests {
                     VALUES ('c1', 'Recent chat', 1, 1);
                  INSERT INTO credential (name, api_key, updated_at)
                     VALUES ('api-key', 'sk-live', 1);
+                 DROP TRIGGER conversations_fts_insert;
+                 DROP TRIGGER conversations_fts_delete;
+                 DROP TRIGGER conversations_fts_update;
+                 DROP TRIGGER messages_fts_insert;
+                 DROP TRIGGER messages_fts_delete;
+                 DROP TRIGGER messages_fts_update;
+                 DROP TABLE conversations_fts;
+                 DROP TABLE messages_fts;
                  PRAGMA user_version = 0;",
             )
             .expect("simulate the pre-versioning release");
 
         prepare(&mut connection).expect("adopt");
 
-        assert_eq!(version(&connection), 1);
+        assert_eq!(version(&connection), 2);
         let api_key: String = connection
             .query_row(
                 "SELECT api_key FROM credential WHERE name = 'api-key'",
@@ -370,7 +393,7 @@ mod tests {
                 "a reset file has no tables, so it must not look unversioned"
             );
             prepare(&mut connection).expect("rebuild after reset");
-            assert_eq!(version(&connection), 1);
+            assert_eq!(version(&connection), 2);
 
             let remaining: i64 = connection
                 .query_row("SELECT count(*) FROM conversations", [], |row| row.get(0))

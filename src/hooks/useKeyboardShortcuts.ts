@@ -1,8 +1,10 @@
 import { useEffect } from 'react'
 
 import { useChatStore } from '@/stores/chatStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { useUIStore } from '@/stores/uiStore'
 import { hideMainWindow } from '@/tauri/commands/app'
+import { matchesShortcut } from '@/utils/shortcut'
 import { isTauri } from '@/utils/tauri'
 
 /** Global desktop shortcuts, matched to the habits of a macOS assistant. */
@@ -13,6 +15,9 @@ export function useKeyboardShortcuts() {
   const openSettings = useUIStore((state) => state.openSettings)
   const closeSettings = useUIStore((state) => state.closeSettings)
   const focusComposer = useUIStore((state) => state.focusComposer)
+  const focusSearch = useUIStore((state) => state.focusSearch)
+  const setSearchQuery = useUIStore((state) => state.setSearchQuery)
+  const searchShortcut = useSettingsStore((state) => state.searchShortcut)
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -34,14 +39,15 @@ export function useKeyboardShortcuts() {
 
       if (modifier && key === 'n') {
         event.preventDefault()
+        setSearchQuery('')
         createConversation()
         focusComposer()
         return
       }
 
-      if (modifier && key === 'k') {
+      if (matchesShortcut(event, searchShortcut)) {
         event.preventDefault()
-        focusComposer()
+        focusSearch()
         return
       }
 
@@ -79,7 +85,10 @@ export function useKeyboardShortcuts() {
     closeSettings,
     createConversation,
     focusComposer,
+    focusSearch,
     openSettings,
+    searchShortcut,
+    setSearchQuery,
     stopStreaming,
     toggleSidebar,
   ])

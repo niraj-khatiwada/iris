@@ -47,6 +47,31 @@ export type MessagePage = {
   hasMore: boolean
 }
 
+/** A conversation whose title matched a search query. */
+export type SearchConversationHit = {
+  id: string
+  title: string
+  updatedAt: number
+  archived: boolean
+}
+
+/** A message whose body matched a search query, with a snippet around the first match. */
+export type SearchMessageHit = {
+  conversationId: string
+  conversationTitle: string
+  messageId: string
+  role: ChatRole
+  /** Matched words are wrapped in `\u0002` / `\u0003` so the sidebar can highlight them. */
+  snippet: string
+  createdAt: number
+  archived: boolean
+}
+
+export type SearchResults = {
+  conversations: SearchConversationHit[]
+  messages: SearchMessageHit[]
+}
+
 /** The minimal shape sent to the agent backend. */
 export type AgentMessage = {
   /** The chat message id, so the backend can merge a paginated request tail with the DB. */

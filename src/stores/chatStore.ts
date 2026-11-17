@@ -1,11 +1,16 @@
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { create } from 'zustand'
 
-import { QUICK_CONVERSATION_ID, QUICK_CONVERSATION_TITLE } from '@/constants'
+import {
+  MESSAGE_PAGE_SIZE,
+  QUICK_CONVERSATION_ID,
+  QUICK_CONVERSATION_TITLE,
+} from '@/constants'
 import { cancelActiveRun, startAgentRun } from '@/services/agent'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { generateConversationTitle } from '@/tauri/commands/chat'
 import {
+  loadMessagePage,
   moveConversationMessages,
   restoreQuickConversation,
 } from '@/tauri/commands/storage'
@@ -40,6 +45,8 @@ type ChatState = {
   streamingRequestId: string | null
   streamingConversationId: string | null
   streamingMessageId: string | null
+  /** A message a search result asked to reveal; the message list scrolls to it once loaded. */
+  focusedMessageId: string | null
   /** False until the first SQLite hydration finishes. */
   hydrated: boolean
   markHydrated: () => void
@@ -58,6 +65,12 @@ type ChatState = {
   resetQuickConversation: () => void
   restorePreviousQuickConversation: () => void
   selectConversation: (id: string) => void
+  /**
+   * Opens a conversation and loads older pages until `messageId` is in memory, then asks the
+   * message list to scroll to it. Deep hits stay local and quiet; pages load in the background.
+   */
+  focusMessage: (conversationId: string, messageId: string) => Promise<void>
+  clearFocusedMessage: () => void
   archiveConversation: (id: string) => void
   restoreConversation: (id: string) => void
   deleteArchivedConversation: (id: string) => void
@@ -282,6 +295,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   streamingRequestId: null,
   streamingConversationId: null,
   streamingMessageId: null,
+  focusedMessageId: null,
 
   createConversation: () => {
     const state = get()
@@ -316,7 +330,64 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     return id
   },
 
-  selectConversation: (id) => set({ activeConversationId: id }),
+  selectConversation: (id) =>
+    set({ activeConversationId: id, focusedMessageId: null }),
+
+  focusMessage: async (conversationId, messageId) => {
+    set({ activeConversationId: conversationId, focusedMessageId: messageId })
+    const find = () =>
+      get().conversations.find(
+        (conversation) => conversation.id === conversationId,
+      )
+
+    try {
+      let conversation = find()
+      if (!conversation) {
+        return
+      }
+      if (!conversation.messagesLoaded) {
+        const page = await loadMessagePage(
+          conversationId,
+          null,
+          MESSAGE_PAGE_SIZE,
+        )
+        get().applyMessagePage(conversationId, page, 'replace')
+      }
+
+      // Walk back from the newest page until the hit is loaded. Every page stays in memory, so
+      // the user can keep reading around the match once it appears.
+      for (let attempt = 0; attempt < 500; attempt += 1) {
+        conversation = find()
+        if (!conversation) {
+          return
+        }
+        if (conversation.messages.some((message) => message.id === messageId)) {
+          return
+        }
+        if (!conversation.hasOlderMessages) {
+          break
+        }
+        const page = await loadMessagePage(
+          conversationId,
+          conversation.historyCursor ?? null,
+          MESSAGE_PAGE_SIZE,
+        )
+        get().applyMessagePage(conversationId, page, 'prepend')
+        if (page.messages.length === 0) {
+          break
+        }
+      }
+    } catch {
+      // Selecting the conversation still happened; leave it at the newest page.
+    } finally {
+      const conversation = find()
+      if (!conversation?.messages.some((message) => message.id === messageId)) {
+        set({ focusedMessageId: null })
+      }
+    }
+  },
+
+  clearFocusedMessage: () => set({ focusedMessageId: null }),
 
   ensureQuickConversation: () => {
     const existing = get().conversations.find(
@@ -524,6 +595,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         streamingRequestId: null,
         streamingConversationId: null,
         streamingMessageId: null,
+        focusedMessageId: null,
       }
     })
 
@@ -599,6 +671,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         streamingRequestId: null,
         streamingConversationId: null,
         streamingMessageId: null,
+        focusedMessageId: null,
       }
     })
 
@@ -808,6 +881,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       streamingRequestId: null,
       streamingConversationId: null,
       streamingMessageId: null,
+      focusedMessageId: null,
     })
   },
 

@@ -10,6 +10,7 @@ import {
 import { Archive, MessageSquare, MoreHorizontal, Pencil } from 'lucide-react'
 import { useState } from 'react'
 
+import { NO_WRITING_ASSIST } from '@/constants'
 import { useChatStore } from '@/stores/chatStore'
 import { groupConversations } from '@/utils/format'
 import { cn } from '@/utils/tailwind'
@@ -31,7 +32,7 @@ function ConversationList() {
 
   return (
     <>
-      <nav className="mt-4 min-h-0 flex-1 px-2">
+      <nav className="mt-2 min-h-0 flex-1 px-2">
         <ScrollShadow className="h-full">
           {groups.length === 0 ? (
             <p className="px-2 py-6 text-xs leading-5 text-muted">
@@ -147,7 +148,11 @@ function ConversationList() {
                 onChange={setRenameValue}
               >
                 <Label>Title</Label>
-                <Input autoFocus placeholder="Conversation title" />
+                <Input
+                  {...NO_WRITING_ASSIST}
+                  autoFocus
+                  placeholder="Conversation title"
+                />
               </TextField>
             </Modal.Body>
             <Modal.Footer>

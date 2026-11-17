@@ -201,7 +201,9 @@ feature-parity plan, not just a custom URL.
   (only the visible window is in the DOM), loads the newest 100 and fetches older pages as you
   scroll up, and fades into the composer at the bottom. `localStorage` only keeps settings and the selected conversation ids
   (`iris.chat.ui`). The old `iris.chat` cache is imported into SQLite once on first launch, then
-  removed.
+  removed. `Cmd+Shift+F` focuses the sidebar search (configurable in Settings → Shortcuts), which uses SQLite FTS5 to match conversation
+  titles and message bodies; message results show a snippet and open the conversation at that
+  message.
 - The bundle identifier is `com.iris.desktop` (reverse-DNS, no `.app` suffix). On first launch
   after the rename from `com.iris.app`, `core/legacy.rs` copies the old Application Support and
   WebKit folders into the new identifier so chats and settings survive.

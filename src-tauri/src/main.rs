@@ -189,6 +189,7 @@ fn main() {
             tauri_commands::shortcut::set_open_shortcut,
             tauri_commands::storage::load_conversations,
             tauri_commands::storage::load_message_page,
+            tauri_commands::storage::search_history,
             tauri_commands::storage::save_conversation_meta,
             tauri_commands::storage::save_message,
             tauri_commands::storage::delete_messages,

@@ -6,8 +6,12 @@ import {
   DEFAULT_MODEL,
   DEFAULT_OPEN_SHORTCUT,
   DEFAULT_OVERLAY_SHORTCUTS,
+  DEFAULT_SEARCH_SHORTCUT,
+  DEFAULT_SIDEBAR_WIDTH,
   DEFAULT_SYSTEM_PROMPT,
   DEFAULT_TTS_VOICE,
+  MAX_SIDEBAR_WIDTH,
+  MIN_SIDEBAR_WIDTH,
   SETTINGS_STORAGE_KEY,
 } from '@/constants'
 import type { ThemeMode, TtsVoice } from '@/types/settings'
@@ -33,6 +37,21 @@ function normalizePrompt(saved: unknown): string {
   return typeof saved === 'string' && saved.trim().length > 0
     ? saved
     : DEFAULT_SYSTEM_PROMPT
+}
+
+function normalizeShortcut(saved: unknown, fallback: string): string {
+  return typeof saved === 'string' && saved.includes('+') ? saved : fallback
+}
+
+function normalizeSidebarWidth(saved: unknown): number {
+  const width =
+    typeof saved === 'number' && Number.isFinite(saved)
+      ? saved
+      : DEFAULT_SIDEBAR_WIDTH
+  return Math.min(
+    MAX_SIDEBAR_WIDTH,
+    Math.max(MIN_SIDEBAR_WIDTH, Math.round(width)),
+  )
 }
 
 function normalizeOverlayShortcuts(saved: unknown): OverlayShortcuts {
@@ -104,6 +123,10 @@ type SettingsState = {
   ttsVoice: TtsVoice
   /** Tauri shortcut syntax, chosen with the recorder in Settings → Shortcuts. */
   openShortcut: string
+  /** Focuses the history window's sidebar search; configured in Settings → Shortcuts. */
+  searchShortcut: string
+  /** Width of the open history sidebar in CSS pixels; dragging the border persists it. */
+  sidebarWidth: number
   /** In-app shortcuts while the quick overlay is key; never registered with the OS. */
   overlayShortcuts: OverlayShortcuts
   setTheme: (theme: ThemeMode) => void
@@ -122,6 +145,8 @@ type SettingsState = {
   setWebSearch: (webSearch: boolean) => void
   setTtsVoice: (ttsVoice: TtsVoice) => void
   setOpenShortcut: (openShortcut: string) => void
+  setSearchShortcut: (searchShortcut: string) => void
+  setSidebarWidth: (sidebarWidth: number) => void
   setOverlayShortcut: (action: OverlayShortcutAction, shortcut: string) => void
 }
 
@@ -144,6 +169,8 @@ export const useSettingsStore = create<SettingsState>()(
       webSearch: false,
       ttsVoice: DEFAULT_TTS_VOICE,
       openShortcut: DEFAULT_OPEN_SHORTCUT,
+      searchShortcut: DEFAULT_SEARCH_SHORTCUT,
+      sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
       overlayShortcuts: { ...DEFAULT_OVERLAY_SHORTCUTS },
       setTheme: (theme) => set({ theme }),
       setApiKeyState: ({ present, hint }) =>
@@ -165,6 +192,9 @@ export const useSettingsStore = create<SettingsState>()(
       setWebSearch: (webSearch) => set({ webSearch }),
       setTtsVoice: (ttsVoice) => set({ ttsVoice }),
       setOpenShortcut: (openShortcut) => set({ openShortcut }),
+      setSearchShortcut: (searchShortcut) => set({ searchShortcut }),
+      setSidebarWidth: (sidebarWidth) =>
+        set({ sidebarWidth: normalizeSidebarWidth(sidebarWidth) }),
       setOverlayShortcut: (action, shortcut) =>
         set((state) => ({
           overlayShortcuts: { ...state.overlayShortcuts, [action]: shortcut },
@@ -172,7 +202,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: SETTINGS_STORAGE_KEY,
-      version: 12,
+      version: 14,
       merge: (persisted, current) => {
         const saved = (persisted ?? {}) as Partial<SettingsState> &
           LegacySettings
@@ -192,6 +222,11 @@ export const useSettingsStore = create<SettingsState>()(
           ),
           mainSystemPrompt: normalizePrompt(saved.mainSystemPrompt),
           mainUsesIslandPrompt: saved.mainUsesIslandPrompt !== false,
+          searchShortcut: normalizeShortcut(
+            saved.searchShortcut,
+            DEFAULT_SEARCH_SHORTCUT,
+          ),
+          sidebarWidth: normalizeSidebarWidth(saved.sidebarWidth),
           overlayShortcuts: normalizeOverlayShortcuts(saved.overlayShortcuts),
         }
       },
@@ -233,6 +268,11 @@ export const useSettingsStore = create<SettingsState>()(
           webSearch: rest.webSearch ?? false,
           ttsVoice: rest.ttsVoice === 'tide' ? 'tide' : DEFAULT_TTS_VOICE,
           openShortcut,
+          searchShortcut: normalizeShortcut(
+            rest.searchShortcut,
+            DEFAULT_SEARCH_SHORTCUT,
+          ),
+          sidebarWidth: normalizeSidebarWidth(rest.sidebarWidth),
           islandSystemPrompt: normalizePrompt(
             rest.islandSystemPrompt ?? legacySystemPrompt,
           ),
