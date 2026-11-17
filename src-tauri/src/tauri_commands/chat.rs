@@ -1,7 +1,9 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use tauri::{AppHandle, State};
 
 use crate::core::agent::AgentConfig;
@@ -170,6 +172,116 @@ pub fn send_message(
     Ok(())
 }
 
+/// Asks DeepSeek for a short title for a new conversation. The UI keeps its local fallback title
+/// when this fails, so a title request can never block sending or lose the conversation.
+#[tauri::command]
+pub async fn generate_conversation_title(
+    storage: State<'_, Storage>,
+    base_url: String,
+    model: String,
+    prompt: String,
+) -> Result<String, String> {
+    let api_key = storage.require_api_key()?;
+    let prompt = prompt.trim();
+    if prompt.is_empty() {
+        return Err("There is nothing to title yet.".to_string());
+    }
+    if base_url.trim().is_empty() {
+        return Err("Add the API base URL in Settings.".to_string());
+    }
+
+    let model = if model.trim().is_empty() {
+        "deepseek-flash"
+    } else {
+        model.trim()
+    };
+    let excerpt = prompt.chars().take(2000).collect::<String>();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|error| format!("Could not create the title client: {error}"))?;
+
+    let response = client
+        .post(endpoints::url(&base_url, endpoints::MESSAGES_PATH))
+        .header("x-api-key", api_key)
+        .header("accept", "application/json")
+        .json(&json!({
+            "model": model,
+            "max_tokens": 32,
+            "system": "You write short conversation titles. Use 2-5 words, no quotes, and no final punctuation. Reply with the title only.",
+            "messages": [{
+                "role": "user",
+                "content": format!("Title this conversation:\n\n{excerpt}")
+            }],
+            "thinking": { "type": "disabled" },
+            "stream": false
+        }))
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach the title service: {error}"))?;
+
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        let detail = serde_json::from_str::<Value>(&body)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("error")
+                    .and_then(|error| error.get("message"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .unwrap_or_else(|| body.chars().take(160).collect());
+        return Err(format!("Title request failed ({status}): {detail}"));
+    }
+
+    let value: Value = serde_json::from_str(&body)
+        .map_err(|_| "The title service returned an unexpected response.".to_string())?;
+    let raw = value
+        .get("content")
+        .and_then(Value::as_array)
+        .map(|blocks| {
+            blocks
+                .iter()
+                .filter_map(|block| block.get("text").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .unwrap_or_default();
+    let title = normalize_title(&raw);
+    if title.is_empty() {
+        return Err("The title service returned an empty title.".to_string());
+    }
+
+    Ok(title)
+}
+
+fn normalize_title(raw: &str) -> String {
+    let collapsed = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    let text = collapsed
+        .trim_matches(|character: char| {
+            character.is_whitespace()
+                || matches!(
+                    character,
+                    '"' | '\'' | '`' | '“' | '”' | '‘' | '’' | '.' | ',' | '!' | '?' | ':' | ';'
+                )
+        })
+        .trim();
+    let title = text
+        .strip_prefix("Title:")
+        .or_else(|| text.strip_prefix("Conversation title:"))
+        .unwrap_or(text)
+        .trim();
+
+    if title.chars().count() > 48 {
+        let cut = title.chars().take(47).collect::<String>();
+        format!("{}…", cut.trim_end())
+    } else {
+        title.to_string()
+    }
+}
+
 #[tauri::command]
 pub fn cancel_generation(
     app: AppHandle,
@@ -179,4 +291,27 @@ pub fn cancel_generation(
     state.cancel(request_id.as_deref());
     crate::sys::speech::stop(&app);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_title;
+
+    #[test]
+    fn titles_are_single_line_without_quotes_or_final_punctuation() {
+        assert_eq!(normalize_title("  \"James Bond reboot.\"  "), "James Bond reboot");
+        assert_eq!(
+            normalize_title("Title: A plan for the day"),
+            "A plan for the day"
+        );
+        assert_eq!(normalize_title("New\n\nBond   movie!"), "New Bond movie");
+        assert_eq!(normalize_title("   "), "");
+    }
+
+    #[test]
+    fn long_titles_are_truncated() {
+        let title = normalize_title(&"a".repeat(80));
+        assert_eq!(title.chars().count(), 48);
+        assert!(title.ends_with('…'));
+    }
 }

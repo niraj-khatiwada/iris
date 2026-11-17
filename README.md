@@ -70,7 +70,9 @@ Iris launches as a floating quick-chat window, not a normal app window.
 - The AI blob in the menu bar offers **Ask Iris**, **History**, and **Quit Iris**. Iris keeps
   running when the overlay hides; quit from there.
 - Quick chats are stored as one rolling **Quick chat** conversation, so they remain available in
-  history. **+** starts a fresh one.
+  history. **+** starts a fresh one, and `⌘⇧N` restores the previous one. The header shows the same
+  conversation title as the sidebar; new chats get a short DeepSeek-generated title with the first
+  message as an instant fallback.
 - The panel morphs between idle, processing, ready, and revealed states with springs, matching
   the Dynamic Island's motion language.
 - The overlay is only revealed after the webview has painted, so there is no empty native
@@ -181,7 +183,8 @@ origin. The Messages route is under `/anthropic`; the root `/v1/messages` return
 `src-tauri/src/sys/speech.rs` owns automatic read-aloud. It calls `/v1/tools/tts` with the selected
 voice, wraps the raw PCM in a WAV, and plays it with macOS `afplay`. A new message, Cancel, New
 chat, or quitting stops the current speech. The manual **Read aloud** button uses the same pipeline
-through `speak_text`, so any completed reply can be spoken without regenerating it.
+through `speak_text`, so any completed reply can be spoken without regenerating it. While that
+conversation is preparing or playing audio, the button turns into **Stop** instead of restarting.
 
 The API key is stored in the Iris SQLite database (`credential`), saved from Settings → AI. The
 webview never receives it: `send_message`, `speak_text`, and `transcribe_audio` read it inside Rust,
@@ -203,8 +206,9 @@ feature-parity plan, not just a custom URL.
   `bun run tauri:dev` and `bun run tauri:build:debug`. Dev chats and settings therefore live in
   separate `Application Support` and WebKit folders and never clash with the installed app.
 - The quick overlay has configurable local shortcuts in Settings → Shortcuts: Capture screen
-  (`⌘C`), New chat (`⌘N`), Show / hide response (`⌘B`), DeepThink (`⌘D`), Web search (`⌘S`), and
-  Voice input (`⌘I`). They are overlay-only and never register with the OS.
+  (`⌘C`), New chat (`⌘N`), Previous conversation (`⌘⇧N`), Show / hide response (`⌘B`), DeepThink
+  (`⌘D`), Web search (`⌘S`), and Voice input (`⌘I`). They are overlay-only and never register with
+  the OS.
 - Settings → Storage has two separate actions: **Clear** deletes only conversations, while
   **Reset Iris** wipes conversations, compressed summaries, speech audio, settings, the API key,
   and the pre-rename data copies, then reloads both webviews. The SQLite file is vacuumed and its
@@ -216,13 +220,12 @@ feature-parity plan, not just a custom URL.
   section while anything is archived; archived chats open read-only and can be restored or
   permanently deleted. They never accept new messages or renames. Empty conversations are deleted
   outright instead of being archived.
-- New quick chats archive the previous quick conversation under a new id, so old messages stay in
-  History instead of being discarded.
+- New quick chats move the previous quick conversation to a new id, so old messages stay in
+  History instead of being discarded. `⌘⇧N` brings the previous quick conversation back.
 - Settings live in `localStorage`; the DeepSeek API key lives in the SQLite `credential` table and
   is read only inside Rust.
-- The composer has two request toggles, matching the DeepSeek demo: **DeepThink** sends
-  `thinking: { type: "enabled" }`, and **Search** adds the `deepseek_web_search` tool (reading links
-  is always available). Both are off by default and apply to the next message only.
+- The composer has two request toggles: **DeepThink** sends `thinking: { type: "adaptive" }`, and
+  **Search** adds the `web_search_20250305` server tool. Both apply to the next message only.
 - Images can be pasted or dropped into the composer or the quick overlay; there is no attach
   button. They are resized to 1280px JPEGs, kept as attachments on the user message, and sent to
   the Messages API as base64 image blocks. The database stores them in `messages.attachments`.

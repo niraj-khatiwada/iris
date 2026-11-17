@@ -54,6 +54,7 @@ export const SETTINGS_STORAGE_KEY = 'iris.settings'
 export const DEFAULT_OVERLAY_SHORTCUTS = {
   capture: 'CommandOrControl+KeyC',
   newChat: 'CommandOrControl+KeyN',
+  restorePrevious: 'CommandOrControl+Shift+KeyN',
   toggleResponse: 'CommandOrControl+KeyB',
   deepThink: 'CommandOrControl+KeyD',
   webSearch: 'CommandOrControl+KeyS',

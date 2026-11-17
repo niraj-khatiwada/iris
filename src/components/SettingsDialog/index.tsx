@@ -386,6 +386,20 @@ const OVERLAY_SHORTCUT_ROWS: Array<{
     search: ['new', 'chat', 'conversation', 'shortcut'],
   },
   {
+    id: 'restorePrevious',
+    title: 'Previous conversation',
+    description: 'Bring back the quick conversation that New chat moved aside.',
+    search: [
+      'previous',
+      'restore',
+      'back',
+      'undo',
+      'new chat',
+      'conversation',
+      'shortcut',
+    ],
+  },
+  {
     id: 'toggleResponse',
     title: 'Show / hide response',
     description: 'Reveal the reply below the overlay, or hide it again.',

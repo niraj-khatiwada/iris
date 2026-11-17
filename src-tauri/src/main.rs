@@ -165,6 +165,7 @@ fn main() {
             tauri_commands::app::reload_app_windows,
             tauri_commands::app::reset_app_data,
             tauri_commands::chat::send_message,
+            tauri_commands::chat::generate_conversation_title,
             tauri_commands::chat::cancel_generation,
             tauri_commands::credentials::has_api_key,
             tauri_commands::credentials::remove_api_key,

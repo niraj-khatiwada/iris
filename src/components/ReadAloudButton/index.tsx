@@ -1,9 +1,9 @@
 import { Button, Tooltip } from '@heroui/react'
-import { Volume2 } from 'lucide-react'
+import { Square, Volume2 } from 'lucide-react'
 
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useSpeechStore } from '@/stores/speechStore'
-import { speakText } from '@/tauri/commands/voice'
+import { speakText, stopSpeaking } from '@/tauri/commands/voice'
 import { cn } from '@/utils/tailwind'
 import { isTauri } from '@/utils/tauri'
 
@@ -22,6 +22,12 @@ function ReadAloudButton({
   text,
   className,
 }: ReadAloudButtonProps) {
+  const activeConversationId = useSpeechStore((state) => state.conversationId)
+  const playing = useSpeechStore((state) => state.preparing || state.speaking)
+  // Read-aloud is conversation-scoped in the backend. While this conversation is being prepared
+  // or played, the button is a Stop control; clicking again must not restart the same audio.
+  const active = playing && activeConversationId === conversationId
+
   const read = async () => {
     if (!isTauri() || !text.trim()) {
       return
@@ -47,19 +53,33 @@ function ReadAloudButton({
     }
   }
 
+  const stop = async () => {
+    if (!isTauri()) {
+      return
+    }
+
+    await stopSpeaking()
+  }
+
   return (
     <Tooltip delay={400}>
       <Button
         isIconOnly
-        aria-label="Read aloud"
+        aria-label={active ? 'Stop reading aloud' : 'Read aloud'}
         className={cn('size-6 min-w-6 text-muted', className)}
         size="sm"
         variant="ghost"
-        onPress={() => void read()}
+        onPress={() => void (active ? stop() : read())}
       >
-        <Volume2 className="size-3.5" />
+        {active ? (
+          <Square className="size-3 fill-current" />
+        ) : (
+          <Volume2 className="size-3.5" />
+        )}
       </Button>
-      <Tooltip.Content>Read aloud</Tooltip.Content>
+      <Tooltip.Content>
+        {active ? 'Stop reading aloud' : 'Read aloud'}
+      </Tooltip.Content>
     </Tooltip>
   )
 }

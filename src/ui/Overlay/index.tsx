@@ -109,6 +109,9 @@ function Overlay() {
   const resetQuickConversation = useChatStore(
     (state) => state.resetQuickConversation,
   )
+  const restorePreviousQuickConversation = useChatStore(
+    (state) => state.restorePreviousQuickConversation,
+  )
   const sendMessage = useChatStore((state) => state.sendMessage)
   const stopStreaming = useChatStore((state) => state.stopStreaming)
   const regenerate = useChatStore((state) => state.regenerate)
@@ -296,6 +299,18 @@ function Overlay() {
         return
       }
 
+      if (matchesShortcut(event, overlayShortcuts.restorePrevious)) {
+        event.preventDefault()
+        if (isTauri()) {
+          void stopSpeaking()
+        }
+        restorePreviousQuickConversation()
+        setRevealed(revealResponse)
+        setIgnoredResponseId(null)
+        requestAnimationFrame(() => inputRef.current?.focus())
+        return
+      }
+
       if (matchesShortcut(event, overlayShortcuts.toggleResponse)) {
         if (!streaming && hasResponse) {
           event.preventDefault()
@@ -359,6 +374,8 @@ function Overlay() {
     newChat,
     openSettings,
     overlayShortcuts,
+    restorePreviousQuickConversation,
+    revealResponse,
     setDeepThink,
     setWebSearch,
     streaming,
@@ -727,6 +744,17 @@ function Overlay() {
                     <span className="text-[10px] font-semibold tracking-[0.16em] text-foreground/55">
                       IRIS
                     </span>
+                    {conversation && conversation.messages.length > 0 ? (
+                      <>
+                        <span
+                          aria-hidden
+                          className="h-3 w-px shrink-0 bg-foreground/15"
+                        />
+                        <span className="min-w-0 max-w-[300px] truncate text-[11px] text-foreground/50">
+                          {conversation.title}
+                        </span>
+                      </>
+                    ) : null}
                     {errorLabel ? (
                       <span className="truncate text-[11px] text-danger/90">
                         {errorLabel}

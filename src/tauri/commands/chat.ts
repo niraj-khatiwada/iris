@@ -40,6 +40,15 @@ export function cancelGeneration(requestId?: string) {
   return invoke<void>('cancel_generation', { requestId })
 }
 
+/** Asks DeepSeek for a short title for the first message in a conversation. */
+export function generateConversationTitle(request: {
+  baseUrl: string
+  model: string
+  prompt: string
+}) {
+  return invoke<string>('generate_conversation_title', request)
+}
+
 export function subscribeToChatToken(
   handler: (payload: ChatTokenPayload) => void,
 ): Promise<UnlistenFn> {

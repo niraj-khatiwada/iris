@@ -8,6 +8,7 @@ import {
 } from '@/constants'
 import { cancelActiveRun, startAgentRun } from '@/services/agent'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { generateConversationTitle } from '@/tauri/commands/chat'
 import type {
   AgentMessage,
   ChatAttachment,
@@ -17,10 +18,13 @@ import type {
 import { newId } from '@/utils/id'
 import { attachmentToAgent } from '@/utils/image'
 import { titleFromMessage } from '@/utils/string'
+import { isTauri } from '@/utils/tauri'
 
 type ChatState = {
   conversations: Conversation[]
   activeConversationId: string | null
+  /** The quick conversation that the last New chat archived, so it can be restored. */
+  lastQuickConversationId: string | null
   streamingRequestId: string | null
   streamingConversationId: string | null
   streamingMessageId: string | null
@@ -28,6 +32,7 @@ type ChatState = {
   ensureQuickConversation: () => string
   hydrateConversations: (conversations: Conversation[]) => void
   resetQuickConversation: () => void
+  restorePreviousQuickConversation: () => void
   selectConversation: (id: string) => void
   archiveConversation: (id: string) => void
   restoreConversation: (id: string) => void
@@ -81,7 +86,7 @@ function toAgentHistory(messages: ChatMessage[]): AgentMessage[] {
 
 type PersistedChatState = Pick<
   ChatState,
-  'conversations' | 'activeConversationId'
+  'conversations' | 'activeConversationId' | 'lastQuickConversationId'
 >
 
 function withMessage(
@@ -248,6 +253,7 @@ export const useChatStore = create<ChatState>()(
     (set, get) => ({
       conversations: [],
       activeConversationId: null,
+      lastQuickConversationId: null,
       streamingRequestId: null,
       streamingConversationId: null,
       streamingMessageId: null,
@@ -335,8 +341,21 @@ export const useChatStore = create<ChatState>()(
               ? state.activeConversationId
               : (normalized.find((conversation) => !conversation.archivedAt)
                   ?.id ?? null)
+          const lastQuickConversationId =
+            state.lastQuickConversationId &&
+            normalized.some(
+              (conversation) =>
+                conversation.id === state.lastQuickConversationId &&
+                conversation.id !== QUICK_CONVERSATION_ID,
+            )
+              ? state.lastQuickConversationId
+              : null
 
-          return { conversations: normalized, activeConversationId }
+          return {
+            conversations: normalized,
+            activeConversationId,
+            lastQuickConversationId,
+          }
         }),
 
       resetQuickConversation: () => {
@@ -377,6 +396,76 @@ export const useChatStore = create<ChatState>()(
                 (conversation) => conversation.id !== QUICK_CONVERSATION_ID,
               ),
             ],
+            // Remember what New chat put away so Cmd+Shift+N can bring it back.
+            lastQuickConversationId:
+              archived?.id ?? state.lastQuickConversationId,
+            streamingRequestId: null,
+            streamingConversationId: null,
+            streamingMessageId: null,
+          }
+        })
+      },
+
+      restorePreviousQuickConversation: () => {
+        cancelActiveRun()
+        const now = Date.now()
+
+        set((state) => {
+          const previousId = state.lastQuickConversationId
+          if (!previousId) {
+            return state
+          }
+
+          const previous = state.conversations.find(
+            (conversation) =>
+              conversation.id === previousId &&
+              conversation.id !== QUICK_CONVERSATION_ID &&
+              conversation.messages.length > 0,
+          )
+          if (!previous) {
+            return { ...state, lastQuickConversationId: null }
+          }
+
+          const quick = state.conversations.find(
+            (conversation) => conversation.id === QUICK_CONVERSATION_ID,
+          )
+          const retiredCurrent =
+            quick && quick.messages.length > 0
+              ? {
+                  ...quick,
+                  id: newId(),
+                  updatedAt: now,
+                  messages: quick.messages.map((message) =>
+                    message.status === 'streaming'
+                      ? { ...message, status: 'complete' as const }
+                      : message,
+                  ),
+                }
+              : null
+          const restored: Conversation = {
+            ...previous,
+            id: QUICK_CONVERSATION_ID,
+            archivedAt: undefined,
+            updatedAt: now,
+            messages: previous.messages.map((message) =>
+              message.status === 'streaming'
+                ? { ...message, status: 'complete' as const }
+                : message,
+            ),
+          }
+
+          return {
+            conversations: [
+              restored,
+              ...(retiredCurrent ? [retiredCurrent] : []),
+              ...state.conversations.filter(
+                (conversation) =>
+                  conversation.id !== QUICK_CONVERSATION_ID &&
+                  conversation.id !== previousId,
+              ),
+            ],
+            activeConversationId: QUICK_CONVERSATION_ID,
+            lastQuickConversationId: retiredCurrent?.id ?? null,
             streamingRequestId: null,
             streamingConversationId: null,
             streamingMessageId: null,
@@ -458,11 +547,12 @@ export const useChatStore = create<ChatState>()(
               updatedAt: now,
               messages: [],
             }
+            const archivedQuickId = newId()
 
             return {
               conversations: [
                 fresh,
-                archive(quick, newId()),
+                archive(quick, archivedQuickId),
                 ...state.conversations.filter(
                   (conversation) => conversation.id !== QUICK_CONVERSATION_ID,
                 ),
@@ -471,6 +561,7 @@ export const useChatStore = create<ChatState>()(
                 state.activeConversationId === QUICK_CONVERSATION_ID
                   ? fresh.id
                   : state.activeConversationId,
+              lastQuickConversationId: archivedQuickId,
               ...(wasStreaming
                 ? {
                     streamingRequestId: null,
@@ -526,6 +617,10 @@ export const useChatStore = create<ChatState>()(
                 : conversation,
             ),
             activeConversationId: id,
+            lastQuickConversationId:
+              state.lastQuickConversationId === id
+                ? null
+                : state.lastQuickConversationId,
           }
         }),
 
@@ -549,7 +644,14 @@ export const useChatStore = create<ChatState>()(
                   ?.id ?? null)
               : state.activeConversationId
 
-          return { conversations, activeConversationId }
+          return {
+            conversations,
+            activeConversationId,
+            lastQuickConversationId:
+              state.lastQuickConversationId === id
+                ? null
+                : state.lastQuickConversationId,
+          }
         }),
 
       renameConversation: (id, title) =>
@@ -566,6 +668,7 @@ export const useChatStore = create<ChatState>()(
         set({
           conversations: [],
           activeConversationId: null,
+          lastQuickConversationId: null,
           streamingRequestId: null,
           streamingConversationId: null,
           streamingMessageId: null,
@@ -624,23 +727,45 @@ export const useChatStore = create<ChatState>()(
           conversation.messages.length === 0 ||
           conversation.title === 'New conversation' ||
           conversation.title === QUICK_CONVERSATION_TITLE
+        const fallbackTitle = text ? titleFromMessage(text) : 'Image'
 
         set((current) => ({
           conversations: current.conversations.map((item) =>
             item.id === conversationId
               ? {
                   ...item,
-                  title: isUntitled
-                    ? text
-                      ? titleFromMessage(text)
-                      : 'Image'
-                    : item.title,
+                  title: isUntitled ? fallbackTitle : item.title,
                   updatedAt: now,
                   messages: [...item.messages, userMessage, assistantMessage],
                 }
               : item,
           ),
         }))
+
+        if (isUntitled && isTauri()) {
+          const settings = useSettingsStore.getState()
+          void generateConversationTitle({
+            baseUrl: settings.baseUrl,
+            model: settings.model,
+            prompt: text || 'The user shared an image with no text.',
+          })
+            .then((title) => {
+              // Apply only if this is still the same conversation and the user has not renamed it.
+              set((current) => ({
+                conversations: current.conversations.map((item) =>
+                  item.id === conversationId &&
+                  !item.archivedAt &&
+                  item.title === fallbackTitle &&
+                  item.messages.some((message) => message.id === userMessage.id)
+                    ? { ...item, title }
+                    : item,
+                ),
+              }))
+            })
+            .catch(() => {
+              // Keep the local fallback title when the service is unavailable.
+            })
+        }
 
         await runAssistantReply({
           set,
@@ -760,6 +885,7 @@ export const useChatStore = create<ChatState>()(
       partialize: (state): PersistedChatState => ({
         conversations: state.conversations,
         activeConversationId: state.activeConversationId,
+        lastQuickConversationId: state.lastQuickConversationId,
       }),
       merge: (persisted, current) => {
         const saved = persisted as Partial<PersistedChatState> | undefined
@@ -787,6 +913,15 @@ export const useChatStore = create<ChatState>()(
             )
               ? saved.activeConversationId
               : (conversations[0]?.id ?? null),
+          lastQuickConversationId:
+            saved?.lastQuickConversationId &&
+            conversations.some(
+              (conversation) =>
+                conversation.id === saved.lastQuickConversationId &&
+                conversation.id !== QUICK_CONVERSATION_ID,
+            )
+              ? saved.lastQuickConversationId
+              : null,
         }
       },
     },
