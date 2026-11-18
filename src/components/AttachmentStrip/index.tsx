@@ -14,6 +14,7 @@ function AttachmentStrip({
   onRetry,
   error,
   onDismissError,
+  conversationId,
   compact = false,
   className,
 }: {
@@ -22,6 +23,7 @@ function AttachmentStrip({
   onRetry?: (id: string) => void
   error?: string | null
   onDismissError?: () => void
+  conversationId?: string | null
   compact?: boolean
   className?: string
 }) {
@@ -33,7 +35,13 @@ function AttachmentStrip({
     if (!attachment.dataUrl || !isTauri()) {
       return
     }
-    void showImagePreview(getCurrentWindow().label, attachment.dataUrl)
+    void showImagePreview({
+      source: getCurrentWindow().label,
+      url: attachment.dataUrl,
+      name: attachment.name,
+      conversationId,
+      fileName: attachment.fileName,
+    })
   }
 
   return (

@@ -186,6 +186,8 @@ fn main() {
             tauri_commands::overlay::resize_overlay,
             tauri_commands::preview::show_image_preview,
             tauri_commands::preview::close_image_preview,
+            tauri_commands::preview::copy_preview_image,
+            tauri_commands::preview::save_preview_image,
             tauri_commands::screen::start_screen_capture,
             tauri_commands::screen::capture_annotated_screen,
             tauri_commands::screen::close_screen_capture,

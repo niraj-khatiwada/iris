@@ -42,7 +42,13 @@ function AttachmentImage({
         onDoubleClick={() => {
           const url = failed ? source : (originalUrl ?? source)
           if (isTauri()) {
-            void showImagePreview(getCurrentWindow().label, url)
+            void showImagePreview({
+              source: getCurrentWindow().label,
+              url,
+              name: attachment.name,
+              conversationId,
+              fileName: attachment.fileName,
+            })
           }
         }}
         onError={() => {

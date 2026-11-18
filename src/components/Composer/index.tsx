@@ -99,6 +99,7 @@ function Composer() {
         <AttachmentStrip
           attachments={files.attachments}
           className="px-2 pt-1.5"
+          conversationId={activeConversationId}
           error={files.error}
           onDismissError={files.clearError}
           onRemove={files.remove}

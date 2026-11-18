@@ -1032,6 +1032,7 @@ function Overlay() {
                       attachments={files.attachments}
                       className="pb-2"
                       compact
+                      conversationId={quickConversationId}
                       error={files.error}
                       onDismissError={files.clearError}
                       onRemove={files.remove}

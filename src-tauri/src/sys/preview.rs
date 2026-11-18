@@ -121,3 +121,81 @@ pub fn hide(app: &AppHandle) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// Puts the image on the system clipboard in its original format (JPEG stays JPEG), so pasting
+/// it produces the same file the download action saves. Unknown formats fall back to a TIFF
+/// representation built by `NSImage`. Must run on the main thread.
+#[cfg(target_os = "macos")]
+pub fn copy_image_to_clipboard(bytes: &[u8]) -> Result<(), String> {
+    use objc2::AnyThread;
+    use objc2_app_kit::{NSImage, NSPasteboard, NSPasteboardTypePNG, NSPasteboardTypeTIFF};
+    use objc2_foundation::{NSData, NSString};
+
+    let data = NSData::with_bytes(bytes);
+    let pasteboard = NSPasteboard::generalPasteboard();
+    pasteboard.clearContents();
+
+    let copied = if is_png(bytes) {
+        pasteboard.setData_forType(Some(&data), unsafe { NSPasteboardTypePNG })
+    } else if is_tiff(bytes) {
+        pasteboard.setData_forType(Some(&data), unsafe { NSPasteboardTypeTIFF })
+    } else if let Some(uti) = image_uti(bytes) {
+        let uti = NSString::from_str(uti);
+        pasteboard.setData_forType(Some(&data), &uti)
+    } else {
+        false
+    };
+    if copied {
+        return Ok(());
+    }
+
+    // A format macOS has no pasteboard type for still pastes through its TIFF representation.
+    let image = NSImage::initWithData(NSImage::alloc(), &data)
+        .ok_or_else(|| "The image could not be read.".to_string())?;
+    let tiff = image
+        .TIFFRepresentation()
+        .ok_or_else(|| "The image could not be prepared for the clipboard.".to_string())?;
+
+    if !pasteboard.setData_forType(Some(&tiff), unsafe { NSPasteboardTypeTIFF }) {
+        return Err("The image could not be copied to the clipboard.".to_string());
+    }
+    Ok(())
+}
+
+fn is_png(bytes: &[u8]) -> bool {
+    bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a])
+}
+
+fn is_tiff(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"II*\0") || bytes.starts_with(b"MM\0*")
+}
+
+/// The pasteboard UTI for the common image formats that have no AppKit constant.
+fn image_uti(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+        return Some("public.jpeg");
+    }
+    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        return Some("com.compuserve.gif");
+    }
+    if bytes.starts_with(b"BM") {
+        return Some("com.microsoft.bmp");
+    }
+    if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
+        return Some("org.webmproject.webp");
+    }
+    if bytes.get(4..8) == Some(b"ftyp") {
+        match bytes.get(8..12) {
+            Some(b"heic" | b"heix" | b"hevc" | b"hevx") => return Some("public.heic"),
+            Some(b"mif1" | b"msf1") => return Some("public.heif"),
+            Some(b"avif" | b"avis") => return Some("public.avif"),
+            _ => {}
+        }
+    }
+    None
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn copy_image_to_clipboard(_bytes: &[u8]) -> Result<(), String> {
+    Err("Copying images is not supported on this platform.".to_string())
+}
