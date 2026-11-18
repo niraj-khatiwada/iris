@@ -2,6 +2,7 @@ import { Button, TextArea, Tooltip } from '@heroui/react'
 import { invoke } from '@tauri-apps/api/core'
 import { emit, listen } from '@tauri-apps/api/event'
 import {
+  ArrowUpRight,
   ChevronDown,
   ChevronUp,
   Info,
@@ -51,6 +52,7 @@ import {
   startScreenCapture,
 } from '@/tauri/commands/screen'
 import { stopSpeaking } from '@/tauri/commands/voice'
+import type { SettingsCategory } from '@/types/settings'
 import { newId } from '@/utils/id'
 import {
   formatShortcut,
@@ -215,11 +217,11 @@ function Overlay() {
       : null
   const view = voiceActive ? 'voice' : 'main'
 
-  const openSettings = useCallback(async () => {
+  const openSettings = useCallback(async (category?: SettingsCategory) => {
     if (!isTauri()) {
       return
     }
-    await emit('settings:open')
+    await emit('settings:open', category ? { category } : {})
     await invoke('show_main_window')
   }, [])
 
@@ -949,10 +951,24 @@ function Overlay() {
                         className="max-h-[320px] overflow-y-auto"
                       >
                         {assistant?.status === 'error' ? (
-                          <p className="text-[13px] leading-6 text-danger">
-                            {assistant.error ??
-                              'Iris could not finish that response. Try again in a moment.'}
-                          </p>
+                          apiKeyMissing ? (
+                            <button
+                              type="button"
+                              className="group inline-flex max-w-full items-center gap-1 text-left text-[13px] leading-6 text-danger transition-colors hover:text-danger/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40"
+                              onClick={() => void openSettings('ai')}
+                            >
+                              <span className="min-w-0 underline decoration-danger/35 underline-offset-2 transition-colors group-hover:decoration-danger/70">
+                                {assistant.error ??
+                                  'Add your API key in Settings.'}
+                              </span>
+                              <ArrowUpRight className="size-3.5 shrink-0" />
+                            </button>
+                          ) : (
+                            <p className="text-[13px] leading-6 text-danger">
+                              {assistant.error ??
+                                'Iris could not finish that response. Try again in a moment.'}
+                            </p>
+                          )
                         ) : assistant?.content ? (
                           <Markdown>{assistant.content}</Markdown>
                         ) : null}

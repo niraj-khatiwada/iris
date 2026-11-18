@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import { SETTINGS_STORAGE_KEY } from '@/constants'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useUIStore } from '@/stores/uiStore'
+import type { SettingsCategory } from '@/types/settings'
 import { isTauri } from '@/utils/tauri'
 import { applyAccent } from '@/utils/theme'
 
@@ -50,13 +51,22 @@ export function useSettingsSync() {
     window.addEventListener('focus', schedule)
     document.addEventListener('visibilitychange', onVisibilityChange)
 
-    // The quick overlay asks this window to open Settings with Cmd+,.
+    // The quick overlay asks this window to open Settings with Cmd+, or a specific
+    // panel such as the API key form.
     let unlisten: (() => void) | undefined
     let disposed = false
     if (isTauri()) {
-      void listen('settings:open', () => {
-        useUIStore.getState().openSettings()
-      }).then((off) => {
+      void listen<{ category?: SettingsCategory } | null>(
+        'settings:open',
+        (event) => {
+          const category = event.payload?.category
+          if (category) {
+            useUIStore.getState().openSettingsAt(category)
+          } else {
+            useUIStore.getState().openSettings()
+          }
+        },
+      ).then((off) => {
         if (disposed) {
           off()
         } else {
