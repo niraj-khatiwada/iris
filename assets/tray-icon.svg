@@ -1,22 +1,16 @@
 <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <radialGradient id="body" cx="35%" cy="28%" r="82%">
-      <stop stop-color="#B4F7D0"/>
-      <stop offset="0.45" stop-color="#7ADAA5"/>
-      <stop offset="1" stop-color="#3F9065"/>
-    </radialGradient>
-    <mask id="face">
-      <rect width="64" height="64" fill="#FFFFFF"/>
-      <g transform="translate(32 31) scale(0.95) translate(-50 -50)" fill="#000000">
-        <rect x="37.5" y="37" width="9" height="15" rx="4.5"/>
-        <rect x="53.5" y="37" width="9" height="15" rx="4.5"/>
-        <path d="M43.5 54Q50 60.2 56.5 54" fill="none" stroke="#000000" stroke-width="3.2" stroke-linecap="round"/>
+    <mask id="clover">
+      <rect width="64" height="64" fill="#000000"/>
+      <g transform="translate(32 32) scale(0.72) translate(-50 -50)">
+        <path d="M26.53 22.38A25 25 0 0 1 73.47 22.38A7 7 0 0 0 77.62 26.53A25 25 0 0 1 77.62 73.47A7 7 0 0 0 73.47 77.62A25 25 0 0 1 26.53 77.62A7 7 0 0 0 22.38 73.47A25 25 0 0 1 22.38 26.53A7 7 0 0 0 26.53 22.38Z" fill="#FFFFFF"/>
+        <g fill="#000000">
+          <rect x="37.5" y="37" width="9" height="15" rx="4.5"/>
+          <rect x="53.5" y="37" width="9" height="15" rx="4.5"/>
+          <path d="M43.5 54Q50 60.2 56.5 54" fill="none" stroke="#000000" stroke-width="3.2" stroke-linecap="round"/>
+        </g>
       </g>
     </mask>
   </defs>
-  <g mask="url(#face)">
-    <g transform="translate(32 31) scale(0.95) translate(-50 -50)">
-      <path d="M26.53 22.38A25 25 0 0 1 73.47 22.38A7 7 0 0 0 77.62 26.53A25 25 0 0 1 77.62 73.47A7 7 0 0 0 73.47 77.62A25 25 0 0 1 26.53 77.62A7 7 0 0 0 22.38 73.47A25 25 0 0 1 22.38 26.53A7 7 0 0 0 26.53 22.38Z" fill="url(#body)"/>
-    </g>
-  </g>
+  <rect width="64" height="64" fill="#000000" mask="url(#clover)"/>
 </svg>

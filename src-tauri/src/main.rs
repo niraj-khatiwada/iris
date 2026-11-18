@@ -106,9 +106,8 @@ fn main() {
 
                 TrayIconBuilder::new()
                     .icon(Image::from_bytes(include_bytes!("../icons/tray.png"))?)
-                    // The tray keeps the avatar's colour so it matches the app icon instead of
-                    // being recoloured as a monochrome template.
-                    .icon_as_template(false)
+                    // Menu bar icons should follow the system's light/dark appearance.
+                    .icon_as_template(true)
                     .menu(&menu)
                     .show_menu_on_left_click(true)
                     .on_menu_event(|app, event| match event.id.as_ref() {
