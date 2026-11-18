@@ -1,5 +1,8 @@
 import type { IrisAvatar, ThemeMode, TtsVoice } from '@/types/settings'
 
+/** The default Iris accent, also used when the avatar follows the theme colour. */
+export const DEFAULT_PRIMARY_COLOR = '#7adaa5'
+
 /** The look Iris ships with; Settings → About edits and persists it. */
 export const DEFAULT_IRIS_AVATAR: IrisAvatar = {
   type: 'clover',

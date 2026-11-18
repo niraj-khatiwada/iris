@@ -18,7 +18,7 @@ import {
 import { Check, Palette } from 'lucide-react'
 import type { ReactNode } from 'react'
 
-import { irisPrimaryColor } from '@/components/IrisBlob'
+import { DEFAULT_PRIMARY_COLOR } from '@/constants'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { cn } from '@/utils/tailwind'
 
@@ -101,7 +101,7 @@ function AvatarEditor({ onDone }: { onDone?: () => void }) {
   const avatar = useSettingsStore((state) => state.avatar)
   const setAvatar = useSettingsStore((state) => state.setAvatar)
   const resetAvatar = useSettingsStore((state) => state.resetAvatar)
-  const color = avatar.color || irisPrimaryColor()
+  const color = avatar.color || DEFAULT_PRIMARY_COLOR
   const customBodyColor =
     avatar.color !== '' && !BODY_COLORS.includes(avatar.color)
   const customAccessoryColor = !ACCESSORY_COLORS.includes(avatar.accessoryColor)
@@ -150,7 +150,7 @@ function AvatarEditor({ onDone }: { onDone?: () => void }) {
         </EditorRow>
 
         <EditorRow
-          description="Iris green follows the app's primary colour."
+          description="The app accent follows this choice. Iris green is the default."
           title="Body colour"
         >
           <div className="flex flex-wrap items-center gap-2">
@@ -167,7 +167,7 @@ function AvatarEditor({ onDone }: { onDone?: () => void }) {
                     selected &&
                       'ring-2 ring-foreground/70 ring-offset-2 ring-offset-background',
                   )}
-                  style={{ backgroundColor: value || irisPrimaryColor() }}
+                  style={{ backgroundColor: value || DEFAULT_PRIMARY_COLOR }}
                   title={value ? value : 'Iris green'}
                   onClick={() => setAvatar({ color: value })}
                 >

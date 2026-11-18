@@ -5,6 +5,7 @@ import { SETTINGS_STORAGE_KEY } from '@/constants'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useUIStore } from '@/stores/uiStore'
 import { isTauri } from '@/utils/tauri'
+import { applyAccent } from '@/utils/theme'
 
 /**
  * Keeps every Iris window on the same persisted settings. The quick overlay and the history
@@ -12,6 +13,12 @@ import { isTauri } from '@/utils/tauri'
  * overlay until it reloaded.
  */
 export function useSettingsSync() {
+  const avatarColor = useSettingsStore((state) => state.avatar.color)
+
+  useEffect(() => {
+    applyAccent(avatarColor)
+  }, [avatarColor])
+
   useEffect(() => {
     let timer: number | null = null
 

@@ -12,10 +12,12 @@ import {
 import { isTauri } from '@/utils/tauri'
 
 import './global.css'
+import { applyAccent, getStoredAvatarColor } from '@/utils/theme'
 
 // A full-screen, in-app lightbox above the quick overlay. It is a non-activating panel, so
 // opening it never activates another app or switches Spaces.
 document.documentElement.dataset.window = 'preview'
+applyAccent(getStoredAvatarColor())
 
 type PreviewPayload = {
   url: string

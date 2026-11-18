@@ -5,10 +5,16 @@ import DynamicIsland from '@/components/dynamic-island'
 
 import './global.css'
 import { routeTree } from './routeTree.gen'
-import { applyTheme, getStoredTheme } from './utils/theme'
+import {
+  applyAccent,
+  applyTheme,
+  getStoredAvatarColor,
+  getStoredTheme,
+} from './utils/theme'
 
 // Applied before the first render so the window never flashes the wrong theme.
 applyTheme(getStoredTheme())
+applyAccent(getStoredAvatarColor())
 
 const router = createRouter({
   routeTree,

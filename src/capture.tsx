@@ -19,12 +19,13 @@ import {
 } from '@/tauri/commands/screen'
 import { cn } from '@/utils/tailwind'
 import { isTauri } from '@/utils/tauri'
-import { applyTheme } from '@/utils/theme'
+import { applyAccent, applyTheme, getStoredAvatarColor } from '@/utils/theme'
 
 import './global.css'
 
 document.documentElement.dataset.window = 'capture'
 applyTheme('dark')
+applyAccent(getStoredAvatarColor())
 
 type Point = { x: number; y: number }
 type Rect = { x: number; y: number; width: number; height: number }

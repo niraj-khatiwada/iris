@@ -1,3 +1,5 @@
+import { autoInk } from 'bot-avatars'
+
 import { SETTINGS_STORAGE_KEY } from '@/constants'
 import type { ThemeMode } from '@/types/settings'
 
@@ -52,4 +54,37 @@ export function getStoredTheme(): ThemeMode {
   }
 
   return 'dark'
+}
+
+const HEX_COLOR = /^#[0-9a-f]{6}$/i
+
+/**
+ * Makes the avatar's body colour the app-wide primary. An empty colour clears the override and
+ * lets the stylesheet's default Iris green apply again.
+ */
+export function applyAccent(avatarColor: string) {
+  const root = document.documentElement
+  if (!HEX_COLOR.test(avatarColor)) {
+    root.style.removeProperty('--primary')
+    root.style.removeProperty('--accent-foreground')
+    return
+  }
+
+  root.style.setProperty('--primary', avatarColor)
+  root.style.setProperty('--accent-foreground', autoInk(avatarColor))
+}
+
+/** Reads the saved avatar colour without hydrating the whole settings store. */
+export function getStoredAvatarColor(): string {
+  try {
+    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY)
+    if (!raw) {
+      return ''
+    }
+
+    const color = JSON.parse(raw)?.state?.avatar?.color
+    return typeof color === 'string' && HEX_COLOR.test(color) ? color : ''
+  } catch {
+    return ''
+  }
 }

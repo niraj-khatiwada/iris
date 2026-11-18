@@ -1,6 +1,10 @@
 import ReactDOM from 'react-dom/client'
 
-import { watchSystemTheme } from '@/utils/theme'
+import {
+  applyAccent,
+  getStoredAvatarColor,
+  watchSystemTheme,
+} from '@/utils/theme'
 
 import './global.css'
 import Overlay from './ui/Overlay'
@@ -9,6 +13,7 @@ import Overlay from './ui/Overlay'
 // and stays transparent around the panel.
 document.documentElement.dataset.window = 'overlay'
 watchSystemTheme()
+applyAccent(getStoredAvatarColor())
 
 const rootElement = document.getElementById('app')
 

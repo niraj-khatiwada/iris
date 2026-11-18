@@ -5,6 +5,7 @@ import {
   type BotAvatarType,
 } from 'bot-avatars'
 
+import { DEFAULT_PRIMARY_COLOR } from '@/constants'
 import { useSettingsStore } from '@/stores/settingsStore'
 
 export type IrisTone = 'primary' | 'pending' | 'speaking' | 'error'
@@ -35,52 +36,9 @@ type IrisBlobProps = Omit<
   activity?: IrisActivity
 }
 
-/** sRGB equivalent of `--primary`, used until the token can be resolved at runtime. */
-const PRIMARY_FALLBACK = '#7adaa5'
-
-let resolvedPrimary: string | null = null
-
-/**
- * `bot-avatars` parses hex/rgb/hsl colours, so the theme token cannot be passed straight
- * through. Resolve it once through a canvas, which handles the oklch value in `global.css`.
- */
-export function irisPrimaryColor() {
-  if (resolvedPrimary) {
-    return resolvedPrimary
-  }
-  if (typeof document === 'undefined') {
-    return PRIMARY_FALLBACK
-  }
-
-  const token = getComputedStyle(document.documentElement)
-    .getPropertyValue('--primary')
-    .trim()
-  if (!token) {
-    resolvedPrimary = PRIMARY_FALLBACK
-    return resolvedPrimary
-  }
-
-  const canvas = document.createElement('canvas')
-  canvas.width = 1
-  canvas.height = 1
-  const context = canvas.getContext('2d', { willReadFrequently: true })
-  if (!context) {
-    resolvedPrimary = PRIMARY_FALLBACK
-    return resolvedPrimary
-  }
-
-  context.fillStyle = token
-  context.fillRect(0, 0, 1, 1)
-  const [r, g, b] = context.getImageData(0, 0, 1, 1).data
-  resolvedPrimary = `#${[r, g, b]
-    .map((channel) => channel.toString(16).padStart(2, '0'))
-    .join('')}`
-  return resolvedPrimary
-}
-
 /** Semantic body colours: ready, request in flight, read-aloud, and failure. */
 const TONE_COLORS: Record<IrisTone, string> = {
-  primary: PRIMARY_FALLBACK,
+  primary: DEFAULT_PRIMARY_COLOR,
   pending: '#f2b94b',
   speaking: '#6fb2ee',
   error: '#e56f6a',
@@ -136,7 +94,7 @@ function IrisBlob({
       bowTie={bowTie ?? avatar.bowTie}
       color={
         tone === 'primary'
-          ? avatar.color || irisPrimaryColor()
+          ? avatar.color || DEFAULT_PRIMARY_COLOR
           : TONE_COLORS[tone]
       }
       face={face ?? avatar.face}

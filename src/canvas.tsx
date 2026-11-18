@@ -6,10 +6,12 @@ import { cn } from '@/utils/tailwind'
 import { isTauri } from '@/utils/tauri'
 
 import './global.css'
+import { applyAccent, getStoredAvatarColor } from '@/utils/theme'
 
 // The full-screen canvas is transparent and click-through. It hosts transient snap guides for
 // the draggable overlay and, later, screen annotations and agent output.
 document.documentElement.dataset.window = 'canvas'
+applyAccent(getStoredAvatarColor())
 
 type Guides = {
   left: number
