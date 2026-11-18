@@ -1,4 +1,17 @@
-import type { ThemeMode, TtsVoice } from '@/types/settings'
+import type { IrisAvatar, ThemeMode, TtsVoice } from '@/types/settings'
+
+/** The look Iris ships with; Settings → About edits and persists it. */
+export const DEFAULT_IRIS_AVATAR: IrisAvatar = {
+  type: 'clover',
+  color: '',
+  face: 'mouth',
+  shading: 'fabric',
+  hat: 'none',
+  glasses: 'none',
+  headphones: false,
+  bowTie: false,
+  accessoryColor: '#27272b',
+}
 
 /** Suggested prompts shown on the welcome screen. */
 export const SUGGESTIONS = [

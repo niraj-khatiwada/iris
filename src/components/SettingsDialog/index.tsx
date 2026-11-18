@@ -22,6 +22,7 @@ import {
   type LucideIcon,
   Monitor,
   Moon,
+  Palette,
   RefreshCw,
   SearchX,
   Settings2,
@@ -31,6 +32,7 @@ import {
 } from 'lucide-react'
 import { type ReactNode, useCallback, useEffect, useState } from 'react'
 
+import AvatarEditor from '@/components/AvatarEditor'
 import { useDynamicIslandNotice } from '@/components/dynamic-island/notifications'
 import IrisBlob from '@/components/IrisBlob'
 import ShortcutRecorder from '@/components/ShortcutRecorder'
@@ -38,6 +40,7 @@ import {
   CHAT_STORAGE_KEY,
   CHAT_UI_STORAGE_KEY,
   DEFAULT_BASE_URL,
+  DEFAULT_IRIS_AVATAR,
   DEFAULT_MODEL,
   DEFAULT_OPEN_SHORTCUT,
   DEFAULT_OVERLAY_SHORTCUTS,
@@ -144,7 +147,26 @@ const CATEGORIES: Category[] = [
     label: 'About',
     group: 'Iris',
     icon: Info,
-    terms: ['about', 'version', 'platform', 'identifier'],
+    terms: [
+      'about',
+      'version',
+      'platform',
+      'identifier',
+      'avatar',
+      'bot',
+      'appearance',
+      'customize',
+      'colour',
+      'color',
+      'body',
+      'face',
+      'material',
+      'hat',
+      'glasses',
+      'headphones',
+      'bow tie',
+      'accessory',
+    ],
   },
 ]
 
@@ -1280,6 +1302,7 @@ function StoragePanel({ query }: { query: string }) {
               ttsVoice: DEFAULT_TTS_VOICE,
               openShortcut: DEFAULT_OPEN_SHORTCUT,
               overlayShortcuts: { ...DEFAULT_OVERLAY_SHORTCUTS },
+              avatar: { ...DEFAULT_IRIS_AVATAR },
             })
             localStorage.removeItem(CHAT_STORAGE_KEY)
             localStorage.removeItem(CHAT_UI_STORAGE_KEY)
@@ -1316,12 +1339,31 @@ function StoragePanel({ query }: { query: string }) {
 function AboutPanel({ query }: { query: string }) {
   const info = useAppInfo()
   const platform = info ? `${info.platform} · ${info.arch}` : '—'
+  const [editing, setEditing] = useState(false)
 
   return (
     <>
-      <div className="flex justify-center pb-7">
-        <IrisBlob emotion="happy" size={100} />
-      </div>
+      {editing ? (
+        <div className="avatar-preview sticky top-4 z-20 mx-auto mb-5 w-fit rounded-full p-1.5">
+          <IrisBlob emotion="happy" size={76} />
+        </div>
+      ) : (
+        <div className="flex flex-col items-center gap-3 pb-7">
+          <IrisBlob emotion="happy" size={100} />
+          <Button
+            aria-expanded={editing}
+            className="h-8 min-w-0 gap-2 rounded-full px-3.5 text-xs"
+            size="sm"
+            variant="secondary"
+            onPress={() => setEditing(true)}
+          >
+            <Palette className="size-3.5" />
+            Edit avatar
+          </Button>
+        </div>
+      )}
+
+      {editing ? <AvatarEditor onDone={() => setEditing(false)} /> : null}
 
       <SettingsSection title="Iris">
         <SettingRow title="Version" query={query} search={['about', 'version']}>

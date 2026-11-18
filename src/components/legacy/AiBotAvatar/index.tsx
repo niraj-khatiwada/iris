@@ -30,6 +30,7 @@ export interface AiBotAvatarProps extends AiBotOptions {
   style?: CSSProperties
 }
 
+/** Legacy SVG engine, kept for reference. The app now renders `src/components/IrisBlob` with `bot-avatars`. */
 export function AiBotAvatar({
   colors,
   size = 120,

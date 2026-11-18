@@ -31,11 +31,6 @@ import SendButton from '@/components/SendButton'
 import SpeechControl from '@/components/SpeechControl'
 import VoiceStrip from '@/components/VoiceStrip'
 import { NO_WRITING_ASSIST } from '@/constants'
-import {
-  SENDING_EMOTIONS,
-  SENDING_SHAPES,
-  SENDING_TICK_MS,
-} from '@/constants/blob'
 import { useAttachments } from '@/hooks/useAttachments'
 import { useChatStorage } from '@/hooks/useChatStorage'
 import { useConversationHistory } from '@/hooks/useConversationHistory'
@@ -164,7 +159,6 @@ function Overlay() {
   const [captureError, setCaptureError] = useState<string | null>(null)
   const [capturePermissionNeeded, setCapturePermissionNeeded] = useState(false)
   const [capturing, setCapturing] = useState(false)
-  const [sendingTick, setSendingTick] = useState(0)
   const [contentHeight, setContentHeight] = useState<number | null>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const finishVoiceRef = useRef<(forceSend?: boolean) => void>(() => {})
@@ -269,18 +263,6 @@ function Overlay() {
       ensureQuickConversation()
     }
   }, [ensureQuickConversation, hasQuickConversation, hydrated])
-
-  useEffect(() => {
-    if (!morphing) {
-      setSendingTick(0)
-      return
-    }
-
-    const timer = window.setInterval(() => {
-      setSendingTick((tick) => tick + 1)
-    }, SENDING_TICK_MS)
-    return () => window.clearInterval(timer)
-  }, [morphing])
 
   useEffect(() => {
     if (!overlayError) {
@@ -772,21 +754,12 @@ function Overlay() {
                           activity={speaking ? 'speaking' : 'idle'}
                           emotion={
                             morphing
-                              ? (SENDING_EMOTIONS[
-                                  sendingTick % SENDING_EMOTIONS.length
-                                ] ?? 'thinking')
+                              ? 'thinking'
                               : assistant?.status === 'error'
                                 ? 'sad'
                                 : hasResponse
                                   ? 'happy'
                                   : 'neutral'
-                          }
-                          shape={
-                            morphing
-                              ? (SENDING_SHAPES[
-                                  sendingTick % SENDING_SHAPES.length
-                                ] ?? 'blob')
-                              : 'blob'
                           }
                           size={24}
                           tone={tone}

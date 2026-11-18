@@ -1,69 +1,152 @@
-import type { CSSProperties } from 'react'
-
 import {
-  AiBotAvatar,
-  type AiBotAvatarProps,
-  type AiBotShape,
-} from '@/components/AiBotAvatar'
+  BotAvatar,
+  type BotAvatarProps,
+  type BotAvatarState,
+  type BotAvatarType,
+} from 'bot-avatars'
+
+import { useSettingsStore } from '@/stores/settingsStore'
 
 export type IrisTone = 'primary' | 'pending' | 'speaking' | 'error'
 
-type IrisBlobProps = Omit<AiBotAvatarProps, 'colors' | 'label'> & {
+export type IrisEmotion =
+  | 'neutral'
+  | 'happy'
+  | 'love'
+  | 'laugh'
+  | 'surprised'
+  | 'sad'
+  | 'thinking'
+  | 'sleepy'
+  | 'wink'
+
+export type IrisActivity = 'idle' | 'speaking' | 'listening'
+
+type IrisBlobProps = Omit<
+  BotAvatarProps,
+  'color' | 'size' | 'state' | 'type'
+> & {
+  /** Body diameter in px. */
+  size?: number
   label?: string
-  shape?: AiBotShape
+  shape?: BotAvatarType
   tone?: IrisTone
+  emotion?: IrisEmotion
+  activity?: IrisActivity
 }
 
-const PRIMARY_COLORS = [
-  'color-mix(in oklch, var(--primary) 78%, white 22%)',
-  'color-mix(in oklch, var(--primary) 58%, black 42%)',
-] as const
+/** sRGB equivalent of `--primary`, used until the token can be resolved at runtime. */
+const PRIMARY_FALLBACK = '#7adaa5'
+
+let resolvedPrimary: string | null = null
+
+/**
+ * `bot-avatars` parses hex/rgb/hsl colours, so the theme token cannot be passed straight
+ * through. Resolve it once through a canvas, which handles the oklch value in `global.css`.
+ */
+export function irisPrimaryColor() {
+  if (resolvedPrimary) {
+    return resolvedPrimary
+  }
+  if (typeof document === 'undefined') {
+    return PRIMARY_FALLBACK
+  }
+
+  const token = getComputedStyle(document.documentElement)
+    .getPropertyValue('--primary')
+    .trim()
+  if (!token) {
+    resolvedPrimary = PRIMARY_FALLBACK
+    return resolvedPrimary
+  }
+
+  const canvas = document.createElement('canvas')
+  canvas.width = 1
+  canvas.height = 1
+  const context = canvas.getContext('2d', { willReadFrequently: true })
+  if (!context) {
+    resolvedPrimary = PRIMARY_FALLBACK
+    return resolvedPrimary
+  }
+
+  context.fillStyle = token
+  context.fillRect(0, 0, 1, 1)
+  const [r, g, b] = context.getImageData(0, 0, 1, 1).data
+  resolvedPrimary = `#${[r, g, b]
+    .map((channel) => channel.toString(16).padStart(2, '0'))
+    .join('')}`
+  return resolvedPrimary
+}
 
 /** Semantic body colours: ready, request in flight, read-aloud, and failure. */
-const TONES: Record<
-  IrisTone,
-  { colors: readonly [string, string]; glow: string }
-> = {
-  primary: { colors: PRIMARY_COLORS, glow: 'var(--primary)' },
-  pending: {
-    colors: ['oklch(0.9 0.12 88)', 'oklch(0.68 0.16 62)'],
-    glow: 'oklch(0.84 0.14 78)',
-  },
-  speaking: {
-    colors: ['oklch(0.88 0.08 235)', 'oklch(0.62 0.16 258)'],
-    glow: 'oklch(0.78 0.11 245)',
-  },
-  error: {
-    colors: ['oklch(0.85 0.1 25)', 'oklch(0.6 0.18 25)'],
-    glow: 'oklch(0.72 0.15 25)',
-  },
+const TONE_COLORS: Record<IrisTone, string> = {
+  primary: PRIMARY_FALLBACK,
+  pending: '#f2b94b',
+  speaking: '#6fb2ee',
+  error: '#e56f6a',
 }
 
-/** Iris's presence: the shared AI blob painted with the project primary or a state tone. */
+/** The old emotion/activity vocabulary mapped onto the library's three animation states. */
+function avatarState(
+  emotion: IrisEmotion,
+  activity: IrisActivity,
+): BotAvatarState {
+  if (emotion === 'sleepy') {
+    return 'sleeping'
+  }
+  if (activity !== 'idle') {
+    return 'working'
+  }
+
+  switch (emotion) {
+    case 'laugh':
+    case 'surprised':
+    case 'thinking':
+    case 'wink':
+      return 'working'
+    default:
+      return 'default'
+  }
+}
+
+/** Iris's presence: the saved bot look, with tone and state driven by the app. */
 function IrisBlob({
-  size = 32,
+  accessoryColor,
+  activity = 'idle',
+  bowTie,
+  emotion = 'neutral',
+  face,
+  glasses,
+  hat,
+  headphones,
   label = 'Iris',
-  shape = 'blob',
-  style,
+  shading,
+  shape,
+  size = 32,
   tone = 'primary',
   ...options
 }: IrisBlobProps) {
-  const palette = TONES[tone]
-  const primaryStyle = {
-    '--bot-face': 'oklch(0.16 0.004 250)',
-    '--bot-ground': `color-mix(in oklch, ${palette.glow} 18%, transparent)`,
-    '--bot-ground-core': `color-mix(in oklch, ${palette.glow} 30%, transparent)`,
-    ...style,
-  } as CSSProperties
+  const avatar = useSettingsStore((state) => state.avatar)
 
   return (
-    <AiBotAvatar
+    <BotAvatar
       {...options}
-      colors={palette.colors}
-      label={label}
-      shape={shape}
+      accessoryColor={accessoryColor ?? avatar.accessoryColor}
+      aria-label={label}
+      bowTie={bowTie ?? avatar.bowTie}
+      color={
+        tone === 'primary'
+          ? avatar.color || irisPrimaryColor()
+          : TONE_COLORS[tone]
+      }
+      face={face ?? avatar.face}
+      glasses={glasses ?? avatar.glasses}
+      hat={hat ?? avatar.hat}
+      headphones={headphones ?? avatar.headphones}
+      shading={shading ?? avatar.shading}
       size={size}
-      style={primaryStyle}
+      state={avatarState(emotion, activity)}
+      type={shape ?? avatar.type}
     />
   )
 }

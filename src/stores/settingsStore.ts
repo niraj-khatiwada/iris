@@ -1,8 +1,10 @@
+import { botAvatarTypes } from 'bot-avatars'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 import {
   DEFAULT_BASE_URL,
+  DEFAULT_IRIS_AVATAR,
   DEFAULT_MODEL,
   DEFAULT_OPEN_SHORTCUT,
   DEFAULT_OVERLAY_SHORTCUTS,
@@ -14,7 +16,7 @@ import {
   MIN_SIDEBAR_WIDTH,
   SETTINGS_STORAGE_KEY,
 } from '@/constants'
-import type { ThemeMode, TtsVoice } from '@/types/settings'
+import type { IrisAvatar, ThemeMode, TtsVoice } from '@/types/settings'
 
 export type OverlayShortcutAction = keyof typeof DEFAULT_OVERLAY_SHORTCUTS
 export type OverlayShortcuts = Record<OverlayShortcutAction, string>
@@ -86,6 +88,66 @@ function normalizeOverlayShortcuts(saved: unknown): OverlayShortcuts {
   return shortcuts
 }
 
+const HEX_COLOR = /^#[0-9a-f]{6}$/i
+const AVATAR_FACES = ['eyes', 'mouth'] as const
+const AVATAR_SHADINGS = [
+  'fabric',
+  'plastic',
+  'crisp',
+  'smooth',
+  'flat',
+] as const
+const AVATAR_HATS = ['none', 'beret', 'beanie', 'party', 'crown'] as const
+const AVATAR_GLASSES = ['none', 'round', 'square', 'shades'] as const
+
+/** Keeps a stale or hand-edited persisted look from reaching the canvas library. */
+function normalizeAvatar(saved: unknown): IrisAvatar {
+  const value = (saved ?? {}) as Partial<Record<keyof IrisAvatar, unknown>>
+  const color =
+    value.color === ''
+      ? ''
+      : typeof value.color === 'string' && HEX_COLOR.test(value.color)
+        ? value.color
+        : DEFAULT_IRIS_AVATAR.color
+  const accessoryColor =
+    typeof value.accessoryColor === 'string' &&
+    HEX_COLOR.test(value.accessoryColor)
+      ? value.accessoryColor
+      : DEFAULT_IRIS_AVATAR.accessoryColor
+
+  return {
+    type: botAvatarTypes.includes(value.type as IrisAvatar['type'])
+      ? (value.type as IrisAvatar['type'])
+      : DEFAULT_IRIS_AVATAR.type,
+    color,
+    face: AVATAR_FACES.includes(value.face as (typeof AVATAR_FACES)[number])
+      ? (value.face as IrisAvatar['face'])
+      : DEFAULT_IRIS_AVATAR.face,
+    shading: AVATAR_SHADINGS.includes(
+      value.shading as (typeof AVATAR_SHADINGS)[number],
+    )
+      ? (value.shading as IrisAvatar['shading'])
+      : DEFAULT_IRIS_AVATAR.shading,
+    hat: AVATAR_HATS.includes(value.hat as (typeof AVATAR_HATS)[number])
+      ? (value.hat as IrisAvatar['hat'])
+      : DEFAULT_IRIS_AVATAR.hat,
+    glasses: AVATAR_GLASSES.includes(
+      value.glasses as (typeof AVATAR_GLASSES)[number],
+    )
+      ? (value.glasses as IrisAvatar['glasses'])
+      : DEFAULT_IRIS_AVATAR.glasses,
+    headphones:
+      typeof value.headphones === 'boolean'
+        ? value.headphones
+        : DEFAULT_IRIS_AVATAR.headphones,
+    bowTie:
+      typeof value.bowTie === 'boolean'
+        ? value.bowTie
+        : DEFAULT_IRIS_AVATAR.bowTie,
+    accessoryColor,
+  }
+}
+
 type SettingsState = {
   theme: ThemeMode
   /** DeepSeek API origin. Defaults to the official API; set a proxy if one is required. */
@@ -129,6 +191,8 @@ type SettingsState = {
   sidebarWidth: number
   /** In-app shortcuts while the quick overlay is key; never registered with the OS. */
   overlayShortcuts: OverlayShortcuts
+  /** Saved avatar look; tone and emotion still come from the running app state. */
+  avatar: IrisAvatar
   setTheme: (theme: ThemeMode) => void
   setApiKeyState: (state: { present: boolean; hint: string | null }) => void
   /** Signals that the credential changed, so key-derived results must be refetched. */
@@ -148,6 +212,8 @@ type SettingsState = {
   setSearchShortcut: (searchShortcut: string) => void
   setSidebarWidth: (sidebarWidth: number) => void
   setOverlayShortcut: (action: OverlayShortcutAction, shortcut: string) => void
+  setAvatar: (patch: Partial<IrisAvatar>) => void
+  resetAvatar: () => void
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -172,6 +238,7 @@ export const useSettingsStore = create<SettingsState>()(
       searchShortcut: DEFAULT_SEARCH_SHORTCUT,
       sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
       overlayShortcuts: { ...DEFAULT_OVERLAY_SHORTCUTS },
+      avatar: { ...DEFAULT_IRIS_AVATAR },
       setTheme: (theme) => set({ theme }),
       setApiKeyState: ({ present, hint }) =>
         set({ apiKeyPresent: present, apiKeyHint: hint }),
@@ -199,10 +266,15 @@ export const useSettingsStore = create<SettingsState>()(
         set((state) => ({
           overlayShortcuts: { ...state.overlayShortcuts, [action]: shortcut },
         })),
+      setAvatar: (patch) =>
+        set((state) => ({
+          avatar: normalizeAvatar({ ...state.avatar, ...patch }),
+        })),
+      resetAvatar: () => set({ avatar: { ...DEFAULT_IRIS_AVATAR } }),
     }),
     {
       name: SETTINGS_STORAGE_KEY,
-      version: 14,
+      version: 15,
       merge: (persisted, current) => {
         const saved = (persisted ?? {}) as Partial<SettingsState> &
           LegacySettings
@@ -228,6 +300,7 @@ export const useSettingsStore = create<SettingsState>()(
           ),
           sidebarWidth: normalizeSidebarWidth(saved.sidebarWidth),
           overlayShortcuts: normalizeOverlayShortcuts(saved.overlayShortcuts),
+          avatar: normalizeAvatar(saved.avatar),
         }
       },
       migrate: (persisted) => {
@@ -279,6 +352,7 @@ export const useSettingsStore = create<SettingsState>()(
           mainSystemPrompt: normalizePrompt(rest.mainSystemPrompt),
           mainUsesIslandPrompt: rest.mainUsesIslandPrompt !== false,
           overlayShortcuts: normalizeOverlayShortcuts(rest.overlayShortcuts),
+          avatar: normalizeAvatar(rest.avatar),
         } as SettingsState
       },
     },
