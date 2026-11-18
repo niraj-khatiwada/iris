@@ -80,7 +80,7 @@ pub async fn transcribe_audio(
         .map_err(|error| format!("Could not prepare the recording: {error}"))?;
     let form = reqwest::multipart::Form::new().part("file", part);
 
-    let client = reqwest::Client::builder()
+    let client = crate::utils::http::client()
         .timeout(Duration::from_secs(180))
         .build()
         .map_err(|error| format!("Could not create the voice client: {error}"))?;

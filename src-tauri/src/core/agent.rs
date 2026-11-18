@@ -199,7 +199,7 @@ async fn run(
     let includes_document = documents > 0;
     let body = build_body(prepared.system, prepared.messages, config, read_url);
 
-    let client = reqwest::Client::builder()
+    let client = crate::utils::http::client()
         .timeout(Duration::from_secs(300))
         .build()
         .map_err(|error| format!("Could not create the AI client: {error}"))?;
@@ -520,7 +520,7 @@ async fn prepare_with(
         _ => (0, String::new()),
     };
 
-    let client = reqwest::Client::builder()
+    let client = crate::utils::http::client()
         .timeout(Duration::from_secs(120))
         .build()
         .map_err(|error| format!("Could not create the AI client: {error}"))?;

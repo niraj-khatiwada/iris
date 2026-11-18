@@ -25,7 +25,7 @@ async fn fetch_models(base_url: &str, api_key: &str) -> Result<Vec<ModelEntry>, 
     }
 
     let url = endpoints::url(base_url, endpoints::MODELS_PATH);
-    let client = reqwest::Client::builder()
+    let client = crate::utils::http::client()
         .timeout(Duration::from_secs(30))
         .build()
         .map_err(|error| format!("Could not create the models client: {error}"))?;

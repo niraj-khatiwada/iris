@@ -125,7 +125,7 @@ pub async fn speak(
         );
         return;
     }
-    let client = match reqwest::Client::builder()
+    let client = match crate::utils::http::client()
         .timeout(Duration::from_secs(300))
         .build()
     {

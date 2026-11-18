@@ -210,7 +210,7 @@ pub async fn generate_conversation_title(
         model.trim()
     };
     let excerpt = prompt.chars().take(2000).collect::<String>();
-    let client = reqwest::Client::builder()
+    let client = crate::utils::http::client()
         .timeout(Duration::from_secs(30))
         .build()
         .map_err(|error| format!("Could not create the title client: {error}"))?;

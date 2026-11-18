@@ -118,7 +118,7 @@ async fn post_document(
         .text("purpose", purpose.to_string())
         .part("file", part);
 
-    let client = reqwest::Client::builder()
+    let client = crate::utils::http::client()
         .timeout(Duration::from_secs(300))
         .build()
         .map_err(|error| format!("Could not create the upload client: {error}"))?;
