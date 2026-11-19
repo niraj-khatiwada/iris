@@ -63,6 +63,11 @@ import {
 } from '@/stores/settingsStore'
 import { useUIStore } from '@/stores/uiStore'
 import { reloadAppWindows, resetAppData } from '@/tauri/commands/app'
+import {
+  disableLaunchAtLogin,
+  enableLaunchAtLogin,
+  isLaunchAtLoginEnabled,
+} from '@/tauri/commands/autostart'
 import { setOpenShortcut as applyOpenShortcut } from '@/tauri/commands/shortcut'
 import {
   hasApiKey,
@@ -92,7 +97,20 @@ const CATEGORIES: Category[] = [
     label: 'General',
     group: 'Settings',
     icon: Settings2,
-    terms: ['appearance', 'theme', 'light', 'dark', 'system'],
+    terms: [
+      'appearance',
+      'theme',
+      'light',
+      'dark',
+      'system',
+      'startup',
+      'start',
+      'login',
+      'launch',
+      'sign in',
+      'open at login',
+      'boot',
+    ],
   },
   {
     id: 'shortcuts',
@@ -348,6 +366,69 @@ function GeneralPanel({ query }: { query: string }) {
   const setTheme = useSettingsStore((state) => state.setTheme)
   const revealResponse = useSettingsStore((state) => state.revealResponse)
   const setRevealResponse = useSettingsStore((state) => state.setRevealResponse)
+  const [launchAtLogin, setLaunchAtLogin] = useState(false)
+  // The LaunchAgent is owned by macOS, so the switch stays disabled until the real state is known.
+  const [launchAtLoginReady, setLaunchAtLoginReady] = useState(!isTauri())
+  const [launchAtLoginBusy, setLaunchAtLoginBusy] = useState(false)
+  const [launchAtLoginError, setLaunchAtLoginError] = useState<string | null>(
+    null,
+  )
+
+  useEffect(() => {
+    if (!isTauri()) {
+      return
+    }
+
+    let cancelled = false
+    void isLaunchAtLoginEnabled()
+      .then((enabled) => {
+        if (!cancelled) {
+          setLaunchAtLogin(enabled)
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setLaunchAtLoginError(
+            error instanceof Error ? error.message : String(error),
+          )
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLaunchAtLoginReady(true)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const recordLaunchAtLogin = async (enabled: boolean) => {
+    const previous = launchAtLogin
+    setLaunchAtLogin(enabled)
+    setLaunchAtLoginError(null)
+
+    if (!isTauri()) {
+      return
+    }
+
+    setLaunchAtLoginBusy(true)
+    try {
+      if (enabled) {
+        await enableLaunchAtLogin()
+      } else {
+        await disableLaunchAtLogin()
+      }
+    } catch (error) {
+      setLaunchAtLogin(previous)
+      setLaunchAtLoginError(
+        error instanceof Error ? error.message : String(error),
+      )
+    } finally {
+      setLaunchAtLoginBusy(false)
+    }
+  }
 
   return (
     <>
@@ -396,6 +477,27 @@ function GeneralPanel({ query }: { query: string }) {
             ))}
           </Tabs>
         </SettingRow>
+      </SettingsSection>
+
+      <SettingsSection title="Startup">
+        <SwitchRow
+          error={launchAtLoginError}
+          isDisabled={!launchAtLoginReady || launchAtLoginBusy}
+          isSelected={launchAtLogin}
+          title="Start at login"
+          description="Launch Iris in the menu bar automatically when you sign in to this Mac."
+          query={query}
+          search={[
+            'startup',
+            'start',
+            'login',
+            'launch',
+            'sign in',
+            'open at login',
+            'boot',
+          ]}
+          onChange={(enabled) => void recordLaunchAtLogin(enabled)}
+        />
       </SettingsSection>
 
       <SettingsSection title="Iris Island">
@@ -1459,14 +1561,18 @@ function SettingField({
 function SwitchRow({
   title,
   description,
+  error,
   isSelected,
+  isDisabled = false,
   onChange,
   query,
   search,
 }: {
   title: string
   description: string
+  error?: string | null
   isSelected: boolean
+  isDisabled?: boolean
   onChange: (isSelected: boolean) => void
   query: string
   search: string[]
@@ -1476,13 +1582,23 @@ function SwitchRow({
   }
 
   return (
-    <Switch className="w-full" isSelected={isSelected} onChange={onChange}>
+    <Switch
+      className="w-full"
+      isDisabled={isDisabled}
+      isSelected={isSelected}
+      onChange={onChange}
+    >
       <Switch.Content className="flex w-full items-center justify-between gap-8 py-4">
         <span className="min-w-0">
           <Label className="text-sm font-medium">{title}</Label>
           <Description className="mt-0.5 block text-xs leading-5 text-muted">
             {description}
           </Description>
+          {error ? (
+            <span className="mt-1 block text-xs leading-5 text-danger">
+              {error}
+            </span>
+          ) : null}
         </span>
         <Switch.Control className="shrink-0">
           <Switch.Thumb />

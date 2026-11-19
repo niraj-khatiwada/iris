@@ -4,6 +4,7 @@
   "description": "Permissions for the Iris windows",
   "windows": ["main", "overlay", "canvas", "capture", "preview"],
   "permissions": [
+    "autostart:default",
     "core:default",
     "core:window:allow-start-dragging",
     "core:window:allow-toggle-maximize",

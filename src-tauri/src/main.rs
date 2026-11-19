@@ -39,6 +39,17 @@ fn main() {
                 )
                 .build(),
         )
+        .plugin(
+            // The LaunchAgent is the macOS default. Keep the development registration separate
+            // so testing Start at login in a dev build never repoints the installed app's entry.
+            tauri_plugin_autostart::Builder::new()
+                .app_name(if cfg!(debug_assertions) {
+                    "Iris Dev"
+                } else {
+                    "Iris"
+                })
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())

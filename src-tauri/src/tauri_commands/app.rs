@@ -1,4 +1,5 @@
 use tauri::{AppHandle, Manager, State};
+use tauri_plugin_autostart::ManagerExt as AutostartExt;
 
 use crate::core::storage::Storage;
 
@@ -60,6 +61,11 @@ pub fn reload_app_windows(app: AppHandle) {
 #[tauri::command]
 pub fn reset_app_data(app: AppHandle, storage: State<'_, Storage>) -> Result<(), String> {
     crate::sys::speech::stop(&app);
+
+    // Start-at-login is registered with macOS, outside the database reset, so turn it off too.
+    if let Err(error) = app.autolaunch().disable() {
+        log::warn!("Could not disable start at login during reset: {error}");
+    }
 
     if let Some(cache) = app.try_state::<crate::core::agent::SummaryCache>() {
         cache.clear();
