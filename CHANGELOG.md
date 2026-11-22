@@ -9,8 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Capture notices moved.** The “Drag to capture · Esc to cancel” hint and capture
-  errors now sit in the bottom-right corner, clear of the MacBook notch.
+- **Capture notices moved.** The “Drag to capture · Esc to cancel” hint sits at the
+  top center, 48px down so the MacBook notch and menu bar cannot cover it. Capture
+  errors stay in the bottom-right corner.
 - **Capture tool shortcuts.** Inside the capture window, **⌘A** selects the
   arrow, **⌘R** the rectangle, and **⌘D** or **⌘P** the pen. They are not listed in
   Settings → Shortcuts and do not affect any other window.

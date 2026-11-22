@@ -689,7 +689,8 @@ function Capture() {
             </div>
           ) : null}
 
-          <div className="pointer-events-none absolute right-5 bottom-5 flex justify-end">
+          {/* 48px clears the menu bar and the MacBook notch. */}
+          <div className="pointer-events-none absolute inset-x-0 top-12 flex justify-center">
             <p className="rounded-full border border-white/10 bg-black/55 px-2.5 py-1 text-[11px] text-white/80 backdrop-blur-md">
               Drag to capture · Esc to cancel
             </p>
