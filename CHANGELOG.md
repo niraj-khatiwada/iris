@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Model metadata per assistant message.** Migration `006-message-metadata` adds a
+  JSON `metadata` column. Assistant replies store `{"ai_model":"..."}` so model
+  performance can be compared later; user messages and older replies have no
+  model metadata.
 - **Menu bar direct toggle.** Left-click the Iris icon to show the overlay if
   hidden, or hide it if visible. Right-click opens **Ask Iris**, **History**, and
   **Quit Iris**.

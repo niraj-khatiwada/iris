@@ -40,6 +40,9 @@ pub struct StoredMessage {
     pub status: String,
     #[serde(default)]
     pub error: Option<String>,
+    /// JSON metadata for future analysis; assistant replies store the model used.
+    #[serde(default)]
+    pub metadata: Option<serde_json::Value>,
     #[serde(default)]
     pub attachments: Vec<StoredAttachment>,
 }
@@ -439,7 +442,8 @@ impl Storage {
             let (created_at, rowid) = parse_cursor(cursor)?;
             let mut statement = connection
                 .prepare(
-                    "SELECT rowid, id, role, content, created_at, status, error, attachments
+                    "SELECT rowid, id, role, content, created_at, status, error, attachments,
+                            metadata
                      FROM messages
                      WHERE conversation_id = ?1
                        AND (created_at < ?2 OR (created_at = ?2 AND rowid < ?3))
@@ -458,7 +462,8 @@ impl Storage {
         } else {
             let mut statement = connection
                 .prepare(
-                    "SELECT rowid, id, role, content, created_at, status, error, attachments
+                    "SELECT rowid, id, role, content, created_at, status, error, attachments,
+                            metadata
                      FROM messages
                      WHERE conversation_id = ?1
                      ORDER BY created_at DESC, rowid DESC
@@ -613,13 +618,15 @@ impl Storage {
         message: &StoredMessage,
     ) -> Result<(), String> {
         let attachments = attachments_json(&message.attachments)?;
+        let metadata = metadata_json(&message.metadata)?;
         self.connection
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .execute(
                 "INSERT INTO messages
-                    (id, conversation_id, role, content, created_at, status, error, attachments)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                    (id, conversation_id, role, content, created_at, status, error, metadata,
+                     attachments)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                  ON CONFLICT(id) DO UPDATE SET
                     conversation_id = excluded.conversation_id,
                     role = excluded.role,
@@ -627,6 +634,7 @@ impl Storage {
                     created_at = excluded.created_at,
                     status = excluded.status,
                     error = excluded.error,
+                    metadata = excluded.metadata,
                     attachments = excluded.attachments",
                 params![
                     message.id,
@@ -636,6 +644,7 @@ impl Storage {
                     message.created_at,
                     message.status,
                     message.error,
+                    metadata,
                     attachments
                 ],
             )
@@ -1059,6 +1068,7 @@ fn row_from_page(row: &rusqlite::Row<'_>) -> rusqlite::Result<(StoredMessage, i6
             created_at: row.get(4)?,
             status: row.get(5)?,
             error: row.get(6)?,
+            metadata: metadata_from(row.get(8)?),
             attachments: attachments_from(row.get(7)?),
         },
         rowid,
@@ -1079,6 +1089,20 @@ fn attachments_from(value: Option<String>) -> Vec<StoredAttachment> {
     value
         .and_then(|json| serde_json::from_str(&json).ok())
         .unwrap_or_default()
+}
+
+fn metadata_json(metadata: &Option<serde_json::Value>) -> Result<Option<String>, String> {
+    metadata
+        .as_ref()
+        .map(|value| {
+            serde_json::to_string(value)
+                .map_err(|error| format!("Could not encode message metadata: {error}"))
+        })
+        .transpose()
+}
+
+fn metadata_from(value: Option<String>) -> Option<serde_json::Value> {
+    value.and_then(|json| serde_json::from_str(&json).ok())
 }
 
 fn save_in_transaction(
@@ -1127,8 +1151,9 @@ fn save_in_transaction(
         transaction
             .execute(
                 "INSERT INTO messages
-                    (id, conversation_id, role, content, created_at, status, error, attachments)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    (id, conversation_id, role, content, created_at, status, error, metadata,
+                     attachments)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     message.id,
                     conversation.id,
@@ -1137,6 +1162,7 @@ fn save_in_transaction(
                     message.created_at,
                     message.status,
                     message.error,
+                    metadata_json(&message.metadata)?,
                     attachments_json(&message.attachments)?
                 ],
             )
@@ -1152,7 +1178,7 @@ fn messages_for(
 ) -> Result<Vec<StoredMessage>, String> {
     let mut statement = connection
         .prepare(
-            "SELECT id, role, content, created_at, status, error, attachments
+            "SELECT id, role, content, created_at, status, error, attachments, metadata
              FROM messages
              WHERE conversation_id = ?1
              ORDER BY created_at ASC, rowid ASC",
@@ -1169,6 +1195,7 @@ fn messages_for(
                 status: row.get(4)?,
                 error: row.get(5)?,
                 attachments: attachments_from(row.get(6)?),
+                metadata: metadata_from(row.get(7)?),
             })
         })
         .map_err(|error| error.to_string())?
@@ -1228,6 +1255,7 @@ mod tests {
             created_at,
             status: "complete".to_string(),
             error: None,
+            metadata: None,
             attachments: Vec::new(),
         }
     }
@@ -1299,6 +1327,37 @@ mod tests {
         assert_eq!(
             storage.load_all_messages("c1").expect("after delete").len(),
             4
+        );
+    }
+
+    #[test]
+    fn message_metadata_round_trips() {
+        let storage = storage();
+        let mut reply = message("m1", 1, "A reply");
+        reply.role = "assistant".to_string();
+        reply.metadata = Some(serde_json::json!({ "ai_model": "deepseek-flash" }));
+        let conversation = super::StoredConversation {
+            id: "c1".to_string(),
+            title: "Talk".to_string(),
+            created_at: 0,
+            updated_at: 1,
+            archived_at: None,
+            messages: vec![reply],
+        };
+        storage.save(&conversation).expect("save");
+
+        let all = storage.load_all_messages("c1").expect("all messages");
+        assert_eq!(
+            all[0].metadata,
+            Some(serde_json::json!({ "ai_model": "deepseek-flash" }))
+        );
+
+        let page = storage
+            .load_message_page("c1", None, 10)
+            .expect("message page");
+        assert_eq!(
+            page.messages[0].metadata,
+            Some(serde_json::json!({ "ai_model": "deepseek-flash" }))
         );
     }
 

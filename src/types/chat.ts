@@ -43,7 +43,15 @@ export type ChatMessage = {
   createdAt: number
   status: MessageStatus
   error?: string
+  /** JSON metadata such as the model that produced an assistant reply. */
+  metadata?: MessageMetadata
   attachments?: ChatAttachment[]
+}
+
+export type MessageMetadata = {
+  /** The DeepSeek model id used for this assistant reply. */
+  ai_model?: string
+  [key: string]: unknown
 }
 
 export type ConversationSummary = {

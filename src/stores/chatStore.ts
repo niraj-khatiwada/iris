@@ -282,6 +282,18 @@ async function runAssistantReply({
   await useSettingsStore.persist.rehydrate()
   const settings = useSettingsStore.getState()
 
+  set((current) => ({
+    conversations: withMessage(
+      current.conversations,
+      conversationId,
+      assistantMessageId,
+      (message) => ({
+        ...message,
+        metadata: { ...message.metadata, ai_model: settings.model },
+      }),
+    ),
+  }))
+
   const systemPrompt =
     isIslandWindow() || settings.mainUsesIslandPrompt
       ? settings.islandSystemPrompt

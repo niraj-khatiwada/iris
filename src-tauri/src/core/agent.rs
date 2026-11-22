@@ -1014,6 +1014,7 @@ mod tests {
             created_at: 1,
             status: "complete".to_string(),
             error: None,
+            metadata: None,
             attachments: vec![
                 StoredAttachment {
                     id: "doc".to_string(),

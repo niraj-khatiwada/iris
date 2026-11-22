@@ -324,7 +324,8 @@ feature-parity plan, not just a custom URL.
 Chat history is stored in Rust with `rusqlite`, not by reaching into SQL from the webview:
 
 - `conversations` — id, title, created_at, updated_at, archived_at
-- `messages` — id, conversation_id, role, content, created_at, status, error, attachments
+- `messages` — id, conversation_id, role, content, created_at, status, error, attachments,
+  and JSON `metadata`; assistant replies store `{"ai_model":"..."}` for model comparison later
 - `message_summaries` — message_id, conversation_id, summary, created_at; the cached spoken
   version used by automatic read-aloud
 - `selection_metadata` — source app, bundle id, pid, action, and selection stats for text
