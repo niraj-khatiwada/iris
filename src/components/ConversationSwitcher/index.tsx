@@ -131,7 +131,7 @@ function ConversationSwitcher({
       <div
         ref={listRef}
         aria-label="Conversations"
-        className="max-h-[220px] overflow-y-auto px-1 pb-1"
+        className="max-h-[220px] overflow-y-auto px-2 pb-1"
         role="listbox"
       >
         {rows.length === 0 ? (

@@ -601,6 +601,11 @@ input:focus-visible {
   --tw-ring-offset-shadow: 0 0 #0000 !important;
 }
 
+/* Match the conversation rows below: 8px group inset + 8px icon inset. */
+.conversation-search .search-field__search-icon {
+  margin-inline-start: 8px;
+}
+
 /* Native macOS controls keep the arrow cursor; only real links show the pointer. Tailwind
    preflight and HeroUI set a pointer on buttons, so override both the base layer and any
    `cursor-pointer` utility without touching explicit resize/text cursors. */
