@@ -34,7 +34,7 @@ function ThinkingEffort() {
     <Tooltip delay={500}>
       <Button
         aria-label={`Thinking effort: ${current.label}. Click to cycle Low, High, Max.`}
-        className="h-6 gap-1 rounded-full px-1.5 text-[10px] text-foreground/55"
+        className="h-6 min-w-0 shrink-0 gap-1 rounded-full px-1 text-[10px] text-foreground/55"
         size="sm"
         variant="ghost"
         onPress={cycle}
@@ -42,7 +42,7 @@ function ThinkingEffort() {
         <Brain className="size-3 text-primary/80" />
         <span
           aria-live="polite"
-          className="relative block h-4 w-8 overflow-hidden text-center"
+          className="relative block h-4 w-7 overflow-hidden text-center"
         >
           <AnimatePresence initial={false} mode="popLayout">
             <motion.span

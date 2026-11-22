@@ -1736,7 +1736,7 @@ function Overlay() {
                       onRetry={files.retry}
                     />
 
-                    <div className="flex items-end gap-2">
+                    <div className="flex items-end gap-1.5">
                       <div className="pb-1.5">
                         <ThinkingEffort />
                       </div>
@@ -1745,7 +1745,7 @@ function Overlay() {
                         {...NO_WRITING_ASSIST}
                         ref={inputRef}
                         aria-label="Ask Iris"
-                        className="max-h-[120px] min-h-10 w-full resize-none border-0 bg-transparent px-1 py-2 text-[15px] leading-6 text-foreground shadow-none placeholder:text-foreground/35 focus-visible:ring-0"
+                        className="max-h-[120px] min-h-10 w-full resize-none border-0 bg-transparent pr-1 pl-0.5 py-2 text-[15px] leading-6 text-foreground shadow-none placeholder:text-foreground/35 focus-visible:ring-0"
                         placeholder={
                           customSelection
                             ? 'Tell Iris what to do with the selection…'

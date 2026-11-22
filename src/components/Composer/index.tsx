@@ -167,7 +167,7 @@ function Composer() {
           onRetry={files.retry}
         />
 
-        <div className="flex items-end gap-2 px-1.5">
+        <div className="flex items-end gap-1.5 px-1.5">
           <div className="pb-2">
             <ThinkingEffort />
           </div>
@@ -176,7 +176,7 @@ function Composer() {
             {...NO_WRITING_ASSIST}
             ref={textareaRef}
             aria-label="Message Iris"
-            className="max-h-44 min-h-11 w-full resize-none border-0 bg-transparent px-1 py-2.5 text-[15px] leading-6 shadow-none focus-visible:ring-0"
+            className="max-h-44 min-h-11 w-full resize-none border-0 bg-transparent pr-1 pl-0.5 py-2.5 text-[15px] leading-6 shadow-none focus-visible:ring-0"
             placeholder={
               slashPrompt
                 ? files.readyAttachments.length > 0
