@@ -198,7 +198,9 @@ export function startAgentRun(options: AgentRunOptions): string {
     timer = setTimeout(tick, 20)
   }
 
-  timer = setTimeout(tick, 320)
+  // TEMP (thinking UI sample): hold the preview in the "Thinking" state so the
+  // overlay strip can be tweaked. Revert to 320 when done.
+  timer = setTimeout(tick, 600_000)
   activeRun = {
     cancel: () => {
       if (timer) {

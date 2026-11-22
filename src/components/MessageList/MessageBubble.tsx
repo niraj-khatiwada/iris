@@ -17,6 +17,7 @@ import AttachmentImage from '@/components/MessageList/AttachmentImage'
 import MessageSummaryMenu from '@/components/MessageList/MessageSummaryMenu'
 import SourcesPill from '@/components/MessageList/SourcesPill'
 import ReadAloudButton from '@/components/ReadAloudButton'
+import ShimmerText from '@/components/ShimmerText'
 import { NO_WRITING_ASSIST } from '@/constants'
 import { useChatStore } from '@/stores/chatStore'
 import type { ChatMessage } from '@/types/chat'
@@ -186,7 +187,11 @@ const MessageBubble = memo(function MessageBubble({
                   )}
                 />
                 <span className="text-[11px] font-medium text-muted">
-                  Thinking
+                  {isThinkingLive ? (
+                    <ShimmerText className="font-medium">Thinking</ShimmerText>
+                  ) : (
+                    'Thought'
+                  )}
                 </span>
                 {effortLabel ? (
                   <span className="text-[10px] text-muted/60">

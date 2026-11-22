@@ -322,6 +322,44 @@ html[data-window="preview"] body {
   }
 }
 
+/* A left-to-right light sweep for open-ended labels such as "Thinking". */
+.shimmer-text {
+  --shimmer-base: color-mix(in oklch, var(--foreground) 48%, transparent);
+  --shimmer-highlight: var(--foreground);
+  background-image: linear-gradient(
+    90deg,
+    var(--shimmer-base) 0%,
+    var(--shimmer-base) 35%,
+    var(--shimmer-highlight) 50%,
+    var(--shimmer-base) 65%,
+    var(--shimmer-base) 100%
+  );
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer-text-sweep 1.8s linear infinite;
+}
+
+@keyframes shimmer-text-sweep {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shimmer-text {
+    animation: none;
+    background-image: none;
+    color: inherit;
+    -webkit-text-fill-color: currentColor;
+  }
+}
+
 /* -------------------------------------------------------------------------------------------------
  * Liquid glass surfaces.
  * ----------------------------------------------------------------------------------------------- */
