@@ -44,6 +44,7 @@ import { useAttachments } from '@/hooks/useAttachments'
 import {
   flushChatStorage,
   selectHistoryConversation,
+  sharedActiveConversationId,
   useChatStorage,
 } from '@/hooks/useChatStorage'
 import { useConversationHistory } from '@/hooks/useConversationHistory'
@@ -73,6 +74,7 @@ import {
   subscribeToSelectionError,
   subscribeToSelectionOpen,
 } from '@/tauri/commands/selection'
+import { deleteEmptyConversations } from '@/tauri/commands/storage'
 import { stopSpeaking } from '@/tauri/commands/voice'
 import type { SelectionOpenPayload, SelectionView } from '@/types/selection'
 import type { QuickPrompt, SettingsCategory } from '@/types/settings'
@@ -115,6 +117,45 @@ function isTypingTarget(target: EventTarget | null) {
     target.tagName === 'TEXTAREA' ||
     target.tagName === 'SELECT'
   )
+}
+
+/**
+ * Removes empty quick/history conversations when New chat starts. The backend confirms each
+ * candidate has no message rows; keepIds protect the new chat and any conversation with messages
+ * still in memory, including the History window's active chat with a pending write.
+ */
+async function cleanUpEmptyConversations() {
+  try {
+    await flushChatStorage()
+  } catch {
+    // Continue; the in-memory keep ids still protect visible messages.
+  }
+
+  const state = useChatStore.getState()
+  const keepIds = new Set<string>()
+  if (state.quickConversationId) {
+    keepIds.add(state.quickConversationId)
+  }
+  const historyActiveId = sharedActiveConversationId()
+  if (historyActiveId) {
+    keepIds.add(historyActiveId)
+  }
+  for (const conversation of state.conversations) {
+    if (conversation.messages.length > 0) {
+      keepIds.add(conversation.id)
+    }
+  }
+
+  try {
+    const deleted = await deleteEmptyConversations([...keepIds])
+    // The backend also broadcasts the ids so the History window drops them; this call keeps the
+    // overlay immediate even if its event arrives a moment later.
+    if (deleted.length > 0) {
+      useChatStore.getState().removeConversations(deleted)
+    }
+  } catch {
+    // Cleanup is best effort; New chat must still succeed.
+  }
 }
 
 function Overlay() {
@@ -343,6 +384,7 @@ function Overlay() {
     setCustomSelection(null)
     setSelectionReplaceError(null)
     requestAnimationFrame(() => inputRef.current?.focus())
+    void cleanUpEmptyConversations()
   }, [clearAttachments, inputRef, resetQuickConversation, revealResponse])
 
   // Drafts belong to one conversation. When Previous conversation or a fresh quick chat

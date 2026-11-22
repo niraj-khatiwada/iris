@@ -81,6 +81,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **New chat cleans up empty conversations.** Starting a new quick chat now
+  removes unarchived conversations that contain no messages, after flushing
+  pending writes. It keeps the new chat, the History window's active chat,
+  archived chats, and every conversation with real messages. Both windows drop
+  the removed rows immediately, so the storage mirror cannot save them again.
 - Selection prompts, **Custom**, and `/` quick prompts now preserve a screenshot
   already attached to the draft and send it with the prompt. Iris keeps the current
   quick chat when an attachment is present so the image stays in the right folder.

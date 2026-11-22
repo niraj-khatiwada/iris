@@ -1174,6 +1174,49 @@ impl Storage {
         transaction.commit().map_err(|error| error.to_string())
     }
 
+    /// Unarchived conversations that truly contain no messages, excluding the ids the caller
+    /// still needs. This is the only safe basis for cleanup: an unloaded conversation can have
+    /// older messages that are not in the webview's memory.
+    pub fn empty_conversation_ids(&self, keep_ids: &[String]) -> Result<Vec<String>, String> {
+        let connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let candidates = {
+            let mut statement = connection
+                .prepare(
+                    "SELECT id FROM conversations
+                     WHERE archived_at IS NULL
+                     ORDER BY updated_at DESC",
+                )
+                .map_err(|error| error.to_string())?;
+            let collected = statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .map_err(|error| error.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| error.to_string())?;
+            collected
+        };
+        let mut has_messages = connection
+            .prepare("SELECT EXISTS(SELECT 1 FROM messages WHERE conversation_id = ?1)")
+            .map_err(|error| error.to_string())?;
+
+        let mut empty = Vec::new();
+        for id in candidates {
+            if keep_ids.iter().any(|keep| keep == &id) {
+                continue;
+            }
+            let contains_messages: bool = has_messages
+                .query_row(params![id], |row| row.get(0))
+                .map_err(|error| error.to_string())?;
+            if !contains_messages {
+                empty.push(id);
+            }
+        }
+
+        Ok(empty)
+    }
+
     pub fn delete(&self, id: &str) -> Result<(), String> {
         let connection = self
             .connection
@@ -2105,6 +2148,35 @@ mod tests {
             .list_memories()
             .expect("list after reset")
             .is_empty());
+    }
+
+    #[test]
+    fn empty_conversation_ids_skip_messages_archives_and_kept_ids() {
+        let storage = storage();
+        let save = |id: &str, updated_at: i64, archived: bool, messages| {
+            storage
+                .save(&super::StoredConversation {
+                    id: id.to_string(),
+                    title: id.to_string(),
+                    created_at: 0,
+                    updated_at,
+                    archived_at: archived.then_some(updated_at),
+                    messages,
+                })
+                .expect("save conversation");
+        };
+
+        save("empty-old", 1, false, vec![]);
+        save("archived-empty", 2, true, vec![]);
+        save("non-empty", 3, false, vec![message("m1", 1, "hello")]);
+        save("keep-empty", 4, false, vec![]);
+        save("empty-new", 5, false, vec![]);
+
+        let ids = storage
+            .empty_conversation_ids(&["keep-empty".to_string()])
+            .expect("empty ids");
+
+        assert_eq!(ids, vec!["empty-new", "empty-old"]);
     }
 
     #[test]

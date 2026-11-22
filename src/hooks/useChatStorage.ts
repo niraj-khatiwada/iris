@@ -86,6 +86,11 @@ function readSelection(): StoredSelection | null {
   }
 }
 
+/** The History window's selected conversation, shared through localStorage. */
+export function sharedActiveConversationId(): string | null {
+  return readSelection()?.activeConversationId ?? null
+}
+
 /**
  * Points the history window at one conversation. The shared selection is written first so the
  * target survives the focus hydrate that runs when the window comes forward; the
@@ -201,6 +206,7 @@ export function useChatStorage() {
     let unlistenFocus: (() => void) | undefined
     let unlistenClear: UnlistenFn | undefined
     let unlistenHistory: UnlistenFn | undefined
+    let unlistenDeleted: UnlistenFn | undefined
     let unsubscribe: (() => void) | undefined
     let previousMeta = new Map<string, string>()
     let previousMessages = new Map<string, MessageEntry>()
@@ -595,6 +601,43 @@ export function useChatStorage() {
       }
     })
 
+    void listen<{ ids?: string[] }>('conversations:deleted', (event) => {
+      if (disposed) {
+        return
+      }
+
+      const ids = (event.payload?.ids ?? []).filter(
+        (id): id is string => typeof id === 'string' && id.length > 0,
+      )
+      if (ids.length === 0) {
+        return
+      }
+
+      for (const id of ids) {
+        previousMeta.delete(id)
+        pendingMeta.delete(id)
+        pendingDeletedConversations.delete(id)
+        for (const [messageId, entry] of previousMessages) {
+          if (entry.conversationId === id) {
+            previousMessages.delete(messageId)
+          }
+        }
+        for (const [messageId, entry] of pendingMessages) {
+          if (entry.conversationId === id) {
+            pendingMessages.delete(messageId)
+          }
+        }
+      }
+
+      useChatStore.getState().removeConversations(ids)
+    }).then((off) => {
+      if (disposed) {
+        off()
+      } else {
+        unlistenDeleted = off
+      }
+    })
+
     void getCurrentWindow()
       .onFocusChanged(({ payload: focused }) => {
         if (focused) {
@@ -624,6 +667,7 @@ export function useChatStorage() {
       unlistenFocus?.()
       unlistenClear?.()
       unlistenHistory?.()
+      unlistenDeleted?.()
     }
   }, [])
 }

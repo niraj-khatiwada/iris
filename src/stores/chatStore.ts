@@ -124,6 +124,8 @@ type ChatState = {
   restoreConversation: (id: string) => void
   deleteArchivedConversation: (id: string) => void
   renameConversation: (id: string, title: string) => void
+  /** Drops conversations deleted by the empty-chat cleanup in any window. */
+  removeConversations: (ids: string[]) => void
   clearAll: () => void
   sendMessage: (
     content: string,
@@ -962,6 +964,49 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           : conversation,
       ),
     })),
+
+  removeConversations: (ids) =>
+    set((state) => {
+      if (ids.length === 0) {
+        return state
+      }
+
+      const removed = new Set(ids)
+      const conversations = state.conversations.filter(
+        (conversation) => !removed.has(conversation.id),
+      )
+      const activeConversationId =
+        state.activeConversationId && removed.has(state.activeConversationId)
+          ? (conversations.find((conversation) => !conversation.archivedAt)
+              ?.id ?? null)
+          : state.activeConversationId
+      const quickConversationId =
+        state.quickConversationId && removed.has(state.quickConversationId)
+          ? null
+          : state.quickConversationId
+      const lastQuickConversationId =
+        state.lastQuickConversationId &&
+        removed.has(state.lastQuickConversationId)
+          ? null
+          : state.lastQuickConversationId
+      const streamingConversationId =
+        state.streamingConversationId &&
+        removed.has(state.streamingConversationId)
+          ? null
+          : state.streamingConversationId
+
+      return {
+        conversations,
+        activeConversationId,
+        quickConversationId,
+        lastQuickConversationId,
+        streamingRequestId:
+          streamingConversationId === null ? null : state.streamingRequestId,
+        streamingConversationId,
+        streamingMessageId:
+          streamingConversationId === null ? null : state.streamingMessageId,
+      }
+    }),
 
   clearAll: () => {
     cancelActiveRun()

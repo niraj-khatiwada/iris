@@ -69,6 +69,11 @@ export function deleteConversation(id: string) {
   return invoke<void>('delete_conversation', { id })
 }
 
+/** Deletes unarchived conversations with no messages, keeping the given ids. */
+export function deleteEmptyConversations(keepIds: string[]) {
+  return invoke<string[]>('delete_empty_conversations', { keepIds })
+}
+
 export function clearConversations() {
   return invoke<void>('clear_conversations')
 }

@@ -5,6 +5,7 @@ use crate::core::storage::{
     SearchResults, Storage, StoredAttachment, StoredConversation, StoredConversationSummary,
     StoredMessage, StoredMessagePage, StoredSpokenSummary,
 };
+use crate::utils::event;
 
 #[tauri::command]
 pub fn load_conversations(
@@ -128,6 +129,50 @@ pub fn delete_conversation(
     // missing files.
     attachments::delete_conversation(&app, &id)?;
     storage.delete(&id)
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConversationsDeletedPayload {
+    ids: Vec<String>,
+}
+
+/// Removes unarchived conversations that contain no messages, excluding the ids the caller is
+/// still using. The check runs against SQLite, so an unloaded conversation with older messages is
+/// never touched.
+#[tauri::command]
+pub fn delete_empty_conversations(
+    app: AppHandle,
+    storage: State<'_, Storage>,
+    keep_ids: Vec<String>,
+) -> Result<Vec<String>, String> {
+    let ids = storage.empty_conversation_ids(&keep_ids)?;
+    let mut deleted = Vec::new();
+
+    for id in ids {
+        // Remove the folder first, matching delete_conversation: a failed cleanup leaves the row
+        // intact instead of pointing at missing files.
+        if let Err(error) = attachments::delete_conversation(&app, &id) {
+            log::warn!("Could not delete empty conversation attachments for {id}: {error}");
+            continue;
+        }
+        if let Err(error) = storage.delete(&id) {
+            log::warn!("Could not delete empty conversation {id}: {error}");
+            continue;
+        }
+        deleted.push(id);
+    }
+
+    if !deleted.is_empty() {
+        let _ = app.emit(
+            event::CONVERSATIONS_DELETED,
+            ConversationsDeletedPayload {
+                ids: deleted.clone(),
+            },
+        );
+    }
+
+    Ok(deleted)
 }
 
 #[tauri::command]
