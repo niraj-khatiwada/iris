@@ -78,16 +78,7 @@ function ConversationSwitcher({
 
   return (
     <div className="mb-2 overflow-hidden rounded-2xl border border-border/50 bg-surface/65 shadow-lg backdrop-blur-xl">
-      <div className="flex items-center justify-between px-2.5 pt-2 pb-1">
-        <span className="text-[10px] font-medium tracking-[0.12em] text-muted uppercase">
-          Recent chats
-        </span>
-        <span className="text-[10px] text-muted/70">
-          {rows.length} {rows.length === 1 ? 'chat' : 'chats'}
-        </span>
-      </div>
-
-      <div className="px-2 pb-1.5">
+      <div className="px-2 pt-2 pb-1.5">
         <SearchField
           aria-label="Search conversations"
           className="conversation-search w-full"
