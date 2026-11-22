@@ -591,6 +591,16 @@ input:focus-visible {
   --tw-ring-offset-shadow: 0 0 #0000 !important;
 }
 
+/* HeroUI draws its accent ring on the search-field group rather than the input. The switcher
+   follows the same quiet-input rule as the composers: only the caret marks focus. */
+.conversation-search .search-field__group:focus-within,
+.conversation-search .search-field__group[data-focus-within="true"] {
+  outline: none !important;
+  box-shadow: none !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+  --tw-ring-offset-shadow: 0 0 #0000 !important;
+}
+
 /* Native macOS controls keep the arrow cursor; only real links show the pointer. Tailwind
    preflight and HeroUI set a pointer on buttons, so override both the base layer and any
    `cursor-pointer` utility without touching explicit resize/text cursors. */

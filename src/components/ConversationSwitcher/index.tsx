@@ -90,7 +90,7 @@ function ConversationSwitcher({
       <div className="px-2 pb-1.5">
         <SearchField
           aria-label="Search conversations"
-          className="w-full"
+          className="conversation-search w-full"
           name="conversation-search"
           value={query}
           variant="secondary"
