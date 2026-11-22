@@ -689,7 +689,7 @@ function Capture() {
             </div>
           ) : null}
 
-          <div className="pointer-events-none absolute inset-x-0 top-5 flex justify-center">
+          <div className="pointer-events-none absolute right-5 bottom-5 flex justify-end">
             <p className="rounded-full border border-white/10 bg-black/55 px-2.5 py-1 text-[11px] text-white/80 backdrop-blur-md">
               Drag to capture · Esc to cancel
             </p>
@@ -855,7 +855,7 @@ function Capture() {
       ) : null}
 
       {error && !capturing ? (
-        <div className="pointer-events-none absolute inset-x-0 top-5 flex justify-center">
+        <div className="pointer-events-none absolute right-5 bottom-5 flex justify-end">
           <p className="max-w-[80vw] truncate rounded-full border border-red-300/20 bg-red-950/70 px-2.5 py-1 text-[11px] text-red-200 backdrop-blur-md">
             {error}
           </p>
