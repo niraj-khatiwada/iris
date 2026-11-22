@@ -52,8 +52,9 @@ memories unless it needs correcting.
 Never store sensitive information, including passwords, API keys, tokens, financial or bank \
 details, payment amounts, government IDs, health or medical information, immigration or criminal \
 history, religion, politics, ethnicity, gender identity, sexual orientation, or exact home \
-addresses. Never store clipboard selections, screenshots, or attachments; those \
-are excluded before you see the conversation.
+addresses. Never store screenshots or attachments; those are excluded before you see the conversation. \
+Pasted and selected text is allowed, but keep only durable facts about the user; do not store \
+article content, third-party details, or one-off quotes.
 
 Return JSON only, with this shape:
 {\"memories\":[{\"action\":\"add\",\"content\":\"...\"},{\"action\":\"update\",\"id\":\"...\",\"content\":\"...\"}]}
@@ -66,8 +67,8 @@ Rules:
 - Return {\"memories\":[]} when nothing should change.
 - At most three memories per response.";
 
-/// One eligible turn shown to the memory writer. Selection prompts and attachment content never
-/// reach this struct; pasted text is allowed.
+/// One eligible turn shown to the memory writer. Attachment content never reaches this struct;
+/// pasted and selected text are allowed.
 #[derive(Clone, Debug)]
 struct MemoryTurn {
     role: String,
@@ -159,8 +160,8 @@ impl MemoryState {
 
 /// Schedules one background memory extraction after the reply has been idle.
 ///
-/// A selection prompt or an attached file excludes the run entirely. Pasted text is allowed;
-/// the sensitive-data filter still applies to whatever the writer proposes.
+/// An attached file excludes the run entirely. Pasted and selected text are allowed; the
+/// sensitive-data filter still applies to whatever the writer proposes.
 pub fn schedule(
     app: AppHandle,
     config: AgentConfig,
@@ -363,8 +364,8 @@ fn extraction_prompt(existing: &[StoredMemory], turns: &[MemoryTurn]) -> String 
     )
 }
 
-/// Keeps user turns and the assistant replies that follow them. Selection prompts and messages
-/// with attachments are skipped; pasted text is included.
+/// Keeps user turns and the assistant replies that follow them. Messages with attachments are
+/// skipped; pasted and selected text is included.
 fn transcript(messages: &[ChatMessageInput], assistant_text: &str) -> Vec<MemoryTurn> {
     let mut turns = Vec::new();
     let mut include_assistant = false;
@@ -425,9 +426,7 @@ fn transcript(messages: &[ChatMessageInput], assistant_text: &str) -> Vec<Memory
 }
 
 fn eligible_user(message: &ChatMessageInput) -> bool {
-    message.attachments.is_empty()
-        && !message.content.contains("<selected_text>")
-        && !message.content.trim().is_empty()
+    message.attachments.is_empty() && !message.content.trim().is_empty()
 }
 
 fn parse_candidates(raw: &str) -> Result<Vec<MemoryCandidate>, String> {
@@ -834,7 +833,7 @@ mod tests {
     }
 
     #[test]
-    fn pasted_text_is_included_but_selection_and_attachment_turns_are_skipped() {
+    fn pasted_and_selected_text_are_included_but_attachments_are_skipped() {
         let mut pasted = message("user", "I prefer dark mode.");
         pasted.pasted = true;
         let selected = message("user", "Explain <selected_text>secret</selected_text>");
@@ -861,10 +860,14 @@ mod tests {
             "Understood.",
         );
 
-        assert_eq!(turns.len(), 3);
+        assert_eq!(turns.len(), 4);
         assert_eq!(turns[0].content, "I prefer dark mode.");
-        assert_eq!(turns[1].content, "I prefer concise answers.");
-        assert_eq!(turns[2].content, "Understood.");
+        assert_eq!(
+            turns[1].content,
+            "Explain <selected_text>secret</selected_text>"
+        );
+        assert_eq!(turns[2].content, "I prefer concise answers.");
+        assert_eq!(turns[3].content, "Understood.");
     }
 
     #[test]
