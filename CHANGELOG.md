@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Sidebar header actions.** The theme and Settings buttons moved from the sidebar
+  footer to compact controls in the top-right header, beside the traffic lights. They
+  are hidden when the sidebar is collapsed; the footer now only appears for the
+  missing API key warning.
 - **Capture notices moved.** The “Drag to capture · Esc to cancel” hint sits at the
   top center, 48px down so the MacBook notch and menu bar cannot cover it. Capture
   errors stay in the bottom-right corner.

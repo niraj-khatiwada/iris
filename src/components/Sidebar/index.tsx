@@ -11,6 +11,7 @@ import ArchiveList from '@/components/Sidebar/ArchiveList'
 import ConversationList from '@/components/Sidebar/ConversationList'
 import SidebarFooter from '@/components/Sidebar/SidebarFooter'
 import SidebarSearch from '@/components/Sidebar/SidebarSearch'
+import SidebarTopActions from '@/components/Sidebar/SidebarTopActions'
 import { MAX_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH } from '@/constants'
 import { useChatStore } from '@/stores/chatStore'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -113,8 +114,12 @@ function Sidebar() {
       style={open ? { width } : undefined}
     >
       {open ? (
-        // Empty drag region: leaves the traffic lights room and keeps the top bar clear.
-        <div data-tauri-drag-region className="h-8 shrink-0" />
+        <div
+          data-tauri-drag-region
+          className="flex h-8 shrink-0 items-center justify-end pr-2"
+        >
+          <SidebarTopActions />
+        </div>
       ) : (
         <div
           data-tauri-drag-region
@@ -239,7 +244,7 @@ function Sidebar() {
         />
       </div>
 
-      <SidebarFooter open={open} />
+      {open ? <SidebarFooter /> : null}
     </aside>
   )
 }

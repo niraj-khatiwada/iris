@@ -5,7 +5,7 @@ import Button from '@/components/Button'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { resolveTheme } from '@/utils/theme'
 
-function ThemeSwitcher() {
+function ThemeSwitcher({ compact = false }: { compact?: boolean }) {
   const theme = useSettingsStore((state) => state.theme)
   const setTheme = useSettingsStore((state) => state.setTheme)
   const isDark = resolveTheme(theme) === 'dark'
@@ -15,12 +15,16 @@ function ThemeSwitcher() {
       <Button
         isIconOnly
         aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-        className="size-8 min-w-8"
+        className={compact ? 'size-6 min-w-6' : 'size-8 min-w-8'}
         size="sm"
         variant="ghost"
         onPress={() => setTheme(isDark ? 'light' : 'dark')}
       >
-        {isDark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+        {isDark ? (
+          <Sun className={compact ? 'size-3.5' : 'size-4'} />
+        ) : (
+          <Moon className={compact ? 'size-3.5' : 'size-4'} />
+        )}
       </Button>
       <Tooltip.Content>{isDark ? 'Light mode' : 'Dark mode'}</Tooltip.Content>
     </Tooltip>
