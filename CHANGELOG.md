@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Movable capture toolbar.** In screen capture, drag the toolbar's empty space
+  (the gaps and separators) to move it away from the area you want to annotate. The
+  move icon still repositions the crop; the toolbar stays where you put it until
+  the capture closes.
 - **Stopped and cut-off replies are labeled.** If a stream is stopped after text
   has already arrived, the partial reply now says **Stopped** in History and the
   quick overlay instead of looking finished. A reply cut off by the output limit

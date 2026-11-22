@@ -133,6 +133,15 @@ function Capture() {
     start: Rect
   } | null>(null)
   const moveHandle = useRef<{ pointer: Point; start: Rect } | null>(null)
+  const toolbarRef = useRef<HTMLDivElement>(null)
+  const toolbarDrag = useRef<{
+    pointer: Point
+    origin: Point
+    width: number
+    height: number
+  } | null>(null)
+  const [toolbarPosition, setToolbarPosition] = useState<Point | null>(null)
+  const [toolbarDragging, setToolbarDragging] = useState(false)
 
   toolRef.current = tool
   colorRef.current = color
@@ -182,6 +191,9 @@ function Capture() {
         draftRef.current = null
         resize.current = null
         moveHandle.current = null
+        toolbarDrag.current = null
+        setToolbarPosition(null)
+        setToolbarDragging(false)
         setSession((current) => current + 1)
       }),
     )
@@ -196,6 +208,9 @@ function Capture() {
         setCapturing(false)
         setError(null)
         setSession(0)
+        toolbarDrag.current = null
+        setToolbarPosition(null)
+        setToolbarDragging(false)
       }),
     )
 
@@ -518,6 +533,58 @@ function Capture() {
     moveHandle.current = null
   }
 
+  // The toolbar itself can be dragged by its empty space, so it can be moved away from the area
+  // being annotated. Buttons keep their own actions.
+  const startToolbarDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!selection || (event.target as HTMLElement).closest('button')) {
+      return
+    }
+    const element = toolbarRef.current
+    if (!element) {
+      return
+    }
+    event.preventDefault()
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId)
+    } catch {
+      // Synthetic preview events have no active pointer.
+    }
+    const rect = element.getBoundingClientRect()
+    toolbarDrag.current = {
+      pointer: { x: event.clientX, y: event.clientY },
+      origin: { x: rect.left + rect.width / 2, y: rect.top },
+      width: rect.width,
+      height: rect.height,
+    }
+    setToolbarDragging(true)
+  }
+
+  const moveToolbar = (event: React.PointerEvent<HTMLDivElement>) => {
+    const state = toolbarDrag.current
+    if (!state) {
+      return
+    }
+
+    const dx = event.clientX - state.pointer.x
+    const dy = event.clientY - state.pointer.y
+    setToolbarPosition({
+      x: clamp(
+        state.origin.x + dx,
+        state.width / 2 + 8,
+        window.innerWidth - state.width / 2 - 8,
+      ),
+      y: clamp(state.origin.y + dy, 8, window.innerHeight - state.height - 8),
+    })
+  }
+
+  const endToolbarDrag = () => {
+    if (!toolbarDrag.current) {
+      return
+    }
+    toolbarDrag.current = null
+    setToolbarDragging(false)
+  }
+
   const attach = async () => {
     const current = selectionRef.current
     if (!current || capturing || !isTauri()) {
@@ -543,14 +610,18 @@ function Capture() {
 
   attachRef.current = () => void attach()
 
-  const toolbarTop = selection
-    ? selection.y > 52
-      ? selection.y - 44
-      : Math.min(selection.y + selection.height + 12, window.innerHeight - 52)
-    : 0
-  const toolbarLeft = selection
-    ? clamp(selection.x + selection.width / 2, 180, window.innerWidth - 180)
-    : 0
+  const toolbarTop =
+    toolbarPosition?.y ??
+    (selection
+      ? selection.y > 52
+        ? selection.y - 44
+        : Math.min(selection.y + selection.height + 12, window.innerHeight - 52)
+      : 0)
+  const toolbarLeft =
+    toolbarPosition?.x ??
+    (selection
+      ? clamp(selection.x + selection.width / 2, 180, window.innerWidth - 180)
+      : 0)
 
   return (
     <div
@@ -647,17 +718,27 @@ function Capture() {
 
           {!capturing ? (
             <div
-              className="fixed z-40 flex items-center gap-0.5 rounded-2xl border border-white/10 bg-[#1b1b1f]/95 px-1.5 py-1 shadow-2xl backdrop-blur-xl"
+              ref={toolbarRef}
+              className={cn(
+                'fixed z-40 flex items-center gap-0.5 rounded-2xl border border-white/10 bg-[#1b1b1f]/95 px-1.5 py-1 shadow-2xl backdrop-blur-xl',
+                toolbarDragging ? 'cursor-grabbing' : 'cursor-grab',
+                '[&_button:not([data-cursor=grab])]:cursor-default',
+              )}
               style={{
                 left: toolbarLeft,
                 top: toolbarTop,
                 transform: 'translateX(-50%)',
               }}
+              onPointerCancel={endToolbarDrag}
+              onPointerDown={startToolbarDrag}
+              onPointerMove={moveToolbar}
+              onPointerUp={endToolbarDrag}
             >
               <Tooltip delay={400}>
                 <button
                   type="button"
                   aria-label="Drag selection"
+                  data-cursor="grab"
                   className="flex size-7 cursor-grab items-center justify-center rounded-full text-white/70 transition-colors hover:bg-white/10 active:cursor-grabbing"
                   onPointerCancel={endMove}
                   onPointerDown={startMove}
@@ -669,7 +750,12 @@ function Capture() {
                 <Tooltip.Content>Drag to move the selection</Tooltip.Content>
               </Tooltip>
 
-              <span className="mx-0.5 h-4 w-px bg-white/10" />
+              <span
+                aria-hidden
+                className="mx-0.5 flex h-6 w-2 items-center justify-center"
+              >
+                <span className="h-4 w-px bg-white/10" />
+              </span>
 
               <ToolButton
                 active={tool === 'pen'}
@@ -690,7 +776,12 @@ function Capture() {
                 onPress={() => setTool('arrow')}
               />
 
-              <span className="mx-0.5 h-4 w-px bg-white/10" />
+              <span
+                aria-hidden
+                className="mx-0.5 flex h-6 w-2 items-center justify-center"
+              >
+                <span className="h-4 w-px bg-white/10" />
+              </span>
 
               {COLORS.map((option) => (
                 <button
@@ -706,7 +797,12 @@ function Capture() {
                 />
               ))}
 
-              <span className="mx-0.5 h-4 w-px bg-white/10" />
+              <span
+                aria-hidden
+                className="mx-0.5 flex h-6 w-2 items-center justify-center"
+              >
+                <span className="h-4 w-px bg-white/10" />
+              </span>
 
               <Button
                 isIconOnly
