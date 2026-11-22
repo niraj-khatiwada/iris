@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Capture tool shortcuts.** Inside the capture window, **⌘A** selects the
+  arrow, **⌘R** the rectangle, and **⌘D** or **⌘P** the pen. They are not listed in
+  Settings → Shortcuts and do not affect any other window.
 - **Movable capture toolbar.** In screen capture, drag the toolbar's empty space
   (the gaps and separators) to move it away from the area you want to annotate. The
   move icon still repositions the crop; the toolbar stays where you put it until

@@ -230,10 +230,28 @@ function Capture() {
         return
       }
 
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
-        event.preventDefault()
-        undoRef.current?.()
-        return
+      if (event.metaKey || event.ctrlKey) {
+        const key = event.key.toLowerCase()
+        if (key === 'z') {
+          event.preventDefault()
+          undoRef.current?.()
+          return
+        }
+        if (key === 'a') {
+          event.preventDefault()
+          setTool('arrow')
+          return
+        }
+        if (key === 'r') {
+          event.preventDefault()
+          setTool('rect')
+          return
+        }
+        if (key === 'd' || key === 'p') {
+          event.preventDefault()
+          setTool('pen')
+          return
+        }
       }
 
       if (event.key === 'Enter') {
@@ -761,18 +779,21 @@ function Capture() {
                 active={tool === 'pen'}
                 icon={Pencil}
                 label="Pen"
+                shortcut="⌘D / ⌘P"
                 onPress={() => setTool('pen')}
               />
               <ToolButton
                 active={tool === 'rect'}
                 icon={Square}
                 label="Rectangle"
+                shortcut="⌘R"
                 onPress={() => setTool('rect')}
               />
               <ToolButton
                 active={tool === 'arrow'}
                 icon={ArrowUpRight}
                 label="Arrow"
+                shortcut="⌘A"
                 onPress={() => setTool('arrow')}
               />
 
@@ -848,11 +869,13 @@ function ToolButton({
   active,
   icon: Icon,
   label,
+  shortcut,
   onPress,
 }: {
   active: boolean
   icon: LucideIcon
   label: string
+  shortcut?: string
   onPress: () => void
 }) {
   return (
@@ -870,7 +893,9 @@ function ToolButton({
       >
         <Icon className="size-3.5" />
       </Button>
-      <Tooltip.Content>{label}</Tooltip.Content>
+      <Tooltip.Content>
+        {shortcut ? `${label} · ${shortcut}` : label}
+      </Tooltip.Content>
     </Tooltip>
   )
 }
