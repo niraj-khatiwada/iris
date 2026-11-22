@@ -803,6 +803,23 @@ impl Storage {
             let new_id = uuid::Uuid::new_v4().to_string();
             let mut paused = false;
 
+            if write.replace.is_none() {
+                // A concurrent extraction from another conversation may have added the same fact
+                // since this batch was prepared. Skip an exact duplicate.
+                let duplicate: bool = transaction
+                    .query_row(
+                        "SELECT EXISTS(
+                             SELECT 1 FROM memories WHERE active = 1 AND content = ?1
+                         )",
+                        params![write.content],
+                        |row| row.get(0),
+                    )
+                    .map_err(|error| error.to_string())?;
+                if duplicate {
+                    continue;
+                }
+            }
+
             if let Some(previous) = write.replace.as_deref() {
                 // Only an active, non-edited memory can be replaced. Carry its paused state so a
                 // corrected fact stays paused if the user had paused it.
@@ -917,7 +934,7 @@ impl Storage {
         let batch: Option<String> = connection
             .query_row(
                 "SELECT batch_id FROM memories
-                 WHERE batch_id IS NOT NULL
+                 WHERE batch_id IS NOT NULL AND active = 1
                  ORDER BY created_at DESC, rowid DESC
                  LIMIT 1",
                 [],

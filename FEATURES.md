@@ -31,7 +31,7 @@
 
 ~~Add a `memories` table, inject a compact memory block into the system prompt in `core/agent.rs`, and add Settings → Memory with search, edit, delete, and pause. Auto-extract low-risk facts after a conversation and show “Iris remembered…” with an undo; ask before storing anything sensitive. Later, scope memories per project.~~
 
-### 3. Scheduled tasks and reminders · Medium
+### 3. Scheduled tasks, reminders, and the island conversation switcher · Medium
 
 Iris already lives in the menu bar and can run while hidden. Add:
 
@@ -40,6 +40,14 @@ Iris already lives in the menu bar and can run while hidden. Add:
 - **Background runs** — long research or generation tasks that notify you when done.
 
 This needs a small Rust scheduler, a `tasks` table, catch-up after sleep, run history, and notifications. Use macOS notifications when Iris is hidden and the Dynamic Island notice system when a window is open. This is the feature that turns Iris from reactive to proactive.
+
+**Conversation switcher in the island.** Today a finished quick chat is only reachable from History, and **Previous conversation** (`⌘⇧N`) toggles one step back. Add a **search** button in the overlay header that lets you jump to any earlier conversation:
+
+- **It searches conversations, not messages.** One query matches conversation titles and returns the recent chats, the same rows the sidebar shows. It is a “get me back to that chat” tool, not a transcript search, so it stays instant and the expanded state stays small.
+- **The island grows for it.** Tapping search expands the panel upward into a compact field with the matching chats underneath. Escape or a second tap collapses it back to the normal one-input, one-response layout; it is not a new window and not a chat redesign.
+- **Selecting a result switches context in place.** The chosen chat becomes the current quick conversation with its title, messages, and attachments, and the overlay keeps working exactly as it does after **Previous conversation** (`⌘⇧N`), just with the full list instead of one step.
+- **Nothing is lost on the way.** The current draft and its pending writes are flushed before the switch, and **New chat** still starts a fresh UUID conversation, so the old chat stays intact in History.
+- **Keyboard-first.** Arrow keys move through results and Enter opens the highlighted chat, so the switcher never requires the mouse.
 
 Those three are the biggest jump in usefulness per unit of work.
 
@@ -85,7 +93,7 @@ These aren’t exciting, but ChatGPT/Claude users expect them:
 
 1. **Selection actions + dictation + screen ask** — make Iris reachable everywhere.
 2. **Memory + pins/export/incognito** — make it personal and round out chat parity.
-3. **Projects + scheduled tasks** — context and autonomy.
+3. **Projects + scheduled tasks + island switcher** — context and autonomy.
 4. **Connectors, read-only first** — calendar, reminders, notes, files.
 5. **Artifacts + file output + research** — make it produce real work.
 6. **Voice conversation + local RAG + meeting notes** — the moonshots.

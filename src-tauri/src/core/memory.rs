@@ -470,20 +470,21 @@ fn validate_candidates(
             continue;
         }
 
-        let replace = if candidate.action == "update" {
-            candidate
-                .id
-                .as_deref()
-                .filter(|id| {
-                    existing
-                        .iter()
-                        .any(|memory| memory.id == *id && !memory.user_edited)
-                })
-                .map(str::to_string)
-        } else if candidate.action == "add" {
-            None
-        } else {
-            continue;
+        let replace = match candidate.action.as_str() {
+            "add" => None,
+            "update" => {
+                let id = candidate.id.as_deref().unwrap_or_default();
+                if !existing
+                    .iter()
+                    .any(|memory| memory.id == id && !memory.user_edited)
+                {
+                    // An update must point at a current, automatically managed memory. A stale or
+                    // user-edited id is ignored rather than turned into a duplicate add.
+                    continue;
+                }
+                Some(id.to_string())
+            }
+            _ => continue,
         };
 
         // An update that repeats the old text is a no-op.
@@ -807,6 +808,30 @@ mod tests {
                 (None, "Timezone is Asia/Kathmandu."),
             ]
         );
+    }
+
+    #[test]
+    fn updates_to_edited_or_unknown_ids_are_not_turned_into_adds() {
+        let mut edited = memory("1", "Prefers long answers.", false);
+        edited.user_edited = true;
+
+        let writes = validate_candidates(
+            &[edited],
+            vec![
+                MemoryCandidate {
+                    action: "update".to_string(),
+                    id: Some("1".to_string()),
+                    content: "Prefers very long answers.".to_string(),
+                },
+                MemoryCandidate {
+                    action: "update".to_string(),
+                    id: Some("missing".to_string()),
+                    content: "Prefers tables.".to_string(),
+                },
+            ],
+        );
+
+        assert!(writes.is_empty());
     }
 
     #[test]
