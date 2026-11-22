@@ -384,7 +384,6 @@ const MessageBubble = memo(function MessageBubble({
                 conversationId={conversationId}
                 text={displayedText}
               />
-              {summary ? <MessageSummaryMenu messageId={message.id} /> : null}
             </>
           ) : null}
 
@@ -403,6 +402,14 @@ const MessageBubble = memo(function MessageBubble({
               </Button>
               <Tooltip.Content>Regenerate</Tooltip.Content>
             </Tooltip>
+          ) : null}
+
+          {!editing &&
+          !isUser &&
+          message.status === 'complete' &&
+          displayedText &&
+          summary ? (
+            <MessageSummaryMenu messageId={message.id} />
           ) : null}
         </div>
       </div>
