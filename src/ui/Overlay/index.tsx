@@ -1614,6 +1614,11 @@ function Overlay() {
                       </div>
 
                       <div className="mt-1 flex items-center gap-0.5">
+                        {assistant?.metadata?.stopped ? (
+                          <span className="pr-1 text-[10px] text-muted/60">
+                            Stopped
+                          </span>
+                        ) : null}
                         {assistant?.content ? (
                           <CopyButton
                             className="size-7 min-w-7 text-foreground/45"

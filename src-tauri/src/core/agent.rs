@@ -282,6 +282,7 @@ async fn run(
     let mut summary_filter = (config.auto_speak && config.summarize_speech)
         .then(read_aloud::SpokenSummaryFilter::default);
     let mut stopped = false;
+    let mut stop_reason: Option<String> = None;
 
     'stream: loop {
         let chunk = tokio::select! {
@@ -364,6 +365,15 @@ async fn run(
                         }
                     }
                 }
+                Some("message_delta") => {
+                    if let Some(reason) = event
+                        .get("delta")
+                        .and_then(|delta| delta.get("stop_reason"))
+                        .and_then(Value::as_str)
+                    {
+                        stop_reason = Some(reason.to_string());
+                    }
+                }
                 Some("message_stop") => {
                     stopped = true;
                     break 'stream;
@@ -386,6 +396,15 @@ async fn run(
     }
     if !stopped {
         return Err("The response ended unexpectedly.".to_string());
+    }
+    // A capped reply looks finished but is cut off mid-answer; surface it instead of storing it
+    // as complete. `refusal` and `end_turn` carry a usable answer.
+    if stop_reason.as_deref() == Some("max_tokens") {
+        return Err(
+            "The reply hit the output limit before it finished. Try again or ask for a shorter \
+             answer."
+                .to_string(),
+        );
     }
     if let Some(filter) = summary_filter.as_mut() {
         let visible = filter.finish();

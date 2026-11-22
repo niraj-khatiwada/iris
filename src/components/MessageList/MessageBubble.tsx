@@ -331,6 +331,10 @@ const MessageBubble = memo(function MessageBubble({
         >
           <span>{formatMessageTime(message.createdAt)}</span>
 
+          {!isUser && message.metadata?.stopped ? (
+            <span className="text-[10px] text-muted/50">Stopped</span>
+          ) : null}
+
           {editing ? (
             <>
               <CopyButton text={draft} />

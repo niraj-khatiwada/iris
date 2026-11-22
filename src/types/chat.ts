@@ -69,6 +69,8 @@ export type MessageMetadata = {
   thinking?: string
   /** Web sources used by the reply. */
   sources?: ChatSource[]
+  /** The user stopped the stream before the reply finished. */
+  stopped?: boolean
   /** True when the composer saw a text paste while this user message was drafted. */
   pasted?: boolean
   [key: string]: unknown

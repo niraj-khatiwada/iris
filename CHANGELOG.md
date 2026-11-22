@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Stopped and cut-off replies are labeled.** If a stream is stopped after text
+  has already arrived, the partial reply now says **Stopped** in History and the
+  quick overlay instead of looking finished. A reply cut off by the output limit
+  reports an error instead of being stored as complete.
 - **Live thinking and sources.** While the model reasons, Iris now streams its
   reasoning instead of showing a silent wait. History shows a compact, collapsible
   **Thinking** panel above the reply with the effort level used; the quick overlay

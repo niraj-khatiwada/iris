@@ -231,11 +231,16 @@ function finishConversationMessages(
       }
 
       const thinking = message.thinking?.trim()
+      const stopped = cancelled && Boolean(message.content.trim())
       return [
         {
           ...message,
           status: 'complete' as const,
-          ...(thinking ? { metadata: { ...message.metadata, thinking } } : {}),
+          metadata: {
+            ...message.metadata,
+            ...(thinking ? { thinking } : {}),
+            ...(stopped ? { stopped: true } : {}),
+          },
         },
       ]
     })
