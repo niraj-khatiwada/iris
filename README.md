@@ -101,6 +101,9 @@ overlay:
   **Extract tasks**, and **Reply**. These are editable quick prompts, not fixed buttons.
 - **Custom** opens a new quick chat with the selection attached as a chip. Type or dictate an
   instruction, and Iris sends it together with the selected text.
+- Selection prompts and **Custom** keep any image already in the draft, including a screen
+  capture from **⌘⇧A** or **⌘⇧S**, and send it with the prompt. If the draft has an attachment,
+  Iris stays in the current quick chat so the file remains available.
 - **AI Prompts → Quick prompts** edits the name, icon, and instruction of every prompt, adds
   your own, and drag-reorders the strip. The same order is used by the `/` menu in both
   composers; type `/` in an empty composer, choose a prompt, then type or paste the text it

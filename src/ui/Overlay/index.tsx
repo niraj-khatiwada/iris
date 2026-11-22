@@ -1037,6 +1037,8 @@ function Overlay() {
       prompt.instruction,
       selection.text,
     )
+    const attachments = files.readyAttachments
+    const hasDraftAttachments = files.attachments.length > 0
 
     setSelectionView(null)
     setSelectionContext(selection)
@@ -1046,18 +1048,23 @@ function Overlay() {
     if (isTauri()) {
       void stopSpeaking()
     }
-    forceRevealOnChatChange.current = true
-    resetQuickConversation()
-    clearAttachments()
+    forceRevealOnChatChange.current = !hasDraftAttachments
+    if (!hasDraftAttachments) {
+      resetQuickConversation()
+    }
     setValue('')
     setRevealed(true)
     setIgnoredResponseId(null)
 
     const conversationId = ensureQuickConversation()
+    if (hasDraftAttachments) {
+      // Commit after the message is created; clear() would delete the attached files.
+      files.commit()
+    }
     const messageId = await sendMessage(
       selectionPrompt,
       conversationId,
-      [],
+      attachments,
       selection.text,
       selectionAutoSpeak,
     )
@@ -1077,6 +1084,7 @@ function Overlay() {
     }
 
     const selection = selectionView
+    const hasDraftAttachments = files.attachments.length > 0
     setSelectionView(null)
     setSelectionContext(selection)
     setCustomSelection(selection)
@@ -1086,9 +1094,10 @@ function Overlay() {
     if (isTauri()) {
       void stopSpeaking()
     }
-    forceRevealOnChatChange.current = true
-    resetQuickConversation()
-    clearAttachments()
+    forceRevealOnChatChange.current = !hasDraftAttachments
+    if (!hasDraftAttachments) {
+      resetQuickConversation()
+    }
     setValue('')
     setRevealed(true)
     setIgnoredResponseId(null)
