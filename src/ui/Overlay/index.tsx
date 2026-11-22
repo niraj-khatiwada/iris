@@ -1396,15 +1396,6 @@ function Overlay() {
                           <ShimmerText className="font-medium">
                             Thinking
                           </ShimmerText>
-                          {assistant.metadata?.thinking_effort ? (
-                            <span className="ml-1 text-foreground/35">
-                              ·{' '}
-                              {assistant.metadata.thinking_effort
-                                .charAt(0)
-                                .toUpperCase() +
-                                assistant.metadata.thinking_effort.slice(1)}
-                            </span>
-                          ) : null}
                         </span>
                       ) : null}
 

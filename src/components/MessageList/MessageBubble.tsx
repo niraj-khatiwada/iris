@@ -60,10 +60,6 @@ const MessageBubble = memo(function MessageBubble({
   const sources = message.metadata?.sources ?? []
   const isThinkingLive = message.status === 'streaming' && !message.content
   const showThinking = !isUser && (Boolean(thinking) || isThinkingLive)
-  const effort = message.metadata?.thinking_effort
-  const effortLabel = effort
-    ? `${effort[0].toUpperCase()}${effort.slice(1)}`
-    : null
   const regenerate = useChatStore((state) => state.regenerate)
   const editAndResend = useChatStore((state) => state.editAndResend)
   const [editing, setEditing] = useState(false)
@@ -193,11 +189,6 @@ const MessageBubble = memo(function MessageBubble({
                     'Thought'
                   )}
                 </span>
-                {effortLabel ? (
-                  <span className="text-[10px] text-muted/60">
-                    · {effortLabel}
-                  </span>
-                ) : null}
                 <ChevronDown
                   className={cn(
                     'ml-auto size-3 shrink-0 text-muted/60 transition-transform',

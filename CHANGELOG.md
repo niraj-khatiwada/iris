@@ -15,10 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reports an error instead of being stored as complete.
 - **Live thinking and sources.** While the model reasons, Iris now streams its
   reasoning instead of showing a silent wait. History shows a compact, collapsible
-  **Thinking** panel above the reply with the effort level used; its label shimmers
-  while the model is thinking and changes to **Thought** when it is done. The quick
-  overlay shows a shimmering **Thinking** line in its header beside Stop, then keeps
-  hiding the answer until **Show response**. Web results used by an answer appear as
+  **Thinking** panel above the reply; its label shimmers while the model is thinking
+  and changes to **Thought** when it is done. The quick overlay shows a shimmering
+  **Thinking** line in its header beside Stop, then keeps hiding the answer until
+  **Show response**. Web results used by an answer appear as
   a small **Sources** pill under it in History, with clickable titles, site names,
   and snippets. Reasoning and sources are stored with the message, so they survive
   reloads. Reasoning is never read aloud, copied, or sent back to the model.
