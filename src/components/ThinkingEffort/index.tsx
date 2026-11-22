@@ -1,5 +1,5 @@
 import { Button, Tooltip } from '@heroui/react'
-import { Brain, RotateCw } from 'lucide-react'
+import { Brain } from 'lucide-react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -66,7 +66,6 @@ function ThinkingEffort() {
             </motion.span>
           </AnimatePresence>
         </span>
-        <RotateCw className="size-2.5 text-muted/60" />
       </Button>
       <Tooltip.Content>
         Thinking effort: {current.label}
