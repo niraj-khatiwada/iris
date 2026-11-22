@@ -63,7 +63,9 @@ This needs a small Rust scheduler, a `tasks` table, catch-up after sleep, run hi
 
 Those four are the biggest jump in usefulness per unit of work.
 
-### 5. REMIND ME: Delete `.commandcode` folder
+### ~~5. REMIND ME: Delete `.commandcode` folder~~ — done
+
+Removed the stale repo-local `.commandcode` folder. The separate `~/.commandcode` directory holds CommandCode CLI auth and history, so it was left untouched.
 
 ## Next tier: the “do everything” layer
 
