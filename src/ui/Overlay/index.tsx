@@ -1324,38 +1324,22 @@ function Overlay() {
                     className="flex items-center gap-2 px-4 pt-2.5 pb-1"
                     data-tauri-drag-region="deep"
                   >
-                    <Tooltip delay={500}>
-                      <button
-                        type="button"
-                        aria-label="Open history"
-                        className="shrink-0 rounded-full focus-visible:outline-none"
-                        onDoubleClick={openHistory}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter' || event.key === ' ') {
-                            event.preventDefault()
-                            openHistory()
-                          }
-                        }}
-                      >
-                        <IrisBlob
-                          activity={speaking ? 'speaking' : 'idle'}
-                          emotion={
-                            morphing
-                              ? 'thinking'
-                              : assistant?.status === 'error'
-                                ? 'sad'
-                                : hasResponse
-                                  ? 'happy'
-                                  : 'neutral'
-                          }
-                          size={24}
-                          tone={tone}
-                        />
-                      </button>
-                      <Tooltip.Content>
-                        Double-click for history
-                      </Tooltip.Content>
-                    </Tooltip>
+                    <span className="shrink-0" aria-hidden>
+                      <IrisBlob
+                        activity={speaking ? 'speaking' : 'idle'}
+                        emotion={
+                          morphing
+                            ? 'thinking'
+                            : assistant?.status === 'error'
+                              ? 'sad'
+                              : hasResponse
+                                ? 'happy'
+                                : 'neutral'
+                        }
+                        size={24}
+                        tone={tone}
+                      />
+                    </span>
 
                     <span className="text-[10px] font-semibold tracking-[0.16em] text-foreground/55">
                       IRIS
@@ -1368,7 +1352,11 @@ function Overlay() {
                           aria-hidden
                           className="h-3 w-px shrink-0 bg-foreground/15"
                         />
-                        <span className="min-w-0 max-w-[300px] truncate text-[11px] text-foreground/50">
+                        <span
+                          className="min-w-0 max-w-[300px] truncate text-[11px] text-foreground/50 transition-colors select-none hover:text-foreground/70"
+                          title="Double-click to open in History"
+                          onDoubleClick={openHistory}
+                        >
                           {conversation.title}
                         </span>
                       </>

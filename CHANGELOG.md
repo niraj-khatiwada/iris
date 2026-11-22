@@ -101,8 +101,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   input instead of showing an empty “No matches” panel.
 - Quick-prompt matching now searches only the prompt name, so `/repl` shows Reply
   without instruction-based matches such as Improve.
-- Double-clicking the Iris mascot now opens History on the current quick
-  conversation instead of leaving the history window on its previous selection.
+- Double-clicking the conversation title in the overlay header now opens History on
+  the current quick conversation. The Iris mascot is a status indicator and no longer
+  reacts to double-clicks.
 - Selection actions no longer crash when opening the overlay: AppKit window
   ordering now runs on the main thread instead of a Tokio worker.
 - Selection actions now inspect the frontmost app's Accessibility tree, retry a
