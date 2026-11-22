@@ -1,16 +1,27 @@
 use std::time::Duration;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use serde::Deserialize;
 use serde_json::Value;
 use tauri::{AppHandle, State};
 
 use crate::core::endpoints;
 use crate::core::storage::Storage;
+use crate::sys::speech::{self, SpeechRequest};
 
 /// Stops the current read-aloud. Also called when a new message starts or generation is cancelled.
 #[tauri::command]
 pub fn stop_speaking(app: AppHandle) {
     crate::sys::speech::stop(&app);
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeakTextRequest {
+    pub conversation_id: String,
+    pub text: String,
+    pub base_url: String,
+    pub voice: String,
 }
 
 /// Reads a specific message aloud on demand, e.g. a reply picked from history.
@@ -21,29 +32,42 @@ pub fn stop_speaking(app: AppHandle) {
 pub fn speak_text(
     app: AppHandle,
     storage: State<'_, Storage>,
-    conversation_id: String,
-    text: String,
-    base_url: String,
-    voice: String,
+    request: SpeakTextRequest,
 ) -> Result<(), String> {
+    let SpeakTextRequest {
+        conversation_id,
+        text,
+        base_url,
+        voice,
+    } = request;
+
     let text = text.trim();
     if text.is_empty() {
         return Err("There is nothing to read aloud.".to_string());
     }
-    if base_url.trim().is_empty() {
+    let base_url = base_url.trim().to_string();
+    if base_url.is_empty() {
         return Err("Add a base URL in Settings.".to_string());
     }
 
     let api_key = storage.require_api_key()?;
     let voice = if voice == "tide" { "tide" } else { "stella" };
+    let tts_url = endpoints::url(&base_url, endpoints::TTS_PATH);
 
-    tauri::async_runtime::spawn(crate::sys::speech::speak(
+    tauri::async_runtime::spawn(speech::speak(
         app,
-        conversation_id,
-        api_key,
-        endpoints::url(&base_url, endpoints::TTS_PATH),
-        voice.to_string(),
-        text.to_string(),
+        SpeechRequest {
+            conversation_id,
+            message_id: None,
+            text: text.to_string(),
+            voice: voice.to_string(),
+            api_key,
+            base_url,
+            model: String::new(),
+            tts_url,
+            // Manual Read aloud always speaks the original reply, never the cached summary.
+            summarize: false,
+        },
     ));
     Ok(())
 }

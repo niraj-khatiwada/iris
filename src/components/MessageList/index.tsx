@@ -6,6 +6,7 @@ import EmptyState from '@/components/EmptyState'
 import MessageBubble from '@/components/MessageList/MessageBubble'
 import { useConversationHistory } from '@/hooks/useConversationHistory'
 import { useChatStore } from '@/stores/chatStore'
+import { useSummaryStore } from '@/stores/summaryStore'
 
 function MessageList() {
   const conversation = useChatStore((state) =>
@@ -14,6 +15,11 @@ function MessageList() {
   const streaming = useChatStore((state) => Boolean(state.streamingRequestId))
   const focusedMessageId = useChatStore((state) => state.focusedMessageId)
   const clearFocusedMessage = useChatStore((state) => state.clearFocusedMessage)
+  const summaryView = useSummaryStore((state) => state.viewing)
+  const summaries = useSummaryStore((state) =>
+    conversation?.id ? state.summaries[conversation.id] : undefined,
+  )
+  const loadSummaries = useSummaryStore((state) => state.load)
   const [highlightedId, setHighlightedId] = useState<string | null>(null)
   const highlightTimer = useRef<number | null>(null)
   const { hasOlder, loadingOlder, loadOlder } = useConversationHistory(
@@ -22,6 +28,14 @@ function MessageList() {
   const virtuosoRef = useRef<VirtuosoHandle>(null)
   const initialScrolled = useRef(false)
   const conversationId = conversation?.id
+
+  // Load the cached spoken summaries for this conversation, so the summary toggle works even if
+  // the menu has not been opened yet.
+  useEffect(() => {
+    if (conversationId) {
+      void loadSummaries(conversationId)
+    }
+  }, [conversationId, loadSummaries])
 
   // A search hit asks for one message, so the search flow owns the first scroll there.
   useEffect(() => {
@@ -150,6 +164,8 @@ function MessageList() {
               disabled={streaming}
               highlighted={message.id === highlightedId}
               message={message}
+              showSummary={Boolean(summaryView[message.id])}
+              summary={summaries?.[message.id]}
             />
           </div>
         )}

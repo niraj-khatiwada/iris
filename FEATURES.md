@@ -1,0 +1,76 @@
+### 1. Selection actions — “Ask Iris about this” · Medium
+
+Select text in any app → press a shortcut → a small action menu appears: **Explain, Summarize, Rewrite, Translate, Fix grammar, Extract tasks, Reply**. The result opens in the overlay, with **Copy** and **Replace selection**.
+
+This is the highest-leverage feature you can add. It makes Iris useful in Mail, Safari, VS Code, PDFs, and every text field on the Mac without building a single new chat screen. It reuses the overlay and DeepSeek; the new work is macOS Accessibility (`AXSelectedText`), a configurable shortcut, and a permission flow. Fall back to clipboard when an app doesn’t expose selection, and never read secure/password fields.
+
+### 2. Persistent memory · Medium
+
+Right now the summary cache compresses _one_ conversation. ChatGPT/Claude memory is different: a small, editable store of facts about you that follows you into every chat — “prefers concise answers,” “works on Iris,” “timezone is …,” “don’t suggest X.”
+
+Add a `memories` table, inject a compact memory block into the system prompt in `core/agent.rs`, and add Settings → Memory with search, edit, delete, and pause. Auto-extract low-risk facts after a conversation and show “Iris remembered…” with an undo; ask before storing anything sensitive. Later, scope memories per project.
+
+### 3. Scheduled tasks and reminders · Medium
+
+Iris already lives in the menu bar and can run while hidden. Add:
+
+- **Reminders** — “Remind me at 5 to call Sam.”
+- **Recurring tasks** — “Every morning at 8, give me a brief.”
+- **Background runs** — long research or generation tasks that notify you when done.
+
+This needs a small Rust scheduler, a `tasks` table, catch-up after sleep, run history, and notifications. Use macOS notifications when Iris is hidden and the Dynamic Island notice system when a window is open. This is the feature that turns Iris from reactive to proactive.
+
+Those three are the biggest jump in usefulness per unit of work.
+
+## Next tier: the “do everything” layer
+
+- **Native connectors + a tool loop · Large.** This is the real unlock: “What’s on my calendar tomorrow?”, “Add that to Reminders,” “Find the PDF I edited last week,” “Summarize this Safari tab.” Start read-only with Calendar, Reminders, Notes, and Finder/Spotlight; add writes only with confirmation. It requires extending `core/agent.rs` from text-only streaming to a `tool_use` → execute → `tool_result` loop, plus per-tool permissions and an audit log. It’s also the same foundation you’ll want later for the DeepSeek CLI, so it pays off twice.
+- **Projects / Spaces · Medium-large.** A project holds a system prompt, reference files, pinned chats, default toggles, and later a memory scope. Claude Projects and ChatGPT Projects are the model. Add a compact space switcher in the overlay header, not a new chat redesign.
+- **Dictation anywhere · Small-medium.** Hold a shortcut, speak, and paste a cleaned transcript into the frontmost app. This is different from the existing voice input, which sends to Iris. You already have 16 kHz recording and ASR; you mainly need a paste/Accessibility flow and a tiny recording indicator.
+- **Screen ask · Small.** You already have region capture and annotation. Add a one-shot “Ask about this screen” that captures a region/window, attaches it, and focuses the prompt. “Explain this chart,” “What’s this error?”, “Translate this page.”
+- **Menu bar control center + `iris://` + Shortcuts · Small.** Tray items for New chat, Dictate, Capture, recent chats, tasks, Settings. A URL scheme and macOS Shortcuts actions let you trigger Iris from Raycast, Alfred, or automations. Cheap, and it makes Iris feel like part of the OS.
+
+## Later differentiators
+
+- **Artifacts / Stage · Large.** Render HTML, SVG, Mermaid, charts, and documents in an interactive preview, iterate on them (“make the hero green”), and export. Your current `canvas` is deliberately click-through, so don’t make it interactive — add a separate `stage` window with a sandboxed iframe.
+- **File generation · Medium.** “Make me a CSV/Markdown/PDF and save it to Downloads.” This is practical output and pairs well with artifacts.
+- **Research mode · Large.** Multi-step plan → search → read sources → synthesize → cite, with progress and a final report. Your current Search toggle is one-shot; this is the ChatGPT/Claude Deep Research equivalent.
+- **Voice conversation mode · Large.** Hands-free, turn-taking conversation with barge-in. Your current voice path is batch ASR → LLM → TTS, so start with push-to-talk turn-taking and set expectations; true realtime is a bigger latency project.
+- **Local folder RAG · Large.** “Chat with my Mac” over selected folders, with file citations. Use FTS/BM25 or local embeddings; keep it local-first.
+- **Meeting notes · Large.** Record system audio + mic, transcribe, summarize, extract action items. High value for a desktop assistant, but it needs ScreenCaptureKit audio, chunking, and diarization.
+
+## Cheap table stakes to fold in
+
+These aren’t exciting, but ChatGPT/Claude users expect them:
+
+- **Pins** and tags/folders for conversations
+- **Export** a chat as Markdown/JSON (and import)
+- **Incognito chat** that isn’t saved
+- **Duplicate / branch from here**
+- **Quote/reply** to a specific message
+- **Follow-up suggestion chips** after a reply
+- **Usage/cost dashboard** for DeepSeek tokens
+- **Auto-update** and an **encrypted local backup**
+
+## What I’d deliberately not build yet
+
+- **A provider picker or multi-model marketplace.** It contradicts the DeepSeek-only decision and doubles the testing surface.
+- **Image/video generation.** DeepSeek isn’t the right backend for it; it would mean a second provider.
+- **Team sharing, cloud sync, mobile apps.** Huge surfaces, and none are required for “one Mac, one assistant.”
+- **A full document editor or IDE.** Artifact preview + export is enough; don’t compete with Notion or VS Code.
+- **The DeepSeek CLI integration**, as you said. But note that the tool loop above is the bridge you’ll want when you do it.
+
+## Suggested order
+
+1. **Selection actions + dictation + screen ask** — make Iris reachable everywhere.
+2. **Memory + pins/export/incognito** — make it personal and round out chat parity.
+3. **Projects + scheduled tasks** — context and autonomy.
+4. **Connectors, read-only first** — calendar, reminders, notes, files.
+5. **Artifacts + file output + research** — make it produce real work.
+6. **Voice conversation + local RAG + meeting notes** — the moonshots.
+
+Architecturally, most of this fits without redesigning the chat: new append-only migrations for `memories`, `projects`, and `tasks`; memory injection and the tool loop in `core/agent.rs`; a permission section in Settings; a separate interactive Stage window rather than changing the click-through canvas.
+
+If I had to pick **one** to start with, it’s **selection actions**. It’s the feature that makes Iris feel like a layer over macOS instead of another chat window, and it’s a contained build compared with connectors or artifacts.
+
+Want me to write a concrete implementation spec for selection actions — shortcut behavior, Accessibility/permission flow, UI states, fallback handling, and where it hooks into the overlay? Or start with memory, which is a smaller first step?

@@ -5,7 +5,8 @@
       "heroui-react": {
         "type": "local",
         "command": ["bunx", "-y", "@heroui/react-mcp@latest"]
-      }
+      },
+      "agent-desktop": { "type": "local", "command": ["agent-desktop", "mcp"] }
     }
   },
   "plugins": [

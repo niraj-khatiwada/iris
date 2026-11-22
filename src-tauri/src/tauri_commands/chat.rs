@@ -38,6 +38,10 @@ pub struct ChatMessageInput {
     pub attachments: Vec<ChatAttachmentInput>,
 }
 
+fn default_summarize_speech() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SendMessageRequest {
@@ -51,6 +55,13 @@ pub struct SendMessageRequest {
     #[serde(default)]
     pub system_prompt: String,
     pub auto_speak: bool,
+    /// The assistant placeholder that will receive this reply. Automatic read-aloud stores its
+    /// spoken summary against this id so a repeat playback can reuse it.
+    #[serde(default)]
+    pub assistant_message_id: Option<String>,
+    /// Condense long replies into a spoken summary before automatic read-aloud.
+    #[serde(default = "default_summarize_speech")]
+    pub summarize_speech: bool,
     /// Enables DeepSeek's DeepThink before the reply.
     #[serde(default)]
     pub deep_think: bool,
@@ -172,6 +183,7 @@ pub fn send_message(
         base_url: base_url.clone(),
         model,
         auto_speak: request.auto_speak,
+        summarize_speech: request.summarize_speech,
         deep_think: request.deep_think,
         web_search: request.web_search,
         tts_voice,

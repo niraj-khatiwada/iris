@@ -1,7 +1,11 @@
 import { useEffect } from 'react'
 
 import { useSettingsStore } from '@/stores/settingsStore'
-import { setOpenShortcut } from '@/tauri/commands/shortcut'
+import {
+  setOpenShortcut,
+  setScreenAskShortcut,
+  setSelectionShortcut,
+} from '@/tauri/commands/shortcut'
 import { isTauri } from '@/utils/tauri'
 
 /**
@@ -10,6 +14,8 @@ import { isTauri } from '@/utils/tauri'
  */
 export function useShortcutSync() {
   const openShortcut = useSettingsStore((state) => state.openShortcut)
+  const selectionShortcut = useSettingsStore((state) => state.selectionShortcut)
+  const screenAskShortcut = useSettingsStore((state) => state.screenAskShortcut)
 
   useEffect(() => {
     if (!isTauri()) {
@@ -19,5 +25,11 @@ export function useShortcutSync() {
     void setOpenShortcut(openShortcut).catch(() => {
       // Keep the startup default. Settings reports conflicts when the user changes the shortcut.
     })
-  }, [openShortcut])
+    void setSelectionShortcut(selectionShortcut).catch(() => {
+      // The selection shortcut is optional; Settings reports conflicts when it is changed.
+    })
+    void setScreenAskShortcut(screenAskShortcut).catch(() => {
+      // The screen-ask shortcut is optional; Settings reports conflicts when it is changed.
+    })
+  }, [openShortcut, screenAskShortcut, selectionShortcut])
 }

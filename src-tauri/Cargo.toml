@@ -44,9 +44,20 @@ opt-level = 3
 panic = "abort"
 strip = "debuginfo"
 
+# Proc-macro dylibs are host artifacts for the build, not the app. Keep their symbols even when
+# the release profile strips debuginfo; otherwise thiserror 1's proc macro fails to load with
+# "can't find crate for thiserror_impl".
+[profile.release.build-override]
+strip = "none"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-app-kit = "0.3"
-# The preview's copy action writes an NSImage to NSPasteboard.
+# The preview's copy action writes an NSImage to NSPasteboard; selection actions read and replace
+# the focused app's selected text through the Accessibility API and fall back to the clipboard.
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSString"] }
 tauri-nspanel = "2.1"
+accessibility = "0.2"
+accessibility-sys = "0.2"
+core-foundation = "0.10"
+core-graphics = "0.25"

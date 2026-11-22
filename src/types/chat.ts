@@ -66,6 +66,12 @@ export type Conversation = ConversationSummary & {
   historyStart?: number
 }
 
+/** A spoken summary cached for one assistant message by automatic read-aloud. */
+export type SpokenSummary = {
+  messageId: string
+  summary: string
+}
+
 /** One page of messages plus the cursor needed to fetch the page before it. */
 export type MessagePage = {
   messages: ChatMessage[]

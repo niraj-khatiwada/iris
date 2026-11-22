@@ -1,7 +1,63 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
+use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CaptureAttached {
+    data_url: String,
+}
+
+/// Captures the display under the mouse, attaches it to the current quick chat, and focuses the
+/// prompt. This is the `⌘⇧A` path: no capture panel, region selection, or annotation.
+#[tauri::command]
+pub async fn capture_screen_for_ask(app: AppHandle) -> Result<(), String> {
+    let result = ask_capture(&app).await;
+
+    // The overlay may have been hidden for the shot. Always bring it back so both the attached
+    // image and any error are visible.
+    let show_app = app.clone();
+    let _ = on_main(&app, move || crate::sys::overlay::show(&show_app));
+
+    let data_url = result?;
+    let _ = app.emit("capture:attached", CaptureAttached { data_url });
+    Ok(())
+}
+
+async fn ask_capture(app: &AppHandle) -> Result<String, String> {
+    if !crate::sys::screen::has_permission() {
+        return Err("Screen Recording permission is required.".to_string());
+    }
+
+    let display_app = app.clone();
+    let display = on_main(app, move || -> Result<usize, String> {
+        let position = display_app
+            .cursor_position()
+            .map_err(|error| format!("Could not read the mouse position: {error}"))?;
+        let monitor = display_app
+            .monitor_from_point(position.x, position.y)
+            .map_err(|error| format!("Could not find the display under the mouse: {error}"))?
+            .or_else(|| {
+                display_app
+                    .get_webview_window(crate::sys::overlay::OVERLAY_LABEL)
+                    .and_then(|window| window.current_monitor().ok().flatten())
+            })
+            .or_else(|| display_app.primary_monitor().ok().flatten())
+            .ok_or_else(|| "Could not find a display to capture.".to_string())?;
+        Ok(display_number(&display_app, &monitor))
+    })??;
+
+    let hide_app = app.clone();
+    on_main(app, move || crate::sys::overlay::hide(&hide_app))??;
+    tokio::time::sleep(Duration::from_millis(120)).await;
+
+    let capture_app = app.clone();
+    tokio::task::spawn_blocking(move || capture_display_jpeg(&capture_app, display))
+        .await
+        .map_err(|error| format!("Screen capture task failed: {error}"))?
+}
 
 /// Opens the live capture panel over the current display. Nothing is screenshotted yet: the
 /// screen keeps rendering behind a transparent selection overlay, and the annotated region is
@@ -139,6 +195,20 @@ fn display_number(app: &AppHandle, monitor: &tauri::Monitor) -> usize {
 }
 
 fn capture_display(app: &AppHandle, display: usize) -> Result<String, String> {
+    capture_display_with_format(app, display, "png", "image/png", None)
+}
+
+fn capture_display_jpeg(app: &AppHandle, display: usize) -> Result<String, String> {
+    capture_display_with_format(app, display, "jpg", "image/jpeg", Some("jpg"))
+}
+
+fn capture_display_with_format(
+    app: &AppHandle,
+    display: usize,
+    extension: &str,
+    mime_type: &str,
+    capture_format: Option<&str>,
+) -> Result<String, String> {
     let directory = app
         .path()
         .app_cache_dir()
@@ -146,17 +216,20 @@ fn capture_display(app: &AppHandle, display: usize) -> Result<String, String> {
     std::fs::create_dir_all(&directory)
         .map_err(|error| format!("Could not create the capture cache directory: {error}"))?;
     let path = directory.join(format!(
-        "iris-capture-{}.png",
+        "iris-capture-{}.{}",
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_nanos())
-            .unwrap_or_default()
+            .unwrap_or_default(),
+        extension
     ));
 
-    let output = std::process::Command::new("/usr/sbin/screencapture")
-        .arg("-x")
-        .arg("-D")
-        .arg(display.to_string())
+    let mut command = std::process::Command::new("/usr/sbin/screencapture");
+    command.arg("-x").arg("-D").arg(display.to_string());
+    if let Some(format) = capture_format {
+        command.arg("-t").arg(format);
+    }
+    let output = command
         .arg(&path)
         .output()
         .map_err(|error| format!("Could not run the screen capture: {error}"))?;
@@ -177,7 +250,7 @@ fn capture_display(app: &AppHandle, display: usize) -> Result<String, String> {
     }
 
     Ok(format!(
-        "data:image/png;base64,{}",
+        "data:{mime_type};base64,{}",
         base64::engine::general_purpose::STANDARD.encode(bytes)
     ))
 }

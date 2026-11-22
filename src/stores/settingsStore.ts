@@ -8,15 +8,25 @@ import {
   DEFAULT_MODEL,
   DEFAULT_OPEN_SHORTCUT,
   DEFAULT_OVERLAY_SHORTCUTS,
+  DEFAULT_QUICK_PROMPTS,
+  DEFAULT_SCREEN_ASK_SHORTCUT,
   DEFAULT_SEARCH_SHORTCUT,
+  DEFAULT_SELECTION_SHORTCUT,
   DEFAULT_SIDEBAR_WIDTH,
   DEFAULT_SYSTEM_PROMPT,
   DEFAULT_TTS_VOICE,
   MAX_SIDEBAR_WIDTH,
   MIN_SIDEBAR_WIDTH,
+  NO_EM_DASH_INSTRUCTION,
   SETTINGS_STORAGE_KEY,
 } from '@/constants'
-import type { IrisAvatar, ThemeMode, TtsVoice } from '@/types/settings'
+import type {
+  IrisAvatar,
+  QuickPrompt,
+  ThemeMode,
+  TtsVoice,
+} from '@/types/settings'
+import { isQuickPromptIcon } from '@/utils/quickPrompts'
 
 export type OverlayShortcutAction = keyof typeof DEFAULT_OVERLAY_SHORTCUTS
 export type OverlayShortcuts = Record<OverlayShortcutAction, string>
@@ -86,6 +96,120 @@ function normalizeOverlayShortcuts(saved: unknown): OverlayShortcuts {
   }
 
   return shortcuts
+}
+
+const MAX_QUICK_PROMPTS = 24
+
+/** The default Rewrite instruction shipped before the prompt was renamed to Improve. */
+const LEGACY_REWRITE_INSTRUCTION =
+  'Rewrite the selected text to be clearer, tighter, and more natural while preserving its meaning and tone. Return only the replacement text, with no preamble or surrounding quotes.'
+
+/**
+ * Renames the untouched default Rewrite prompt to Improve and inserts Simplify next to it,
+ * while preserving the user's order and any custom name or instruction.
+ */
+function migrateQuickPromptDefaults(prompts: QuickPrompt[]): QuickPrompt[] {
+  // An empty list is an explicit user choice; do not add the new default back.
+  if (prompts.length === 0) {
+    return prompts
+  }
+
+  const improve = DEFAULT_QUICK_PROMPTS.find(
+    (prompt) => prompt.id === 'rewrite',
+  )
+  const simplify = DEFAULT_QUICK_PROMPTS.find(
+    (prompt) => prompt.id === 'simplify',
+  )
+
+  let next = prompts.map((prompt) => {
+    if (prompt.id !== 'rewrite') {
+      return prompt
+    }
+    return {
+      ...prompt,
+      name: prompt.name === 'Rewrite' ? 'Improve' : prompt.name,
+      instruction:
+        improve && prompt.instruction === LEGACY_REWRITE_INSTRUCTION
+          ? improve.instruction
+          : prompt.instruction,
+    }
+  })
+
+  if (
+    simplify &&
+    !next.some(
+      (prompt) =>
+        prompt.id === 'simplify' || prompt.name.toLowerCase() === 'simplify',
+    )
+  ) {
+    const index = next.findIndex((prompt) => prompt.id === 'rewrite')
+    const entry = { ...simplify }
+    next =
+      index >= 0
+        ? [...next.slice(0, index + 1), entry, ...next.slice(index + 1)]
+        : [...next, entry]
+  }
+
+  return next
+}
+
+/** Appends the house style rule to built-in prompts, never to user-created ones. */
+function addNoEmDashToBuiltIns(prompts: QuickPrompt[]): QuickPrompt[] {
+  const builtInIds = new Set(DEFAULT_QUICK_PROMPTS.map((prompt) => prompt.id))
+
+  return prompts.map((prompt) => {
+    if (
+      !builtInIds.has(prompt.id) ||
+      prompt.instruction.includes(NO_EM_DASH_INSTRUCTION)
+    ) {
+      return prompt
+    }
+    return {
+      ...prompt,
+      instruction: `${prompt.instruction.trimEnd()} ${NO_EM_DASH_INSTRUCTION}`,
+    }
+  })
+}
+
+/**
+ * Keeps a stale or hand-edited quick-prompt list out of the composer. An empty array is kept as
+ * empty so a user can intentionally remove every prompt.
+ */
+function normalizeQuickPrompts(saved: unknown): QuickPrompt[] {
+  if (!Array.isArray(saved)) {
+    return DEFAULT_QUICK_PROMPTS.map((prompt) => ({ ...prompt }))
+  }
+
+  const seen = new Set<string>()
+  const prompts: QuickPrompt[] = []
+
+  for (const entry of saved) {
+    if (prompts.length >= MAX_QUICK_PROMPTS) {
+      break
+    }
+    if (!entry || typeof entry !== 'object') {
+      continue
+    }
+
+    const value = entry as Partial<Record<keyof QuickPrompt, unknown>>
+    const id = typeof value.id === 'string' ? value.id.trim() : ''
+    const name = typeof value.name === 'string' ? value.name.trim() : ''
+    const instruction =
+      typeof value.instruction === 'string' ? value.instruction.trim() : ''
+    if (!id || !name || !instruction || seen.has(id)) {
+      continue
+    }
+
+    seen.add(id)
+    prompts.push({
+      id,
+      name,
+      instruction,
+      icon: isQuickPromptIcon(value.icon) ? value.icon : 'sparkles',
+    })
+  }
+
+  return prompts
 }
 
 const HEX_COLOR = /^#[0-9a-f]{6}$/i
@@ -159,6 +283,10 @@ type SettingsState = {
   mainSystemPrompt: string
   /** Reuse the island prompt in the main chat; on by default. */
   mainUsesIslandPrompt: boolean
+  /** Editable selection prompts, also shown by the `/` menu in both composers. */
+  quickPrompts: QuickPrompt[]
+  /** Internal marker for built-in quick-prompt migrations. */
+  quickPromptSchema: number
   /**
    * A key is stored. The source of truth is `has_api_key`; this cached flag keeps the saved state
    * instant on the first paint.
@@ -175,6 +303,10 @@ type SettingsState = {
    */
   apiKeyRevision: number
   autoSpeak: boolean
+  /** Automatically speak the result of a selection action. Off by default. */
+  autoSpeakSelection: boolean
+  /** Read a short spoken summary for automatic playback when a reply is long. */
+  summarizeSpeech: boolean
   autoSendVoice: boolean
   /** Show the reply in the quick overlay as soon as it arrives, without pressing Show response. */
   revealResponse: boolean
@@ -185,6 +317,10 @@ type SettingsState = {
   ttsVoice: TtsVoice
   /** Tauri shortcut syntax, chosen with the recorder in Settings → Shortcuts. */
   openShortcut: string
+  /** Captures selected text in any app; configured in Settings → Shortcuts. */
+  selectionShortcut: string
+  /** Captures the whole current display and focuses the prompt; configured in Settings. */
+  screenAskShortcut: string
   /** Focuses the history window's sidebar search; configured in Settings → Shortcuts. */
   searchShortcut: string
   /** Width of the open history sidebar in CSS pixels; dragging the border persists it. */
@@ -202,13 +338,22 @@ type SettingsState = {
   setIslandSystemPrompt: (islandSystemPrompt: string) => void
   setMainSystemPrompt: (mainSystemPrompt: string) => void
   setMainUsesIslandPrompt: (mainUsesIslandPrompt: boolean) => void
+  setQuickPrompts: (quickPrompts: QuickPrompt[]) => void
+  addQuickPrompt: (prompt: QuickPrompt) => void
+  updateQuickPrompt: (id: string, prompt: QuickPrompt) => void
+  removeQuickPrompt: (id: string) => void
+  resetQuickPrompts: () => void
   setAutoSpeak: (autoSpeak: boolean) => void
+  setAutoSpeakSelection: (autoSpeakSelection: boolean) => void
+  setSummarizeSpeech: (summarizeSpeech: boolean) => void
   setRevealResponse: (revealResponse: boolean) => void
   setAutoSendVoice: (autoSendVoice: boolean) => void
   setDeepThink: (deepThink: boolean) => void
   setWebSearch: (webSearch: boolean) => void
   setTtsVoice: (ttsVoice: TtsVoice) => void
   setOpenShortcut: (openShortcut: string) => void
+  setSelectionShortcut: (selectionShortcut: string) => void
+  setScreenAskShortcut: (screenAskShortcut: string) => void
   setSearchShortcut: (searchShortcut: string) => void
   setSidebarWidth: (sidebarWidth: number) => void
   setOverlayShortcut: (action: OverlayShortcutAction, shortcut: string) => void
@@ -225,16 +370,22 @@ export const useSettingsStore = create<SettingsState>()(
       islandSystemPrompt: DEFAULT_SYSTEM_PROMPT,
       mainSystemPrompt: DEFAULT_SYSTEM_PROMPT,
       mainUsesIslandPrompt: true,
+      quickPrompts: DEFAULT_QUICK_PROMPTS.map((prompt) => ({ ...prompt })),
+      quickPromptSchema: 3,
       apiKeyPresent: false,
       apiKeyHint: null,
       apiKeyRevision: 0,
       autoSpeak: true,
+      autoSpeakSelection: false,
+      summarizeSpeech: true,
       revealResponse: true,
       autoSendVoice: true,
       deepThink: false,
       webSearch: false,
       ttsVoice: DEFAULT_TTS_VOICE,
       openShortcut: DEFAULT_OPEN_SHORTCUT,
+      selectionShortcut: DEFAULT_SELECTION_SHORTCUT,
+      screenAskShortcut: DEFAULT_SCREEN_ASK_SHORTCUT,
       searchShortcut: DEFAULT_SEARCH_SHORTCUT,
       sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
       overlayShortcuts: { ...DEFAULT_OVERLAY_SHORTCUTS },
@@ -252,13 +403,40 @@ export const useSettingsStore = create<SettingsState>()(
       setMainSystemPrompt: (mainSystemPrompt) => set({ mainSystemPrompt }),
       setMainUsesIslandPrompt: (mainUsesIslandPrompt) =>
         set({ mainUsesIslandPrompt }),
+      setQuickPrompts: (quickPrompts) =>
+        set({ quickPrompts: normalizeQuickPrompts(quickPrompts) }),
+      addQuickPrompt: (prompt) =>
+        set((state) => ({
+          quickPrompts: normalizeQuickPrompts([...state.quickPrompts, prompt]),
+        })),
+      updateQuickPrompt: (id, prompt) =>
+        set((state) => ({
+          quickPrompts: normalizeQuickPrompts(
+            state.quickPrompts.map((item) =>
+              item.id === id ? { ...prompt, id } : item,
+            ),
+          ),
+        })),
+      removeQuickPrompt: (id) =>
+        set((state) => ({
+          quickPrompts: state.quickPrompts.filter((item) => item.id !== id),
+        })),
+      resetQuickPrompts: () =>
+        set({
+          quickPrompts: DEFAULT_QUICK_PROMPTS.map((prompt) => ({ ...prompt })),
+        }),
       setAutoSpeak: (autoSpeak) => set({ autoSpeak }),
+      setAutoSpeakSelection: (autoSpeakSelection) =>
+        set({ autoSpeakSelection }),
+      setSummarizeSpeech: (summarizeSpeech) => set({ summarizeSpeech }),
       setRevealResponse: (revealResponse) => set({ revealResponse }),
       setAutoSendVoice: (autoSendVoice) => set({ autoSendVoice }),
       setDeepThink: (deepThink) => set({ deepThink }),
       setWebSearch: (webSearch) => set({ webSearch }),
       setTtsVoice: (ttsVoice) => set({ ttsVoice }),
       setOpenShortcut: (openShortcut) => set({ openShortcut }),
+      setSelectionShortcut: (selectionShortcut) => set({ selectionShortcut }),
+      setScreenAskShortcut: (screenAskShortcut) => set({ screenAskShortcut }),
       setSearchShortcut: (searchShortcut) => set({ searchShortcut }),
       setSidebarWidth: (sidebarWidth) =>
         set({ sidebarWidth: normalizeSidebarWidth(sidebarWidth) }),
@@ -274,7 +452,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: SETTINGS_STORAGE_KEY,
-      version: 15,
+      version: 20,
       merge: (persisted, current) => {
         const saved = (persisted ?? {}) as Partial<SettingsState> &
           LegacySettings
@@ -286,14 +464,37 @@ export const useSettingsStore = create<SettingsState>()(
           systemPrompt: legacySystemPrompt,
           ...rest
         } = saved
+        const quickPromptSchema =
+          typeof saved.quickPromptSchema === 'number'
+            ? saved.quickPromptSchema
+            : 0
+        let quickPrompts = normalizeQuickPrompts(saved.quickPrompts)
+        if (quickPromptSchema < 2) {
+          quickPrompts = migrateQuickPromptDefaults(quickPrompts)
+        }
+        if (quickPromptSchema < 3) {
+          quickPrompts = addNoEmDashToBuiltIns(quickPrompts)
+        }
         return {
           ...current,
           ...rest,
+          autoSpeakSelection: saved.autoSpeakSelection === true,
+          summarizeSpeech: saved.summarizeSpeech !== false,
           islandSystemPrompt: normalizePrompt(
             saved.islandSystemPrompt ?? legacySystemPrompt,
           ),
           mainSystemPrompt: normalizePrompt(saved.mainSystemPrompt),
           mainUsesIslandPrompt: saved.mainUsesIslandPrompt !== false,
+          quickPrompts,
+          quickPromptSchema: 3,
+          selectionShortcut: normalizeShortcut(
+            saved.selectionShortcut,
+            DEFAULT_SELECTION_SHORTCUT,
+          ),
+          screenAskShortcut: normalizeShortcut(
+            saved.screenAskShortcut,
+            DEFAULT_SCREEN_ASK_SHORTCUT,
+          ),
           searchShortcut: normalizeShortcut(
             saved.searchShortcut,
             DEFAULT_SEARCH_SHORTCUT,
@@ -334,6 +535,8 @@ export const useSettingsStore = create<SettingsState>()(
           apiKeyHint:
             typeof rest.apiKeyHint === 'string' ? rest.apiKeyHint : null,
           autoSpeak: rest.autoSpeak ?? true,
+          autoSpeakSelection: rest.autoSpeakSelection === true,
+          summarizeSpeech: rest.summarizeSpeech !== false,
           // New behaviour defaults on, so an older stored shape gains it without user action.
           revealResponse: rest.revealResponse ?? true,
           autoSendVoice: rest.autoSendVoice ?? true,
@@ -341,6 +544,14 @@ export const useSettingsStore = create<SettingsState>()(
           webSearch: rest.webSearch ?? false,
           ttsVoice: rest.ttsVoice === 'tide' ? 'tide' : DEFAULT_TTS_VOICE,
           openShortcut,
+          selectionShortcut: normalizeShortcut(
+            rest.selectionShortcut,
+            DEFAULT_SELECTION_SHORTCUT,
+          ),
+          screenAskShortcut: normalizeShortcut(
+            rest.screenAskShortcut,
+            DEFAULT_SCREEN_ASK_SHORTCUT,
+          ),
           searchShortcut: normalizeShortcut(
             rest.searchShortcut,
             DEFAULT_SEARCH_SHORTCUT,
@@ -351,6 +562,7 @@ export const useSettingsStore = create<SettingsState>()(
           ),
           mainSystemPrompt: normalizePrompt(rest.mainSystemPrompt),
           mainUsesIslandPrompt: rest.mainUsesIslandPrompt !== false,
+          quickPrompts: normalizeQuickPrompts(rest.quickPrompts),
           overlayShortcuts: normalizeOverlayShortcuts(rest.overlayShortcuts),
           avatar: normalizeAvatar(rest.avatar),
         } as SettingsState

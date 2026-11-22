@@ -20,6 +20,7 @@ import {
   LoaderCircle,
   Lock as LockIcon,
   type LucideIcon,
+  MessageSquareText,
   Monitor,
   Moon,
   Palette,
@@ -35,6 +36,7 @@ import { type ReactNode, useCallback, useEffect, useState } from 'react'
 import AvatarEditor from '@/components/AvatarEditor'
 import { useDynamicIslandNotice } from '@/components/dynamic-island/notifications'
 import IrisBlob from '@/components/IrisBlob'
+import QuickPromptsSettings from '@/components/QuickPromptsSettings'
 import ShortcutRecorder from '@/components/ShortcutRecorder'
 import {
   CHAT_STORAGE_KEY,
@@ -44,6 +46,9 @@ import {
   DEFAULT_MODEL,
   DEFAULT_OPEN_SHORTCUT,
   DEFAULT_OVERLAY_SHORTCUTS,
+  DEFAULT_QUICK_PROMPTS,
+  DEFAULT_SCREEN_ASK_SHORTCUT,
+  DEFAULT_SELECTION_SHORTCUT,
   DEFAULT_SYSTEM_PROMPT,
   DEFAULT_TTS_VOICE,
   NO_WRITING_ASSIST,
@@ -68,7 +73,11 @@ import {
   enableLaunchAtLogin,
   isLaunchAtLoginEnabled,
 } from '@/tauri/commands/autostart'
-import { setOpenShortcut as applyOpenShortcut } from '@/tauri/commands/shortcut'
+import {
+  setOpenShortcut as applyOpenShortcut,
+  setScreenAskShortcut as applyScreenAskShortcut,
+  setSelectionShortcut as applySelectionShortcut,
+} from '@/tauri/commands/shortcut'
 import {
   hasApiKey,
   listModels,
@@ -129,21 +138,47 @@ const CATEGORIES: Category[] = [
       'space',
       'search',
       'find',
+      'screen',
+      'screenshot',
+      'ask',
+      'capture',
     ],
   },
   {
-    id: 'ai',
-    label: 'AI',
+    id: 'api',
+    label: 'API Key',
     group: 'Settings',
     icon: Sparkles,
     terms: [
       'ai',
       'api key',
       'api',
+      'key',
+      'credential',
       'base url',
       'endpoint',
       'model',
       'connection',
+      'deepseek',
+    ],
+  },
+  {
+    id: 'prompts',
+    label: 'AI Prompts',
+    group: 'Settings',
+    icon: MessageSquareText,
+    terms: [
+      'prompt',
+      'prompts',
+      'system prompt',
+      'instructions',
+      'personality',
+      'quick prompts',
+      'quick prompt',
+      'selection',
+      'selected text',
+      'slash',
+      'custom',
     ],
   },
   {
@@ -350,8 +385,10 @@ function SettingsPanel({
       return <GeneralPanel query={query} />
     case 'shortcuts':
       return <ShortcutsPanel query={query} />
-    case 'ai':
-      return <AiPanel query={query} />
+    case 'api':
+      return <ApiPanel query={query} />
+    case 'prompts':
+      return <PromptsPanel query={query} />
     case 'voice':
       return <VoicePanel query={query} />
     case 'storage':
@@ -589,6 +626,14 @@ const OVERLAY_SHORTCUT_ROWS: Array<{
 function ShortcutsPanel({ query }: { query: string }) {
   const openShortcut = useSettingsStore((state) => state.openShortcut)
   const setOpenShortcut = useSettingsStore((state) => state.setOpenShortcut)
+  const selectionShortcut = useSettingsStore((state) => state.selectionShortcut)
+  const setSelectionShortcut = useSettingsStore(
+    (state) => state.setSelectionShortcut,
+  )
+  const screenAskShortcut = useSettingsStore((state) => state.screenAskShortcut)
+  const setScreenAskShortcut = useSettingsStore(
+    (state) => state.setScreenAskShortcut,
+  )
   const searchShortcut = useSettingsStore((state) => state.searchShortcut)
   const setSearchShortcut = useSettingsStore((state) => state.setSearchShortcut)
   const overlayShortcuts = useSettingsStore((state) => state.overlayShortcuts)
@@ -596,14 +641,19 @@ function ShortcutsPanel({ query }: { query: string }) {
     (state) => state.setOverlayShortcut,
   )
   const [recording, setRecording] = useState(false)
+  const [recordingSelection, setRecordingSelection] = useState(false)
+  const [recordingScreenAsk, setRecordingScreenAsk] = useState(false)
   const [recordingSearch, setRecordingSearch] = useState(false)
   const [recordingAction, setRecordingAction] =
     useState<OverlayShortcutAction | null>(null)
 
   const recordShortcut = async (shortcut: string) => {
-    const conflict = [searchShortcut, ...Object.values(overlayShortcuts)].find(
-      (value) => value.toLowerCase() === shortcut.toLowerCase(),
-    )
+    const conflict = [
+      selectionShortcut,
+      screenAskShortcut,
+      searchShortcut,
+      ...Object.values(overlayShortcuts),
+    ].find((value) => value.toLowerCase() === shortcut.toLowerCase())
     if (conflict) {
       throw new Error('That shortcut is already in use.')
     }
@@ -614,10 +664,47 @@ function ShortcutsPanel({ query }: { query: string }) {
     setOpenShortcut(shortcut)
   }
 
+  const recordSelectionShortcut = async (shortcut: string) => {
+    const conflict = [
+      openShortcut,
+      screenAskShortcut,
+      searchShortcut,
+      ...Object.values(overlayShortcuts),
+    ].find((value) => value.toLowerCase() === shortcut.toLowerCase())
+    if (conflict) {
+      throw new Error('That shortcut is already in use.')
+    }
+
+    if (isTauri()) {
+      await applySelectionShortcut(shortcut)
+    }
+    setSelectionShortcut(shortcut)
+  }
+
+  const recordScreenAskShortcut = async (shortcut: string) => {
+    const conflict = [
+      openShortcut,
+      selectionShortcut,
+      searchShortcut,
+      ...Object.values(overlayShortcuts),
+    ].find((value) => value.toLowerCase() === shortcut.toLowerCase())
+    if (conflict) {
+      throw new Error('That shortcut is already in use.')
+    }
+
+    if (isTauri()) {
+      await applyScreenAskShortcut(shortcut)
+    }
+    setScreenAskShortcut(shortcut)
+  }
+
   const recordSearchShortcut = async (shortcut: string) => {
-    const conflict = [openShortcut, ...Object.values(overlayShortcuts)].find(
-      (value) => value.toLowerCase() === shortcut.toLowerCase(),
-    )
+    const conflict = [
+      openShortcut,
+      selectionShortcut,
+      screenAskShortcut,
+      ...Object.values(overlayShortcuts),
+    ].find((value) => value.toLowerCase() === shortcut.toLowerCase())
     if (conflict) {
       throw new Error('That shortcut is already in use.')
     }
@@ -632,6 +719,8 @@ function ShortcutsPanel({ query }: { query: string }) {
 
     const conflict = [
       openShortcut,
+      selectionShortcut,
+      screenAskShortcut,
       searchShortcut,
       ...Object.entries(overlayShortcuts)
         .filter(([action]) => action !== recordingAction)
@@ -669,6 +758,61 @@ function ShortcutsPanel({ query }: { query: string }) {
             onPress={() => setRecording(true)}
           >
             <span className="font-medium">{formatShortcut(openShortcut)}</span>
+            <Keyboard className="size-3.5 shrink-0 text-muted" />
+          </Button>
+        </SettingRow>
+
+        <SettingRow
+          title="Ask about selection"
+          description="Select text in any app, then press this to show the selection actions."
+          query={query}
+          search={[
+            'selection',
+            'selected',
+            'explain',
+            'summarize',
+            'rewrite',
+            'translate',
+            'shortcut',
+            'keyboard',
+          ]}
+        >
+          <Button
+            className="min-w-40 justify-between gap-3"
+            variant="secondary"
+            onPress={() => setRecordingSelection(true)}
+          >
+            <span className="font-medium">
+              {formatShortcut(selectionShortcut)}
+            </span>
+            <Keyboard className="size-3.5 shrink-0 text-muted" />
+          </Button>
+        </SettingRow>
+
+        <SettingRow
+          title="Ask about screen"
+          description="Capture the whole screen, attach it, and focus the prompt."
+          query={query}
+          search={[
+            'screen',
+            'screenshot',
+            'capture',
+            'ask',
+            'chart',
+            'error',
+            'translate',
+            'shortcut',
+            'keyboard',
+          ]}
+        >
+          <Button
+            className="min-w-40 justify-between gap-3"
+            variant="secondary"
+            onPress={() => setRecordingScreenAsk(true)}
+          >
+            <span className="font-medium">
+              {formatShortcut(screenAskShortcut)}
+            </span>
             <Keyboard className="size-3.5 shrink-0 text-muted" />
           </Button>
         </SettingRow>
@@ -724,6 +868,18 @@ function ShortcutsPanel({ query }: { query: string }) {
         open={recording}
         onOpenChange={setRecording}
         onRecord={recordShortcut}
+      />
+
+      <ShortcutRecorder
+        open={recordingSelection}
+        onOpenChange={setRecordingSelection}
+        onRecord={recordSelectionShortcut}
+      />
+
+      <ShortcutRecorder
+        open={recordingScreenAsk}
+        onOpenChange={setRecordingScreenAsk}
+        onRecord={recordScreenAskShortcut}
       />
 
       <ShortcutRecorder
@@ -911,7 +1067,7 @@ function ApiKeyField({ query }: { query: string }) {
   )
 }
 
-function AiPanel({ query }: { query: string }) {
+function ApiPanel({ query }: { query: string }) {
   const baseUrl = useSettingsStore((state) => state.baseUrl)
   const setBaseUrl = useSettingsStore((state) => state.setBaseUrl)
 
@@ -943,10 +1099,19 @@ function AiPanel({ query }: { query: string }) {
 
         <ModelField query={query} />
       </SettingsSection>
+    </>
+  )
+}
 
-      <SettingsSection title="Prompt">
+/** Prompt settings: the two system prompts first, then the editable quick prompts. */
+function PromptsPanel({ query }: { query: string }) {
+  return (
+    <>
+      <SettingsSection title="System prompts">
         <SystemPromptFields query={query} />
       </SettingsSection>
+
+      <QuickPromptsSettings query={query} />
     </>
   )
 }
@@ -1228,6 +1393,16 @@ function ModelField({ query }: { query: string }) {
 function VoicePanel({ query }: { query: string }) {
   const autoSpeak = useSettingsStore((state) => state.autoSpeak)
   const setAutoSpeak = useSettingsStore((state) => state.setAutoSpeak)
+  const autoSpeakSelection = useSettingsStore(
+    (state) => state.autoSpeakSelection,
+  )
+  const setAutoSpeakSelection = useSettingsStore(
+    (state) => state.setAutoSpeakSelection,
+  )
+  const summarizeSpeech = useSettingsStore((state) => state.summarizeSpeech)
+  const setSummarizeSpeech = useSettingsStore(
+    (state) => state.setSummarizeSpeech,
+  )
   const autoSendVoice = useSettingsStore((state) => state.autoSendVoice)
   const setAutoSendVoice = useSettingsStore((state) => state.setAutoSendVoice)
   const ttsVoice = useSettingsStore((state) => state.ttsVoice)
@@ -1243,6 +1418,41 @@ function VoicePanel({ query }: { query: string }) {
           query={query}
           search={['voice', 'speak', 'read aloud', 'tts']}
           onChange={setAutoSpeak}
+        />
+
+        <SwitchRow
+          isSelected={autoSpeakSelection}
+          title="Read selection results aloud"
+          description="Automatically speak the result of a selection action. Off by default."
+          query={query}
+          search={[
+            'selection',
+            'selected text',
+            'read aloud',
+            'speak',
+            'translate',
+            'rewrite',
+            'tts',
+          ]}
+          onChange={setAutoSpeakSelection}
+        />
+
+        <SwitchRow
+          isSelected={summarizeSpeech}
+          title="Summarize automatic playback"
+          description="Long replies are read as a short summary. Manual Read aloud always speaks the full reply."
+          query={query}
+          search={[
+            'summary',
+            'summarize',
+            'automatic',
+            'manual',
+            'read aloud',
+            'long',
+            'speech',
+            'tts',
+          ]}
+          onChange={setSummarizeSpeech}
         />
 
         <SettingRow
@@ -1394,15 +1604,22 @@ function StoragePanel({ query }: { query: string }) {
               islandSystemPrompt: DEFAULT_SYSTEM_PROMPT,
               mainSystemPrompt: DEFAULT_SYSTEM_PROMPT,
               mainUsesIslandPrompt: true,
+              quickPrompts: DEFAULT_QUICK_PROMPTS.map((prompt) => ({
+                ...prompt,
+              })),
               apiKeyPresent: false,
               apiKeyHint: null,
               autoSpeak: true,
+              autoSpeakSelection: false,
+              summarizeSpeech: true,
               autoSendVoice: true,
               revealResponse: true,
               deepThink: false,
               webSearch: false,
               ttsVoice: DEFAULT_TTS_VOICE,
               openShortcut: DEFAULT_OPEN_SHORTCUT,
+              selectionShortcut: DEFAULT_SELECTION_SHORTCUT,
+              screenAskShortcut: DEFAULT_SCREEN_ASK_SHORTCUT,
               overlayShortcuts: { ...DEFAULT_OVERLAY_SHORTCUTS },
               avatar: { ...DEFAULT_IRIS_AVATAR },
             })

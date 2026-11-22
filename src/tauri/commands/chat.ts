@@ -30,6 +30,8 @@ export function sendMessage(request: {
   model: string
   systemPrompt: string
   autoSpeak: boolean
+  assistantMessageId: string
+  summarizeSpeech: boolean
   deepThink: boolean
   webSearch: boolean
   ttsVoice: string

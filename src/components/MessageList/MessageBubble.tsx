@@ -5,6 +5,7 @@ import { memo, useEffect, useRef, useState } from 'react'
 import CopyButton from '@/components/CopyButton'
 import Markdown from '@/components/Markdown'
 import AttachmentImage from '@/components/MessageList/AttachmentImage'
+import MessageSummaryMenu from '@/components/MessageList/MessageSummaryMenu'
 import ReadAloudButton from '@/components/ReadAloudButton'
 import { NO_WRITING_ASSIST } from '@/constants'
 import { useChatStore } from '@/stores/chatStore'
@@ -24,6 +25,10 @@ type MessageBubbleProps = {
   disabled: boolean
   /** Briefly rings a message that a search result opened. */
   highlighted?: boolean
+  /** Stored spoken summary for this message, when automatic read-aloud generated one. */
+  summary?: string
+  /** Show the summary instead of the original reply for this conversation. */
+  showSummary?: boolean
 }
 
 const MessageBubble = memo(function MessageBubble({
@@ -33,8 +38,12 @@ const MessageBubble = memo(function MessageBubble({
   canRegenerate,
   disabled,
   highlighted = false,
+  summary,
+  showSummary = false,
 }: MessageBubbleProps) {
   const isUser = message.role === 'user'
+  const showingSummary = Boolean(showSummary && summary)
+  const displayedText = showSummary && summary ? summary : message.content
   const isEmptyStream = message.status === 'streaming' && !message.content
   const regenerate = useChatStore((state) => state.regenerate)
   const editAndResend = useChatStore((state) => state.editAndResend)
@@ -184,7 +193,14 @@ const MessageBubble = memo(function MessageBubble({
           ) : isEmptyStream ? (
             <TypingDots />
           ) : (
-            <Markdown>{message.content}</Markdown>
+            <>
+              {showingSummary ? (
+                <span className="mb-1.5 flex text-[10px] font-medium tracking-[0.14em] text-muted/60 uppercase">
+                  Spoken summary
+                </span>
+              ) : null}
+              <Markdown>{displayedText}</Markdown>
+            </>
           )}
 
           {message.status === 'streaming' && message.content ? (
@@ -261,13 +277,14 @@ const MessageBubble = memo(function MessageBubble({
           {!editing &&
           !isUser &&
           message.status === 'complete' &&
-          message.content ? (
+          displayedText ? (
             <>
-              <CopyButton text={message.content} />
+              <CopyButton text={displayedText} />
               <ReadAloudButton
                 conversationId={conversationId}
-                text={message.content}
+                text={displayedText}
               />
+              {summary ? <MessageSummaryMenu messageId={message.id} /> : null}
             </>
           ) : null}
 

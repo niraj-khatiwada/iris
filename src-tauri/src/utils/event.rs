@@ -25,11 +25,20 @@ pub const OVERLAY_HIDDEN: &str = "overlay:hidden";
 /// The capture window received a fresh screenshot and waits for a region selection.
 pub const CAPTURE_START: &str = "capture:start";
 
+/// The global screen-ask shortcut fired; the overlay should capture the display and attach it.
+pub const SCREEN_ASK: &str = "screen:ask";
+
 /// The capture panel was closed without attaching, discarding the in-progress selection.
 pub const CAPTURE_CLOSED: &str = "capture:closed";
 
 /// The overlay was shown or brought forward; the webview should focus its input.
 pub const OVERLAY_FOCUSED: &str = "overlay:focused";
+
+/// A selection was captured and the overlay should show the selection action strip.
+pub const SELECTION_OPEN: &str = "selection:open";
+
+/// A selection could not be captured, or the user needs to grant Accessibility access.
+pub const SELECTION_ERROR: &str = "selection:error";
 
 /// The overlay is being dragged; the canvas draws the snap guides at these positions.
 pub const OVERLAY_GUIDES: &str = "overlay:guides";

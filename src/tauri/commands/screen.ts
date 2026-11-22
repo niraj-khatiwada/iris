@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
 /** Whether macOS has already granted Iris Screen Recording access. */
 export function getScreenCapturePermission() {
@@ -31,4 +32,17 @@ export function captureAnnotatedScreen() {
 /** Closes the capture window and brings the quick overlay back. */
 export function closeScreenCapture() {
   return invoke<void>('close_screen_capture')
+}
+
+/** Fires when the global Ask about screen shortcut is pressed. */
+export function subscribeToScreenAsk(handler: () => void): Promise<UnlistenFn> {
+  return listen('screen:ask', () => handler())
+}
+
+/**
+ * Captures the whole display under the mouse and attaches it to the current quick chat.
+ * The native command hides and restores the overlay around the shot.
+ */
+export function captureScreenForAsk() {
+  return invoke<void>('capture_screen_for_ask')
 }

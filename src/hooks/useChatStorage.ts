@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 
 import { CHAT_STORAGE_KEY, CHAT_UI_STORAGE_KEY } from '@/constants'
 import { useChatStore } from '@/stores/chatStore'
+import { useSummaryStore } from '@/stores/summaryStore'
 import {
   clearConversations,
   deleteConversation,
@@ -23,6 +24,12 @@ import { isTauri } from '@/utils/tauri'
 
 let suspended = false
 let clearStored: (() => Promise<void>) | null = null
+let flushStored: (() => Promise<void>) | null = null
+
+/** Writes pending chat changes now, e.g. before another window reads the conversation. */
+export async function flushChatStorage() {
+  await flushStored?.()
+}
 
 /** Stops the SQLite mirror while Iris resets its data, so a focus hydrate cannot undo the wipe. */
 export function suspendChatStorage() {
@@ -76,6 +83,26 @@ function readSelection(): StoredSelection | null {
     }
   } catch {
     return null
+  }
+}
+
+/**
+ * Points the history window at one conversation. The shared selection is written first so the
+ * target survives the focus hydrate that runs when the window comes forward; the
+ * `history:open-conversation` event covers a window that is already focused.
+ */
+export function selectHistoryConversation(conversationId: string) {
+  const current = readSelection()
+  try {
+    localStorage.setItem(
+      CHAT_UI_STORAGE_KEY,
+      JSON.stringify({
+        activeConversationId: conversationId,
+        lastQuickConversationId: current?.lastQuickConversationId ?? null,
+      }),
+    )
+  } catch {
+    // The event still carries the target when storage is unavailable.
   }
 }
 
@@ -173,6 +200,7 @@ export function useChatStorage() {
     let flushTimer: number | null = null
     let unlistenFocus: (() => void) | undefined
     let unlistenClear: UnlistenFn | undefined
+    let unlistenHistory: UnlistenFn | undefined
     let unsubscribe: (() => void) | undefined
     let previousMeta = new Map<string, string>()
     let previousMessages = new Map<string, MessageEntry>()
@@ -327,6 +355,29 @@ export function useChatStorage() {
         scheduleFlush()
       }
     }
+
+    const flushNow = async () => {
+      if (flushTimer !== null) {
+        window.clearTimeout(flushTimer)
+        flushTimer = null
+      }
+      if (activeHydrate) {
+        await activeHydrate.catch(() => {})
+      }
+      if (activeFlush) {
+        await activeFlush.catch(() => {})
+      }
+      const run = flush()
+      activeFlush = run
+      try {
+        await run
+      } finally {
+        if (activeFlush === run) {
+          activeFlush = null
+        }
+      }
+    }
+    flushStored = flushNow
 
     const schedule = (conversations: Conversation[]) => {
       if (!ready || syncing || suspended) {
@@ -500,6 +551,29 @@ export function useChatStorage() {
       }
     })
 
+    // Double-clicking the overlay mascot asks the history window to open the quick chat. The
+    // overlay writes the shared selection too, so this is safe even if focus arrives first.
+    if (!isOverlay) {
+      void listen<{ conversationId: string }>(
+        'history:open-conversation',
+        (event) => {
+          if (disposed) {
+            return
+          }
+          const id = event.payload?.conversationId
+          if (typeof id === 'string' && id.length > 0) {
+            useChatStore.getState().selectConversation(id)
+          }
+        },
+      ).then((off) => {
+        if (disposed) {
+          off()
+        } else {
+          unlistenHistory = off
+        }
+      })
+    }
+
     // Clear History runs in one window, but every window must drop its in-memory copy too.
     void listen('chat:cleared', () => {
       if (disposed) {
@@ -511,6 +585,7 @@ export function useChatStorage() {
       pendingMessages = new Map()
       pendingDeletedMessages = new Set()
       pendingDeletedConversations = new Set()
+      useSummaryStore.getState().clear()
       useChatStore.getState().clearAll()
     }).then((off) => {
       if (disposed) {
@@ -542,9 +617,13 @@ export function useChatStorage() {
       if (clearStored === clearStoredForThisWindow) {
         clearStored = null
       }
+      if (flushStored === flushNow) {
+        flushStored = null
+      }
       unsubscribe?.()
       unlistenFocus?.()
       unlistenClear?.()
+      unlistenHistory?.()
     }
   }, [])
 }

@@ -6,6 +6,7 @@ import type {
   ConversationSummary,
   MessagePage,
   SearchResults,
+  SpokenSummary,
 } from '@/types/chat'
 
 export function loadConversations() {
@@ -22,6 +23,11 @@ export function loadMessagePage(
     before,
     limit,
   })
+}
+
+/** Cached spoken summaries for one conversation, used by the history summary view. */
+export function loadSpokenSummaries(conversationId: string) {
+  return invoke<SpokenSummary[]>('load_spoken_summaries', { conversationId })
 }
 
 /** Full-text search over conversation titles and message bodies. */

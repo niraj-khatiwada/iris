@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 
 import { useSpeechStore } from '@/stores/speechStore'
+import { useSummaryStore } from '@/stores/summaryStore'
 import {
   subscribeToSpeechEnd,
   subscribeToSpeechError,
@@ -53,6 +54,9 @@ export function useSpeechPlayback() {
           speaking: true,
           error: null,
         })
+        // The backend stores the spoken summary before TTS starts, so this is the moment the
+        // transcript can switch to it if the conversation's summary view is already on.
+        void useSummaryStore.getState().load(conversationId, true)
       }),
     )
     track(() =>

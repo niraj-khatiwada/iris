@@ -17,6 +17,8 @@ export type AgentRunOptions = {
   model: string
   systemPrompt: string
   autoSpeak: boolean
+  assistantMessageId: string
+  summarizeSpeech: boolean
   deepThink: boolean
   webSearch: boolean
   ttsVoice: TtsVoice
@@ -105,6 +107,8 @@ export function startAgentRun(options: AgentRunOptions): string {
           model: options.model,
           systemPrompt: options.systemPrompt,
           autoSpeak: options.autoSpeak,
+          assistantMessageId: options.assistantMessageId,
+          summarizeSpeech: options.summarizeSpeech,
           deepThink: options.deepThink,
           webSearch: options.webSearch,
           ttsVoice: options.ttsVoice,

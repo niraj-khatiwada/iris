@@ -5,11 +5,14 @@ import {
   ArrowUpRight,
   ChevronDown,
   ChevronUp,
+  ClipboardPaste,
   Info,
   Mic,
   Plus,
+  Replace,
   RotateCcw,
   Scan,
+  Sparkles,
   Square,
   X,
 } from 'lucide-react'
@@ -27,13 +30,20 @@ import ChatToggles from '@/components/ChatToggles'
 import CopyButton from '@/components/CopyButton'
 import IrisBlob, { type IrisTone } from '@/components/IrisBlob'
 import Markdown from '@/components/Markdown'
+import QuickPromptChip from '@/components/QuickPromptChip'
+import QuickPromptMenu from '@/components/QuickPromptMenu'
 import ReadAloudButton from '@/components/ReadAloudButton'
+import SelectionPanel from '@/components/SelectionPanel'
 import SendButton from '@/components/SendButton'
 import SpeechControl from '@/components/SpeechControl'
 import VoiceStrip from '@/components/VoiceStrip'
 import { NO_WRITING_ASSIST } from '@/constants'
 import { useAttachments } from '@/hooks/useAttachments'
-import { useChatStorage } from '@/hooks/useChatStorage'
+import {
+  flushChatStorage,
+  selectHistoryConversation,
+  useChatStorage,
+} from '@/hooks/useChatStorage'
 import { useConversationHistory } from '@/hooks/useConversationHistory'
 import { useOverlayWindow } from '@/hooks/useOverlayWindow'
 import { useSettingsSync } from '@/hooks/useSettingsSync'
@@ -43,17 +53,33 @@ import { useVoiceInput } from '@/hooks/useVoiceInput'
 import { useChatStore } from '@/stores/chatStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useSpeechStore } from '@/stores/speechStore'
-import { subscribeToOverlayHidden } from '@/tauri/commands/overlay'
+import { showOverlay, subscribeToOverlayHidden } from '@/tauri/commands/overlay'
 import {
+  captureScreenForAsk,
   closeScreenCapture,
   getScreenCapturePermission,
   openScreenCaptureSettings,
   requestScreenCapturePermission,
   startScreenCapture,
+  subscribeToScreenAsk,
 } from '@/tauri/commands/screen'
+import {
+  openSelectionSettings,
+  pasteSelection,
+  replaceSelection,
+  saveSelectionMetadata,
+  subscribeToSelectionError,
+  subscribeToSelectionOpen,
+} from '@/tauri/commands/selection'
 import { stopSpeaking } from '@/tauri/commands/voice'
-import type { SettingsCategory } from '@/types/settings'
+import type { SelectionOpenPayload, SelectionView } from '@/types/selection'
+import type { QuickPrompt, SettingsCategory } from '@/types/settings'
 import { newId } from '@/utils/id'
+import { filterQuickPrompts } from '@/utils/quickPrompts'
+import {
+  buildCustomSelectionPrompt,
+  buildSelectionPrompt,
+} from '@/utils/selection'
 import {
   formatShortcut,
   isPlainCommandKey,
@@ -131,6 +157,11 @@ function Overlay() {
 
   const { panelRef, inputRef, hide } = useOverlayWindow()
   const autoSendVoice = useSettingsStore((state) => state.autoSendVoice)
+  const autoSpeak = useSettingsStore((state) => state.autoSpeak)
+  const autoSpeakSelection = useSettingsStore(
+    (state) => state.autoSpeakSelection,
+  )
+  const selectionAutoSpeak = autoSpeak && autoSpeakSelection
   const overlayShortcuts = useSettingsStore((state) => state.overlayShortcuts)
   const deepThink = useSettingsStore((state) => state.deepThink)
   const webSearch = useSettingsStore((state) => state.webSearch)
@@ -150,7 +181,10 @@ function Overlay() {
   const preparing = useSpeechStore((state) => state.preparing)
   const speechError = useSpeechStore((state) => state.error)
   const revealResponse = useSettingsStore((state) => state.revealResponse)
+  const quickPrompts = useSettingsStore((state) => state.quickPrompts)
   const [value, setValue] = useState('')
+  const [slashPrompt, setSlashPrompt] = useState<QuickPrompt | null>(null)
+  const [promptIndex, setPromptIndex] = useState(0)
   // A new reply starts revealed or hidden depending on the setting; Hide/Show still override it
   // for the reply currently on screen.
   const [revealed, setRevealed] = useState(revealResponse)
@@ -161,8 +195,18 @@ function Overlay() {
   const [captureError, setCaptureError] = useState<string | null>(null)
   const [capturePermissionNeeded, setCapturePermissionNeeded] = useState(false)
   const [capturing, setCapturing] = useState(false)
+  const [selectionView, setSelectionView] = useState<SelectionView | null>(null)
+  const [selectionContext, setSelectionContext] =
+    useState<SelectionOpenPayload | null>(null)
+  const [customSelection, setCustomSelection] =
+    useState<SelectionOpenPayload | null>(null)
+  const [selectionReplaceError, setSelectionReplaceError] = useState<
+    string | null
+  >(null)
   const [contentHeight, setContentHeight] = useState<number | null>(null)
   const contentRef = useRef<HTMLDivElement>(null)
+  const selectionPanelRef = useRef<HTMLDivElement>(null)
+  const forceRevealOnChatChange = useRef(false)
   const finishVoiceRef = useRef<(forceSend?: boolean) => void>(() => {})
   const startCaptureRef = useRef<() => void>(() => {})
   const captureGuard = useRef(0)
@@ -196,7 +240,8 @@ function Overlay() {
   const voiceActive = voice.status !== 'idle'
   const errorMessage =
     assistant?.status === 'error' ? (assistant.error ?? '') : ''
-  const overlayError = voice.error ?? speechError ?? captureError
+  const overlayError =
+    voice.error ?? speechError ?? captureError ?? selectionReplaceError
   const apiKeyMissing = /api key/i.test(errorMessage)
   // The blob keeps morphing while a reply streams and while its audio is being prepared.
   const morphing = streaming || preparing
@@ -209,13 +254,35 @@ function Overlay() {
           ? 'pending'
           : 'primary'
   const active =
-    streaming || preparing || hasResponse || voiceActive || speaking
+    streaming ||
+    preparing ||
+    hasResponse ||
+    voiceActive ||
+    speaking ||
+    Boolean(selectionView)
   const errorLabel = apiKeyMissing
     ? 'API key is required'
     : assistant?.status === 'error'
       ? 'Something went wrong'
       : null
-  const view = voiceActive ? 'voice' : 'main'
+  const view = selectionView ? 'selection' : voiceActive ? 'voice' : 'main'
+  // The `/` menu is only for the normal composer: a custom selection and the menu never overlap.
+  const slashQuery =
+    !selectionView &&
+    !customSelection &&
+    !slashPrompt &&
+    !streaming &&
+    value.startsWith('/') &&
+    !/\s/.test(value.slice(1))
+      ? value.slice(1)
+      : null
+  const slashMatches =
+    slashQuery === null ? [] : filterQuickPrompts(quickPrompts, slashQuery)
+  const slashOpen = slashQuery !== null && slashMatches.length > 0
+  const activePromptIndex =
+    slashMatches.length === 0
+      ? 0
+      : Math.min(promptIndex, slashMatches.length - 1)
 
   const openSettings = useCallback(async (category?: SettingsCategory) => {
     if (!isTauri()) {
@@ -227,6 +294,29 @@ function Overlay() {
 
   const clearAttachments = files.clear
 
+  const saveSelectionProvenance = async (
+    messageId: string,
+    conversationId: string,
+    action: string,
+    selection: SelectionOpenPayload,
+  ) => {
+    try {
+      await saveSelectionMetadata({
+        messageId,
+        conversationId,
+        sourceApp: selection.appName,
+        sourceBundleId: selection.bundleId,
+        sourcePid: selection.pid,
+        action,
+        characterCount: selection.characterCount,
+        truncated: selection.truncated,
+        fromClipboard: selection.fromClipboard,
+      })
+    } catch {
+      // Provenance is useful but must never block the reply.
+    }
+  }
+
   const newChat = useCallback(() => {
     if (isTauri()) {
       void stopSpeaking()
@@ -234,8 +324,13 @@ function Overlay() {
     resetQuickConversation()
     clearAttachments()
     setValue('')
+    setSlashPrompt(null)
     setRevealed(revealResponse)
     setIgnoredResponseId(null)
+    setSelectionView(null)
+    setSelectionContext(null)
+    setCustomSelection(null)
+    setSelectionReplaceError(null)
     requestAnimationFrame(() => inputRef.current?.focus())
   }, [clearAttachments, inputRef, resetQuickConversation, revealResponse])
 
@@ -253,7 +348,10 @@ function Overlay() {
     }
     clearAttachments()
     setValue('')
-    setRevealed(revealResponse)
+    setSlashPrompt(null)
+    // A selection action always reveals its result; a normal New chat follows the setting.
+    setRevealed(forceRevealOnChatChange.current || revealResponse)
+    forceRevealOnChatChange.current = false
     setIgnoredResponseId(null)
   }, [clearAttachments, quickConversationId, revealResponse])
 
@@ -311,8 +409,8 @@ function Overlay() {
     const onKeyDown = (event: KeyboardEvent) => {
       const modifier = event.metaKey || event.ctrlKey
 
-      // The voice strip owns Enter/Escape and ignores the action shortcuts.
-      if (voiceActive) {
+      // The voice strip and the selection strip own their keys and ignore action shortcuts.
+      if (voiceActive || selectionView) {
         return
       }
 
@@ -330,6 +428,10 @@ function Overlay() {
         restorePreviousQuickConversation()
         setRevealed(revealResponse)
         setIgnoredResponseId(null)
+        setSelectionView(null)
+        setSelectionContext(null)
+        setCustomSelection(null)
+        setSelectionReplaceError(null)
         requestAnimationFrame(() => inputRef.current?.focus())
         return
       }
@@ -399,6 +501,7 @@ function Overlay() {
     overlayShortcuts,
     restorePreviousQuickConversation,
     revealResponse,
+    selectionView,
     setDeepThink,
     setWebSearch,
     streaming,
@@ -416,7 +519,7 @@ function Overlay() {
     }
 
     const onCopy = (event: ClipboardEvent) => {
-      if (voiceActive) {
+      if (voiceActive || selectionView) {
         return
       }
       event.preventDefault()
@@ -425,7 +528,7 @@ function Overlay() {
 
     document.addEventListener('copy', onCopy)
     return () => document.removeEventListener('copy', onCopy)
-  }, [captureShortcutIsCopy, triggerCapture, voiceActive])
+  }, [captureShortcutIsCopy, selectionView, triggerCapture, voiceActive])
 
   // A finished screen capture arrives as an annotated JPEG for the current draft.
   useEffect(() => {
@@ -482,6 +585,57 @@ function Overlay() {
     }
   }, [files.addAttachment, inputRef])
 
+  // `⌘⇧A` captures the whole display and attaches it to the current draft. Permission and errors
+  // use the same notice the region-capture flow already shows.
+  useEffect(() => {
+    if (!isTauri()) {
+      return
+    }
+
+    let disposed = false
+    let unlisten: (() => void) | undefined
+
+    const run = async () => {
+      setCapturePermissionNeeded(false)
+      setCaptureError(null)
+      try {
+        const allowed = await getScreenCapturePermission()
+        if (!allowed) {
+          await requestScreenCapturePermission()
+          if (!(await getScreenCapturePermission())) {
+            await showOverlay()
+            setCapturePermissionNeeded(true)
+            return
+          }
+        }
+        await captureScreenForAsk()
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        if (/screen recording|permission/i.test(message)) {
+          await showOverlay().catch(() => undefined)
+          setCapturePermissionNeeded(true)
+        } else {
+          setCaptureError(message)
+        }
+      }
+    }
+
+    void subscribeToScreenAsk(() => {
+      void run()
+    }).then((off) => {
+      if (disposed) {
+        off()
+      } else {
+        unlisten = off
+      }
+    })
+
+    return () => {
+      disposed = true
+      unlisten?.()
+    }
+  }, [])
+
   // While the voice strip is open, Enter sends and Escape cancels it instead of hiding Iris.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -511,7 +665,13 @@ function Overlay() {
 
     let disposed = false
     let off: (() => void) | undefined
-    void subscribeToOverlayHidden(() => voice.cancel()).then((unlisten) => {
+    void subscribeToOverlayHidden(() => {
+      voice.cancel()
+      setSelectionView(null)
+      setSelectionContext(null)
+      setCustomSelection(null)
+      setSelectionReplaceError(null)
+    }).then((unlisten) => {
       if (disposed) {
         unlisten()
       } else {
@@ -524,6 +684,85 @@ function Overlay() {
       off?.()
     }
   }, [voice.cancel])
+
+  // The Rust shortcut reads the selection before showing Iris, then announces it here.
+  useEffect(() => {
+    if (!isTauri()) {
+      return
+    }
+
+    let disposed = false
+    let offOpen: (() => void) | undefined
+    let offError: (() => void) | undefined
+
+    void subscribeToSelectionOpen((payload) => {
+      if (disposed) {
+        return
+      }
+      voice.cancel()
+      void stopSpeaking()
+      setSelectionView({ kind: 'actions', ...payload })
+      setSelectionContext(null)
+      setCustomSelection(null)
+      setSelectionReplaceError(null)
+      setRevealed(false)
+    }).then((off) => {
+      if (disposed) {
+        off()
+      } else {
+        offOpen = off
+      }
+    })
+
+    void subscribeToSelectionError((payload) => {
+      if (disposed) {
+        return
+      }
+      setSelectionView({ kind: 'error', ...payload })
+      setSelectionContext(null)
+      setCustomSelection(null)
+      setSelectionReplaceError(null)
+      setRevealed(false)
+    }).then((off) => {
+      if (disposed) {
+        off()
+      } else {
+        offError = off
+      }
+    })
+
+    return () => {
+      disposed = true
+      offOpen?.()
+      offError?.()
+    }
+  }, [voice.cancel])
+
+  // Escape cancels the selection strip and returns to the normal composer. It should not
+  // bubble to the window's normal hide handler.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the input ref is stable
+  useEffect(() => {
+    if (!selectionView) {
+      return
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') {
+        return
+      }
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      setSelectionView(null)
+      setSelectionContext(null)
+      setCustomSelection(null)
+      setSelectionReplaceError(null)
+      setSlashPrompt(null)
+      requestAnimationFrame(() => inputRef.current?.focus())
+    }
+
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [selectionView])
 
   const startCapture = async () => {
     if (!isTauri()) {
@@ -574,7 +813,14 @@ function Overlay() {
     }
   }
 
-  const submit = () => {
+  const chooseSlashPrompt = (prompt: QuickPrompt) => {
+    setSlashPrompt(prompt)
+    setValue('')
+    setPromptIndex(0)
+    requestAnimationFrame(() => inputRef.current?.focus())
+  }
+
+  const submit = async () => {
     const text = value.trim()
     if (
       (!text && files.attachments.length === 0) ||
@@ -587,13 +833,51 @@ function Overlay() {
       return
     }
 
+    const selection = customSelection
+    const quickPrompt = slashPrompt
+    if ((selection || quickPrompt) && !text) {
+      return
+    }
+
+    const prompt = selection
+      ? buildCustomSelectionPrompt(text, selection.text)
+      : text
+    const requestPrompt = quickPrompt
+      ? buildSelectionPrompt(quickPrompt.instruction, text)
+      : undefined
     const attachments = files.readyAttachments
     setValue('')
     files.commit()
-    setRevealed(revealResponse)
+    setRevealed(selection ? true : revealResponse)
     setIgnoredResponseId(null)
+    if (!selection) {
+      setSelectionContext(null)
+      setSelectionReplaceError(null)
+    }
+
     const conversationId = ensureQuickConversation()
-    void sendMessage(text, conversationId, attachments)
+    const messageId = await sendMessage(
+      prompt,
+      conversationId,
+      attachments,
+      selection?.text ?? (quickPrompt ? text : undefined),
+      selection ? selectionAutoSpeak : undefined,
+      requestPrompt,
+    )
+    if (quickPrompt) {
+      setSlashPrompt(null)
+    }
+    if (selection) {
+      setCustomSelection(null)
+      if (messageId) {
+        await saveSelectionProvenance(
+          messageId,
+          conversationId,
+          'custom',
+          selection,
+        )
+      }
+    }
     requestAnimationFrame(() => inputRef.current?.focus())
   }
 
@@ -626,12 +910,50 @@ function Overlay() {
         return
       }
 
+      const selection = customSelection
+      const quickPrompt = slashPrompt
+      if ((selection || quickPrompt) && !text) {
+        return
+      }
+      const prompt = selection
+        ? buildCustomSelectionPrompt(text, selection.text)
+        : text
+      const requestPrompt = quickPrompt
+        ? buildSelectionPrompt(quickPrompt.instruction, text)
+        : undefined
+
       setValue('')
       files.commit()
-      setRevealed(revealResponse)
+      setRevealed(selection ? true : revealResponse)
       setIgnoredResponseId(null)
+      if (!selection) {
+        setSelectionContext(null)
+        setSelectionReplaceError(null)
+      }
+
       const conversationId = ensureQuickConversation()
-      void sendMessage(text, conversationId, attachments)
+      const messageId = await sendMessage(
+        prompt,
+        conversationId,
+        attachments,
+        selection?.text ?? (quickPrompt ? text : undefined),
+        selection ? selectionAutoSpeak : undefined,
+        requestPrompt,
+      )
+      if (quickPrompt) {
+        setSlashPrompt(null)
+      }
+      if (selection) {
+        setCustomSelection(null)
+        if (messageId) {
+          await saveSelectionProvenance(
+            messageId,
+            conversationId,
+            'custom',
+            selection,
+          )
+        }
+      }
       return
     }
 
@@ -652,13 +974,29 @@ function Overlay() {
   }
 
   const openHistory = () => {
-    // Keep the history window on the quick conversation when it has content.
-    if (
+    // Keep the history window on the quick conversation when it has content. The overlay and the
+    // history window are separate webviews, so the selection is shared through localStorage and
+    // an event; changing this window's store alone would not move the other one.
+    const target =
       quickConversationId &&
       conversation &&
+      !conversation.archivedAt &&
       conversation.messages.length > 0
-    ) {
-      selectConversation(quickConversationId)
+        ? quickConversationId
+        : null
+
+    if (target) {
+      selectHistoryConversation(target)
+      selectConversation(target)
+      if (isTauri()) {
+        void emit('history:open-conversation', { conversationId: target })
+        // Make sure the new reply and its conversation metadata are in SQLite before the other
+        // window hydrates. Without this a very fast double-click can land on an empty page.
+        void flushChatStorage().finally(() => {
+          void invoke('show_main_window')
+        })
+        return
+      }
     }
 
     if (isTauri()) {
@@ -667,6 +1005,137 @@ function Overlay() {
     }
 
     window.location.assign('/')
+  }
+
+  const closeSelection = useCallback(() => {
+    setSelectionView(null)
+    setSelectionContext(null)
+    setCustomSelection(null)
+    setSelectionReplaceError(null)
+    setSlashPrompt(null)
+    hide()
+  }, [hide])
+
+  const openAccessibilitySettings = useCallback(async () => {
+    try {
+      await openSelectionSettings()
+      hide()
+    } catch (error) {
+      setSelectionReplaceError(
+        error instanceof Error ? error.message : String(error),
+      )
+    }
+  }, [hide])
+
+  const runSelectionAction = async (prompt: QuickPrompt) => {
+    if (!selectionView || selectionView.kind !== 'actions') {
+      return
+    }
+
+    const selection = selectionView
+    const selectionPrompt = buildSelectionPrompt(
+      prompt.instruction,
+      selection.text,
+    )
+
+    setSelectionView(null)
+    setSelectionContext(selection)
+    setSelectionReplaceError(null)
+    setSlashPrompt(null)
+
+    if (isTauri()) {
+      void stopSpeaking()
+    }
+    forceRevealOnChatChange.current = true
+    resetQuickConversation()
+    clearAttachments()
+    setValue('')
+    setRevealed(true)
+    setIgnoredResponseId(null)
+
+    const conversationId = ensureQuickConversation()
+    const messageId = await sendMessage(
+      selectionPrompt,
+      conversationId,
+      [],
+      selection.text,
+      selectionAutoSpeak,
+    )
+    if (messageId) {
+      await saveSelectionProvenance(
+        messageId,
+        conversationId,
+        prompt.id,
+        selection,
+      )
+    }
+  }
+
+  const startCustomSelection = () => {
+    if (!selectionView || selectionView.kind !== 'actions') {
+      return
+    }
+
+    const selection = selectionView
+    setSelectionView(null)
+    setSelectionContext(selection)
+    setCustomSelection(selection)
+    setSelectionReplaceError(null)
+    setSlashPrompt(null)
+
+    if (isTauri()) {
+      void stopSpeaking()
+    }
+    forceRevealOnChatChange.current = true
+    resetQuickConversation()
+    clearAttachments()
+    setValue('')
+    setRevealed(true)
+    setIgnoredResponseId(null)
+    requestAnimationFrame(() => inputRef.current?.focus())
+  }
+
+  const clearCustomSelection = useCallback(() => {
+    setCustomSelection(null)
+    setSelectionContext(null)
+    setSelectionReplaceError(null)
+  }, [])
+
+  const pasteWithSelection = async () => {
+    if (!selectionContext || !assistant?.content) {
+      return
+    }
+
+    try {
+      if (isTauri()) {
+        void stopSpeaking()
+      }
+      await pasteSelection(assistant.content)
+      hide()
+    } catch (error) {
+      setSelectionReplaceError(
+        error instanceof Error ? error.message : String(error),
+      )
+    }
+  }
+
+  const replaceWithSelection = async () => {
+    if (!selectionContext || !assistant?.content) {
+      return
+    }
+
+    try {
+      if (isTauri()) {
+        void stopSpeaking()
+      }
+      await replaceSelection(assistant.content)
+      setSelectionContext(null)
+      hide()
+    } catch (error) {
+      setSelectionReplaceError(
+        error instanceof Error ? error.message : String(error),
+      )
+    }
   }
 
   const canRegenerate = Boolean(assistant && !streaming && !isIgnored)
@@ -679,7 +1148,11 @@ function Overlay() {
     if (isTauri()) {
       void stopSpeaking()
     }
-    void regenerate(quickConversationId, assistant.id)
+    void regenerate(
+      quickConversationId,
+      assistant.id,
+      selectionContext ? selectionAutoSpeak : undefined,
+    )
   }
 
   return (
@@ -721,7 +1194,16 @@ function Overlay() {
               initial={{ opacity: 0, y: 8, filter: 'blur(6px)' }}
               transition={contentSpring}
             >
-              {voiceActive ? (
+              {selectionView ? (
+                <SelectionPanel
+                  panelRef={selectionPanelRef}
+                  view={selectionView}
+                  onAction={(action) => void runSelectionAction(action)}
+                  onCustom={startCustomSelection}
+                  onClose={closeSelection}
+                  onOpenSettings={() => void openAccessibilitySettings()}
+                />
+              ) : voiceActive ? (
                 <VoiceStrip
                   mode={
                     voice.status === 'recording' ? 'listening' : 'transcribing'
@@ -955,7 +1437,7 @@ function Overlay() {
                             <button
                               type="button"
                               className="group inline-flex max-w-full items-center gap-1 text-left text-[13px] leading-6 text-danger transition-colors hover:text-danger/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40"
-                              onClick={() => void openSettings('ai')}
+                              onClick={() => void openSettings('api')}
                             >
                               <span className="min-w-0 underline decoration-danger/35 underline-offset-2 transition-colors group-hover:decoration-danger/70">
                                 {assistant.error ??
@@ -1003,6 +1485,42 @@ function Overlay() {
                             <Tooltip.Content>Regenerate</Tooltip.Content>
                           </Tooltip>
                         ) : null}
+                        {selectionContext &&
+                        assistant?.content &&
+                        assistant.status === 'complete' ? (
+                          <>
+                            <Tooltip delay={500}>
+                              <Button
+                                isIconOnly
+                                aria-label={`Paste into ${selectionContext.appName}`}
+                                className="size-7 min-w-7 text-foreground/45"
+                                size="sm"
+                                variant="ghost"
+                                onPress={() => void pasteWithSelection()}
+                              >
+                                <ClipboardPaste className="size-3.5" />
+                              </Button>
+                              <Tooltip.Content>
+                                Paste into {selectionContext.appName}
+                              </Tooltip.Content>
+                            </Tooltip>
+                            <Tooltip delay={500}>
+                              <Button
+                                isIconOnly
+                                aria-label={`Replace selection in ${selectionContext.appName}`}
+                                className="size-7 min-w-7 text-foreground/45"
+                                size="sm"
+                                variant="ghost"
+                                onPress={() => void replaceWithSelection()}
+                              >
+                                <Replace className="size-3.5" />
+                              </Button>
+                              <Tooltip.Content>
+                                Replace selection in {selectionContext.appName}
+                              </Tooltip.Content>
+                            </Tooltip>
+                          </>
+                        ) : null}
                       </div>
                     </div>
                   ) : null}
@@ -1017,6 +1535,40 @@ function Overlay() {
                     )}
                     data-tauri-drag-region="deep"
                   >
+                    {customSelection ? (
+                      <div className="mb-2 flex items-center gap-2 rounded-xl border border-border/50 bg-surface/45 px-2.5 py-1.5 text-[11px] leading-4">
+                        <Sparkles className="size-3.5 shrink-0 text-primary" />
+                        <span className="shrink-0 text-muted">
+                          Selected from {customSelection.appName}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-foreground/55">
+                          “{customSelection.text}”
+                        </span>
+                        <Button
+                          isIconOnly
+                          aria-label="Clear selected text"
+                          className="size-6 min-w-6 shrink-0 text-foreground/45"
+                          size="sm"
+                          variant="ghost"
+                          onPress={clearCustomSelection}
+                        >
+                          <X className="size-3" />
+                        </Button>
+                      </div>
+                    ) : null}
+                    {slashOpen ? (
+                      <QuickPromptMenu
+                        activeIndex={activePromptIndex}
+                        prompts={slashMatches}
+                        onSelect={chooseSlashPrompt}
+                      />
+                    ) : null}
+                    {slashPrompt ? (
+                      <QuickPromptChip
+                        prompt={slashPrompt}
+                        onClear={() => setSlashPrompt(null)}
+                      />
+                    ) : null}
                     <AttachmentStrip
                       attachments={files.attachments}
                       className="pb-2"
@@ -1048,15 +1600,63 @@ function Overlay() {
                         aria-label="Ask Iris"
                         className="max-h-[120px] min-h-10 w-full resize-none border-0 bg-transparent px-1 py-2 text-[15px] leading-6 text-foreground shadow-none placeholder:text-foreground/35 focus-visible:ring-0"
                         placeholder={
-                          hasResponse
-                            ? 'Ask a follow-up…'
-                            : 'Ask Iris anything…'
+                          customSelection
+                            ? 'Tell Iris what to do with the selection…'
+                            : slashPrompt
+                              ? `Type or paste text to ${slashPrompt.name.toLowerCase()}…`
+                              : hasResponse
+                                ? 'Ask a follow-up…'
+                                : 'Ask Iris anything…'
                         }
                         rows={1}
                         value={value}
                         variant="secondary"
-                        onChange={(event) => setValue(event.target.value)}
+                        onChange={(event) => {
+                          setValue(event.target.value)
+                          setPromptIndex(0)
+                        }}
                         onKeyDown={(event) => {
+                          if (slashOpen) {
+                            if (event.key === 'ArrowDown') {
+                              event.preventDefault()
+                              setPromptIndex((index) =>
+                                slashMatches.length === 0
+                                  ? 0
+                                  : (index + 1) % slashMatches.length,
+                              )
+                              return
+                            }
+                            if (event.key === 'ArrowUp') {
+                              event.preventDefault()
+                              setPromptIndex((index) =>
+                                slashMatches.length === 0
+                                  ? 0
+                                  : (index - 1 + slashMatches.length) %
+                                    slashMatches.length,
+                              )
+                              return
+                            }
+                            if (event.key === 'Escape') {
+                              event.preventDefault()
+                              event.stopPropagation()
+                              setValue('')
+                              setPromptIndex(0)
+                              return
+                            }
+                            if (
+                              event.key === 'Enter' &&
+                              !event.shiftKey &&
+                              !event.nativeEvent.isComposing
+                            ) {
+                              event.preventDefault()
+                              const prompt = slashMatches[activePromptIndex]
+                              if (prompt) {
+                                chooseSlashPrompt(prompt)
+                              }
+                              return
+                            }
+                          }
+
                           if (event.key === 'Enter' && !event.shiftKey) {
                             if (event.nativeEvent.isComposing) {
                               return
@@ -1091,10 +1691,13 @@ function Overlay() {
                         <SendButton
                           isDisabled={
                             streaming ||
+                            slashOpen ||
                             !hydrated ||
                             !quickLoaded ||
                             files.pending ||
                             files.hasError ||
+                            (Boolean(customSelection) && !value.trim()) ||
+                            (Boolean(slashPrompt) && !value.trim()) ||
                             (!value.trim() && files.attachments.length === 0)
                           }
                           onPress={submit}

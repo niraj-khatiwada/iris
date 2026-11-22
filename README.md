@@ -40,7 +40,7 @@ bun run tauri:dev
 
 The first Rust build takes a few minutes; later builds are incremental.
 
-Open Settings (`⌘,`) and add your DeepSeek API key and, if needed, the API origin and model. The default origin is `https://api.deepseek.com` and the default model is `deepseek-flash`. The **Prompt** section edits the Iris Island and main chat system prompts; the main chat follows the island prompt by default.
+Open Settings (`⌘,`) and add your DeepSeek API key and, if needed, the API origin and model in **API Key**. The default origin is `https://api.deepseek.com` and the default model is `deepseek-flash`. **AI Prompts → System prompts** edits the Iris Island and main chat prompts; the main chat follows the island prompt by default.
 
 To work on the UI without the native shell:
 
@@ -60,6 +60,9 @@ Iris launches as a floating quick-chat window, not a normal app window.
 - Click the microphone in the overlay to record. Stop to transcribe; **Send after listening**
   (Settings → Voice, on by default) sends the transcript immediately, or places it in the input
   when off. The blob switches to listening/speaking states.
+- **⌘⇧A** captures the whole display under the mouse, attaches the screenshot to the current
+  quick chat, and focuses the prompt. Type the question and press Enter; nothing is sent
+  automatically. This is separate from **⌘⇧S**, which remains the region/annotation capture.
 - It sits above normal and full-screen apps and on every macOS Space, bottom-centred, with no
   sidebar and no message bubbles.
 - A transparent, click-through canvas covers every display behind it. It is the future surface
@@ -67,6 +70,7 @@ Iris launches as a floating quick-chat window, not a normal app window.
 - It stays open when another app takes focus. **Esc** or the close button hides it; the shortcut
   toggles it.
 - The clock button opens the history window, where the older conversation UI still lives.
+- Double-click the Iris mascot to open History on the current quick conversation.
 - The AI blob in the menu bar offers **Ask Iris**, **History**, and **Quit Iris**. Iris keeps
   running when the overlay hides; quit from there.
 - Every quick chat is a normal UUID conversation, so it appears in history and owns its own
@@ -84,6 +88,43 @@ Iris launches as a floating quick-chat window, not a normal app window.
 The overlay is its own webview (`overlay.html` → `src/ui/Overlay`). It shares the Zustand chat
 store with the history window and rehydrates when history comes forward. It does not dismiss on
 focus loss: it is a panel, not a transient popover.
+
+## Selection actions
+
+Select text in any app and press **⌘⇧Space** (configurable in Settings → Shortcuts → **Ask
+about selection**). Iris reads the selection through macOS Accessibility, falling back to a
+temporary copy when an app does not expose its selection, and shows a compact strip in the
+overlay:
+
+- **Explain**, **Summarize**, **Improve**, **Simplify**, **Translate**, **Fix grammar**,
+  **Extract tasks**, and **Reply**. These are editable quick prompts, not fixed buttons.
+- **Custom** opens a new quick chat with the selection attached as a chip. Type or dictate an
+  instruction, and Iris sends it together with the selected text.
+- **AI Prompts → Quick prompts** edits the name, icon, and instruction of every prompt, adds
+  your own, and drag-reorders the strip. The same order is used by the `/` menu in both
+  composers; type `/` in an empty composer, choose a prompt, then type or paste the text it
+  should act on. The menu only appears while the text after `/` has no whitespace and matches
+  at least one prompt; otherwise the slash is treated as ordinary text and the menu disappears.
+  Matching uses the prompt name only, so `/repl` shows Reply without instruction-based matches.
+  Built-in prompts include the rule `Do not use em-dash, use ";" instead of em-dash.`; prompts
+  you add yourself are left exactly as written.
+- The action starts a new quick chat, so the result appears in the normal response block.
+- **Copy** copies the result. **Paste** inserts it at the source app's focused caret, which is
+  what a reply composer uses. **Replace selection** overwrites the originally selected text.
+  The response footer order is Copy, Read aloud, Regenerate, Paste, Replace.
+- Selection results are **not** spoken automatically by default. Settings → Voice →
+  **Read selection results aloud** opts in; manual Read aloud always works.
+- Iris records the source app, bundle id, action, and selection stats in SQLite, linked to the
+  user message, so provenance survives restarts.
+- **Esc** cancels the selection strip and returns to the normal Iris composer; the **X**
+  button closes the overlay.
+- Secure and password fields are never read or replaced.
+
+The first use needs Accessibility access; the error strip links directly to System Settings →
+Privacy & Security → Accessibility. After granting access, macOS may require restarting Iris.
+Iris hides its own overlay before reading a selection. When Accessibility cannot inspect the
+focused field, it falls back to a temporary copy in every app, including T3 Code and other
+Chromium/Electron apps; secure fields are still rejected when Iris can identify them.
 
 ## Scripts
 
@@ -185,8 +226,16 @@ voice, wraps the raw PCM in a WAV, and plays it with macOS `afplay`. A new messa
 chat, or quitting stops the current speech. The manual **Read aloud** button uses the same pipeline
 through `speak_text`, so any completed reply can be spoken without regenerating it. While that
 conversation is preparing or playing audio, the button turns into **Stop** instead of restarting.
+Before TTS, `core/read_aloud.rs` condenses a long (or code/table-heavy) reply into a 60–120 word
+spoken summary for automatic playback, so Iris does not read an entire essay aloud; the full reply
+stays on screen. The summary is cached in SQLite (`message_summaries`) against the assistant
+message, so a later automatic playback reuses it. Settings → Voice → **Summarize automatic
+playback** controls this; the manual **Read aloud** button always speaks the original reply.
+In the history window, an assistant message with a cached summary gets its own `…` menu with a
+**Show summary** switch. While it is on, that reply displays its spoken version, and Copy and
+Read aloud use that text; other messages stay unchanged.
 
-The API key is stored in the Iris SQLite database (`credential`), saved from Settings → AI. The
+The API key is stored in the Iris SQLite database (`credential`), saved from Settings → API Key. The
 webview never receives it: `send_message`, `speak_text`, and `transcribe_audio` read it inside Rust,
 and once saved Settings shows a "Key saved" badge with Replace and Remove instead of the key itself.
 
@@ -229,8 +278,8 @@ feature-parity plan, not just a custom URL.
   outright instead of being archived.
 - New quick chats create a fresh UUID conversation and leave the previous one in History; no
   messages or attachment folders are moved. `⌘⇧N` toggles back to the previous quick chat.
-- The open sidebar footer shows **API key is not set** when the credential table is empty; its arrow opens Settings → AI at the API key field. The check uses the Rust `has_api_key` command so the cached localStorage flag cannot mask a missing key.
-- Settings → AI → **Prompt** edits the Iris Island and main chat system prompts; the main chat follows the island prompt by default. Reset restores the built-in Iris instructions. Settings live in `localStorage`; the DeepSeek API key lives in the SQLite `credential` table and
+- The open sidebar footer shows **API key is not set** when the credential table is empty; its arrow opens Settings → API Key at the API key field. The check uses the Rust `has_api_key` command so the cached localStorage flag cannot mask a missing key.
+- Settings → AI Prompts → **System prompts** edits the Iris Island and main chat system prompts; the main chat follows the island prompt by default. Reset restores the built-in Iris instructions. **Quick prompts** in the same panel are shared by the selection strip and the `/` menu; drag to reorder, edit the instruction, or add a new prompt with its own name, icon, and prompt. Settings live in `localStorage`; the DeepSeek API key lives in the SQLite `credential` table and
   is read only inside Rust.
 - The composer has two request toggles: **DeepThink** sends `thinking: { type: "adaptive" }`, and
   **Search** adds DeepSeek's `deepseek_web_search` server tool. When the newest message contains a
@@ -272,6 +321,10 @@ Chat history is stored in Rust with `rusqlite`, not by reaching into SQL from th
 
 - `conversations` — id, title, created_at, updated_at, archived_at
 - `messages` — id, conversation_id, role, content, created_at, status, error, attachments
+- `message_summaries` — message_id, conversation_id, summary, created_at; the cached spoken
+  version used by automatic read-aloud
+- `selection_metadata` — source app, bundle id, pid, action, and selection stats for text
+  selected outside Iris, keyed to the user message
 - `credential` — name, api_key, updated_at (the single key used for every request)
 
 The database lives at `Application Support/com.iris.desktop/iris.db` and is the only conversation

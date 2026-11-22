@@ -3,7 +3,7 @@ use tauri::{AppHandle, Emitter, State};
 use crate::core::attachments;
 use crate::core::storage::{
     SearchResults, Storage, StoredAttachment, StoredConversation, StoredConversationSummary,
-    StoredMessage, StoredMessagePage,
+    StoredMessage, StoredMessagePage, StoredSpokenSummary,
 };
 
 #[tauri::command]
@@ -21,6 +21,14 @@ pub fn load_message_page(
     limit: usize,
 ) -> Result<StoredMessagePage, String> {
     storage.load_message_page(&conversation_id, before.as_deref(), limit)
+}
+
+#[tauri::command]
+pub fn load_spoken_summaries(
+    storage: State<'_, Storage>,
+    conversation_id: String,
+) -> Result<Vec<StoredSpokenSummary>, String> {
+    storage.spoken_summaries(&conversation_id)
 }
 
 #[tauri::command]

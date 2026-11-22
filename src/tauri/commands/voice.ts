@@ -13,7 +13,7 @@ export function speakText(request: {
   baseUrl: string
   voice: string
 }) {
-  return invoke<void>('speak_text', request)
+  return invoke<void>('speak_text', { request })
 }
 
 /** Transcribes a WAV recording through DeepSeek's ASR tool under the configured base URL. */

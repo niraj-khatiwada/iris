@@ -6,14 +6,18 @@ mod sys;
 mod tauri_commands;
 mod utils;
 
+use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 
+use tauri::Emitter;
 use tauri::Manager;
 use tauri_commands::chat::GenerationState;
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+use tauri_plugin_global_shortcut::{
+    GlobalShortcutExt, Shortcut, ShortcutState as GlobalShortcutState,
+};
 
 static QUITTING: AtomicBool = AtomicBool::new(false);
 
@@ -69,6 +73,7 @@ fn main() {
             app.manage(crate::sys::overlay::OverlayPosition::load(app.handle()));
             crate::sys::menu::remove_close_window_items(app.handle());
             app.manage(crate::sys::speech::SpeechState::default());
+            app.manage(crate::sys::selection::SelectionState::default());
             app.manage(crate::tauri_commands::preview::PreviewState::default());
             let storage =
                 crate::core::storage::Storage::open(app.handle()).map_err(std::io::Error::other)?;
@@ -83,8 +88,23 @@ fn main() {
             // Settings replaces it at runtime with the user's choice.
             app.handle().plugin(
                 tauri_plugin_global_shortcut::Builder::new()
-                    .with_handler(|app, _shortcut, event| {
-                        if event.state == ShortcutState::Pressed {
+                    .with_handler(|app, shortcut, event| {
+                        if event.state != GlobalShortcutState::Pressed {
+                            return;
+                        }
+
+                        let state = app.state::<crate::tauri_commands::shortcut::ShortcutState>();
+                        if state.is_selection(shortcut) {
+                            crate::sys::selection::trigger(app.clone());
+                            return;
+                        }
+
+                        if state.is_screen_ask(shortcut) {
+                            let _ = app.emit(crate::utils::event::SCREEN_ASK, ());
+                            return;
+                        }
+
+                        if state.is_open(shortcut) {
                             if let Err(error) = crate::sys::overlay::toggle(app) {
                                 log::error!("Failed to toggle the Iris overlay: {error}");
                             }
@@ -93,19 +113,37 @@ fn main() {
                     .build(),
             )?;
 
-            let default_shortcut = crate::tauri_commands::shortcut::DEFAULT_OPEN_SHORTCUT;
-            let registered = match app.global_shortcut().register(default_shortcut) {
-                Ok(()) => {
-                    log::info!("Registered global shortcut {default_shortcut}");
-                    true
-                }
-                Err(error) => {
-                    log::warn!("Could not register global shortcut {default_shortcut}: {error}");
-                    false
+            let open_default =
+                Shortcut::from_str(crate::tauri_commands::shortcut::DEFAULT_OPEN_SHORTCUT).ok();
+            let selection_default =
+                Shortcut::from_str(crate::tauri_commands::shortcut::DEFAULT_SELECTION_SHORTCUT)
+                    .ok();
+            let screen_ask_default =
+                Shortcut::from_str(crate::tauri_commands::shortcut::DEFAULT_SCREEN_ASK_SHORTCUT)
+                    .ok();
+
+            let register_default = |shortcut: Option<Shortcut>, label: &str| {
+                let shortcut = shortcut?;
+                match app.global_shortcut().register(shortcut) {
+                    Ok(()) => {
+                        log::info!("Registered global {label} shortcut {shortcut}");
+                        Some(shortcut)
+                    }
+                    Err(error) => {
+                        log::warn!(
+                            "Could not register global {label} shortcut {shortcut}: {error}"
+                        );
+                        None
+                    }
                 }
             };
+            let registered_open = register_default(open_default, "open");
+            let registered_selection = register_default(selection_default, "selection");
+            let registered_screen_ask = register_default(screen_ask_default, "screen ask");
             app.manage(crate::tauri_commands::shortcut::ShortcutState::new(
-                registered.then(|| default_shortcut.to_string()),
+                registered_open,
+                registered_selection,
+                registered_screen_ask,
             ));
             // The menu bar is how Iris is reached when both windows are hidden.
             let tray = (|| -> tauri::Result<()> {
@@ -201,14 +239,25 @@ fn main() {
             tauri_commands::preview::copy_preview_image,
             tauri_commands::preview::save_preview_image,
             tauri_commands::screen::start_screen_capture,
+            tauri_commands::screen::capture_screen_for_ask,
             tauri_commands::screen::capture_annotated_screen,
             tauri_commands::screen::close_screen_capture,
             tauri_commands::screen::get_screen_capture_permission,
             tauri_commands::screen::request_screen_capture_permission,
             tauri_commands::screen::open_screen_capture_settings,
+            tauri_commands::selection::get_selection_permission,
+            tauri_commands::selection::request_selection_permission,
+            tauri_commands::selection::open_selection_settings,
+            tauri_commands::selection::load_selection_metadata,
+            tauri_commands::selection::paste_selection,
+            tauri_commands::selection::replace_selection,
+            tauri_commands::selection::save_selection_metadata,
             tauri_commands::shortcut::set_open_shortcut,
+            tauri_commands::shortcut::set_selection_shortcut,
+            tauri_commands::shortcut::set_screen_ask_shortcut,
             tauri_commands::storage::load_conversations,
             tauri_commands::storage::load_message_page,
+            tauri_commands::storage::load_spoken_summaries,
             tauri_commands::storage::search_history,
             tauri_commands::storage::save_conversation_meta,
             tauri_commands::storage::save_message,

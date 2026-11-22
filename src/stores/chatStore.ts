@@ -127,9 +127,22 @@ type ChatState = {
     content: string,
     conversationId?: string,
     attachments?: ChatAttachment[],
-  ) => Promise<void>
+    /** A shorter title seed for prompts that wrap the user's actual text (selection actions). */
+    titleSeed?: string,
+    /** Overrides the normal auto-speak setting for this reply. */
+    autoSpeak?: boolean,
+    /**
+     * Sent as the newest user turn while the stored message keeps `content`. Used by the `/`
+     * quick-prompt menu so History shows the user's text, not the wrapped instruction.
+     */
+    requestPrompt?: string,
+  ) => Promise<string | null>
   /** Replaces an assistant reply with a fresh response to the same user message. */
-  regenerate: (conversationId: string, messageId: string) => Promise<void>
+  regenerate: (
+    conversationId: string,
+    messageId: string,
+    autoSpeak?: boolean,
+  ) => Promise<void>
   /** Rewrites a user message and answers again, dropping everything that followed it. */
   editAndResend: (
     conversationId: string,
@@ -231,7 +244,16 @@ async function runAssistantReply({
   get,
   conversationId,
   assistantMessageId,
-}: RunContext & { conversationId: string; assistantMessageId: string }) {
+  autoSpeak,
+  requestPrompt,
+}: RunContext & {
+  conversationId: string
+  assistantMessageId: string
+  /** When set, overrides the global auto-speak setting for this reply. */
+  autoSpeak?: boolean
+  /** Replaces the newest user turn in the request history without touching the stored message. */
+  requestPrompt?: string
+}) {
   const conversation = get().conversations.find(
     (item) => item.id === conversationId,
   )
@@ -245,6 +267,16 @@ async function runAssistantReply({
       (message) => message.id !== assistantMessageId,
     ),
   )
+
+  // A quick prompt wraps the user's text for this request only; the visible message stays clean.
+  if (requestPrompt) {
+    for (let index = history.length - 1; index >= 0; index -= 1) {
+      if (history[index].role === 'user') {
+        history[index] = { ...history[index], content: requestPrompt }
+        break
+      }
+    }
+  }
 
   // Another window (Settings) may have changed the model or base URL since this store hydrated.
   await useSettingsStore.persist.rehydrate()
@@ -261,7 +293,9 @@ async function runAssistantReply({
     baseUrl: settings.baseUrl,
     model: settings.model,
     systemPrompt,
-    autoSpeak: settings.autoSpeak,
+    autoSpeak: autoSpeak ?? settings.autoSpeak,
+    assistantMessageId,
+    summarizeSpeech: settings.summarizeSpeech,
     deepThink: settings.deepThink,
     webSearch: settings.webSearch,
     ttsVoice: settings.ttsVoice,
@@ -872,11 +906,19 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     })
   },
 
-  sendMessage: async (content, targetConversationId, attachments) => {
+  sendMessage: async (
+    content,
+    targetConversationId,
+    attachments,
+    titleSeed,
+    autoSpeak,
+    requestPrompt,
+  ) => {
     const text = content.trim()
+    const titleText = titleSeed?.trim() || text
     const files = attachments ?? []
     if (!text && files.length === 0) {
-      return
+      return null
     }
 
     cancelActiveRun()
@@ -890,7 +932,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       )
     ) {
       if (targetConversationId) {
-        return
+        return null
       }
       conversationId = state.createConversation()
     }
@@ -900,7 +942,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     )
     if (!conversation || conversation.archivedAt) {
       // Archived conversations are read-only.
-      return
+      return null
     }
 
     const now = Date.now()
@@ -928,8 +970,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       .map((file) => file.name)
       .filter(Boolean)
       .join(', ')
-    const fallbackTitle = text
-      ? titleFromMessage(text)
+    const fallbackTitle = titleText
+      ? titleFromMessage(titleText)
       : (files[0]?.name ?? 'Attachment')
 
     set((current) => ({
@@ -951,7 +993,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         baseUrl: settings.baseUrl,
         model: settings.model,
         prompt:
-          text ||
+          titleText ||
           (sharedFileNames
             ? `The user shared ${sharedFileNames}.`
             : 'The user shared a file with no text.'),
@@ -979,10 +1021,14 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       get,
       conversationId: conversationId as string,
       assistantMessageId: assistantMessage.id,
+      autoSpeak,
+      requestPrompt,
     })
+
+    return userMessage.id
   },
 
-  regenerate: async (conversationId, messageId) => {
+  regenerate: async (conversationId, messageId, autoSpeak) => {
     const conversation = get().conversations.find(
       (item) => item.id === conversationId,
     )
@@ -1025,6 +1071,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       get,
       conversationId,
       assistantMessageId: reply.id,
+      autoSpeak,
     })
   },
 

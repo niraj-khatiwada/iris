@@ -7,6 +7,8 @@ use serde::Serialize;
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::core::read_aloud;
+use crate::core::storage::Storage;
 use crate::utils::event;
 
 const TTS_SAMPLE_RATE: u32 = 24_000;
@@ -31,6 +33,21 @@ struct ActiveSpeech {
     child: Child,
     path: std::path::PathBuf,
     conversation_id: String,
+}
+
+/// One read-aloud request. `summarize` condenses long replies before they reach TTS.
+pub struct SpeechRequest {
+    pub conversation_id: String,
+    /// The assistant message this reply belongs to, when automatic read-aloud should cache its
+    /// spoken summary.
+    pub message_id: Option<String>,
+    pub text: String,
+    pub voice: String,
+    pub api_key: String,
+    pub base_url: String,
+    pub model: String,
+    pub tts_url: String,
+    pub summarize: bool,
 }
 
 /// One spoken reply at a time. `epoch` invalidates a TTS request that was superseded while
@@ -87,16 +104,43 @@ pub fn stop(app: &AppHandle) {
     }
 }
 
+/// Reads the spoken summary already generated for this assistant message, if any.
+fn cached_summary(app: &AppHandle, message_id: &str) -> Option<String> {
+    let storage = app.try_state::<Storage>()?;
+    match storage.spoken_summary(message_id) {
+        Ok(summary) => summary,
+        Err(error) => {
+            log::warn!("Could not read the stored spoken summary: {error}");
+            None
+        }
+    }
+}
+
+/// Saves the spoken summary so a later automatic playback never pays for the same summary again.
+fn store_summary(app: &AppHandle, conversation_id: &str, message_id: &str, summary: &str) {
+    let Some(storage) = app.try_state::<Storage>() else {
+        return;
+    };
+    if let Err(error) = storage.save_spoken_summary(conversation_id, message_id, summary) {
+        log::warn!("Could not store the spoken summary: {error}");
+    }
+}
+
 /// Fetches the configured TTS audio and plays it automatically. The response is filtered by the
 /// service (`filter_markdown`) before it is spoken.
-pub async fn speak(
-    app: AppHandle,
-    conversation_id: String,
-    api_key: String,
-    tts_url: String,
-    voice: String,
-    text: String,
-) {
+pub async fn speak(app: AppHandle, request: SpeechRequest) {
+    let SpeechRequest {
+        conversation_id,
+        message_id,
+        mut text,
+        voice,
+        api_key,
+        base_url,
+        model,
+        tts_url,
+        summarize,
+    } = request;
+
     let Some(state) = app.try_state::<SpeechState>() else {
         return;
     };
@@ -125,6 +169,39 @@ pub async fn speak(
         );
         return;
     }
+
+    // Summarize before paying for TTS. `speech:preparing` is already visible, and Stop bumps the
+    // epoch, so a summary that finishes after Stop is discarded without starting playback.
+    if summarize && read_aloud::needs_summary(&text) {
+        let stored = message_id
+            .as_deref()
+            .and_then(|id| cached_summary(&app, id));
+
+        if let Some(summary) = stored {
+            log::info!("Read-aloud is reusing the stored spoken summary");
+            text = summary;
+        } else {
+            match read_aloud::summarize(&api_key, &base_url, &model, &text).await {
+                Ok(summary) => {
+                    log::info!("Read-aloud is using a spoken summary");
+                    if let Some(id) = message_id.as_deref() {
+                        store_summary(&app, &conversation_id, id, &summary);
+                    }
+                    text = summary;
+                }
+                Err(error) => {
+                    log::warn!(
+                        "Could not create a spoken summary; reading the full reply: {error}"
+                    );
+                }
+            }
+        }
+
+        if !state.is_current(epoch) {
+            return;
+        }
+    }
+
     let client = match crate::utils::http::client()
         .timeout(Duration::from_secs(300))
         .build()

@@ -1,4 +1,9 @@
-import type { IrisAvatar, ThemeMode, TtsVoice } from '@/types/settings'
+import type {
+  IrisAvatar,
+  QuickPrompt,
+  ThemeMode,
+  TtsVoice,
+} from '@/types/settings'
 
 /** The default Iris accent, also used when the avatar follows the theme colour. */
 export const DEFAULT_PRIMARY_COLOR = '#7adaa5'
@@ -15,6 +20,84 @@ export const DEFAULT_IRIS_AVATAR: IrisAvatar = {
   bowTie: false,
   accessoryColor: '#27272b',
 }
+
+/**
+ * Selection actions double as quick prompts: they are editable, reorderable, and available from
+ * the `/` menu in both composers.
+ */
+export const NO_EM_DASH_INSTRUCTION =
+  'Do not use em-dash, use ";" instead of em-dash.'
+
+function withNoEmDash(instruction: string) {
+  return `${instruction} ${NO_EM_DASH_INSTRUCTION}`
+}
+
+export const DEFAULT_QUICK_PROMPTS: QuickPrompt[] = [
+  {
+    id: 'explain',
+    name: 'Explain',
+    icon: 'lightbulb',
+    instruction: withNoEmDash(
+      'Explain the selected text clearly and concisely. Keep it practical and avoid unnecessary formatting.',
+    ),
+  },
+  {
+    id: 'summarize',
+    name: 'Summarize',
+    icon: 'align-left',
+    instruction: withNoEmDash(
+      'Summarize the selected text. Keep the key facts, numbers, names, decisions, and action items.',
+    ),
+  },
+  {
+    id: 'rewrite',
+    name: 'Improve',
+    icon: 'pen-line',
+    instruction: withNoEmDash(
+      'Improve the selected text to be clearer, tighter, and more natural while preserving its meaning and tone. Return only the replacement text, with no preamble or surrounding quotes.',
+    ),
+  },
+  {
+    id: 'simplify',
+    name: 'Simplify',
+    icon: 'wand',
+    instruction: withNoEmDash(
+      'Simplify the selected text into plain, concise language. Keep the meaning and key facts, remove jargon and unnecessary detail, and return only the simplified text, with no preamble or surrounding quotes.',
+    ),
+  },
+  {
+    id: 'translate',
+    name: 'Translate',
+    icon: 'languages',
+    instruction: withNoEmDash(
+      'Translate the selected text into English. Return only the translation, with no preamble or surrounding quotes.',
+    ),
+  },
+  {
+    id: 'fix',
+    name: 'Fix grammar',
+    icon: 'check-check',
+    instruction: withNoEmDash(
+      'Correct the grammar, spelling, and punctuation of the selected text while preserving its meaning and tone. Return only the corrected text, with no preamble or surrounding quotes.',
+    ),
+  },
+  {
+    id: 'tasks',
+    name: 'Extract tasks',
+    icon: 'list-todo',
+    instruction: withNoEmDash(
+      'Extract the actionable tasks from the selected text. Return a short bullet list, keeping owners and deadlines when present.',
+    ),
+  },
+  {
+    id: 'reply',
+    name: 'Reply',
+    icon: 'reply',
+    instruction: withNoEmDash(
+      'Draft a concise, natural reply to the selected message. Return only the reply body, ready to send, with no preamble or surrounding quotes.',
+    ),
+  },
+]
 
 /** Suggested prompts shown on the welcome screen. */
 export const SUGGESTIONS = [
@@ -69,6 +152,10 @@ export const TTS_PATH = '/v1/tools/tts'
 export const ASR_PATH = '/v1/tools/asr'
 export const DEFAULT_TTS_VOICE: TtsVoice = 'stella'
 export const DEFAULT_OPEN_SHORTCUT = 'commandorcontrol+space'
+/** Captures selected text in any app and opens the selection actions; configurable in Settings. */
+export const DEFAULT_SELECTION_SHORTCUT = 'CommandOrControl+Shift+Space'
+/** Captures the whole current display, attaches it, and focuses the prompt. */
+export const DEFAULT_SCREEN_ASK_SHORTCUT = 'CommandOrControl+Shift+KeyA'
 /** Focuses the sidebar search in the history window; configurable in Settings → Shortcuts. */
 export const DEFAULT_SEARCH_SHORTCUT = 'CommandOrControl+Shift+KeyF'
 export const TTS_VOICES: ReadonlyArray<{ id: TtsVoice; label: string }> = [

@@ -4,20 +4,29 @@ import { useEffect, useRef, useState } from 'react'
 
 import AttachmentStrip from '@/components/AttachmentStrip'
 import ChatToggles from '@/components/ChatToggles'
+import QuickPromptChip from '@/components/QuickPromptChip'
+import QuickPromptMenu from '@/components/QuickPromptMenu'
 import SendButton from '@/components/SendButton'
 import SpeechControl from '@/components/SpeechControl'
 import { NO_WRITING_ASSIST } from '@/constants'
 import { useAttachments } from '@/hooks/useAttachments'
 import { useSpeechPlayback } from '@/hooks/useSpeechPlayback'
 import { useChatStore } from '@/stores/chatStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { useUIStore } from '@/stores/uiStore'
+import type { QuickPrompt } from '@/types/settings'
+import { filterQuickPrompts } from '@/utils/quickPrompts'
+import { buildSelectionPrompt } from '@/utils/selection'
 import { cn } from '@/utils/tailwind'
 
 function Composer() {
   const [value, setValue] = useState('')
+  const [slashPrompt, setSlashPrompt] = useState<QuickPrompt | null>(null)
+  const [promptIndex, setPromptIndex] = useState(0)
   useSpeechPlayback()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const sendMessage = useChatStore((state) => state.sendMessage)
+  const quickPrompts = useSettingsStore((state) => state.quickPrompts)
   const hydrated = useChatStore((state) => state.hydrated)
   const activeConversation = useChatStore((state) =>
     state.conversations.find((item) => item.id === state.activeConversationId),
@@ -35,6 +44,21 @@ function Composer() {
     createConversation,
   })
 
+  const slashQuery =
+    !slashPrompt &&
+    !streaming &&
+    value.startsWith('/') &&
+    !/\s/.test(value.slice(1))
+      ? value.slice(1)
+      : null
+  const slashMatches =
+    slashQuery === null ? [] : filterQuickPrompts(quickPrompts, slashQuery)
+  const slashOpen = slashQuery !== null && slashMatches.length > 0
+  const activePromptIndex =
+    slashMatches.length === 0
+      ? 0
+      : Math.min(promptIndex, slashMatches.length - 1)
+
   useEffect(() => {
     if (focusToken > 0) {
       textareaRef.current?.focus()
@@ -51,6 +75,7 @@ function Composer() {
       return
     }
     previousConversationId.current = activeConversationId
+    setSlashPrompt(null)
     if (previous !== null) {
       files.clear()
     }
@@ -67,10 +92,18 @@ function Composer() {
     element.style.height = `${Math.min(element.scrollHeight, 168)}px`
   }, [value])
 
+  const chooseSlashPrompt = (prompt: QuickPrompt) => {
+    setSlashPrompt(prompt)
+    setValue('')
+    setPromptIndex(0)
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }
+
   const submit = () => {
     const text = value.trim()
     if (
       (!text && files.attachments.length === 0) ||
+      (Boolean(slashPrompt) && !text) ||
       files.pending ||
       files.hasError ||
       streaming ||
@@ -81,9 +114,20 @@ function Composer() {
     }
 
     const attachments = files.readyAttachments
+    const requestPrompt = slashPrompt
+      ? buildSelectionPrompt(slashPrompt.instruction, text)
+      : undefined
     setValue('')
+    setSlashPrompt(null)
     files.commit()
-    void sendMessage(text, undefined, attachments)
+    void sendMessage(
+      text,
+      undefined,
+      attachments,
+      undefined,
+      undefined,
+      requestPrompt,
+    )
     requestAnimationFrame(() => textareaRef.current?.focus())
   }
 
@@ -96,6 +140,19 @@ function Composer() {
         )}
         {...files.dragHandlers}
       >
+        {slashOpen ? (
+          <QuickPromptMenu
+            activeIndex={activePromptIndex}
+            prompts={slashMatches}
+            onSelect={chooseSlashPrompt}
+          />
+        ) : null}
+        {slashPrompt ? (
+          <QuickPromptChip
+            prompt={slashPrompt}
+            onClear={() => setSlashPrompt(null)}
+          />
+        ) : null}
         <AttachmentStrip
           attachments={files.attachments}
           className="px-2 pt-1.5"
@@ -116,12 +173,58 @@ function Composer() {
             ref={textareaRef}
             aria-label="Message Iris"
             className="max-h-44 min-h-11 w-full resize-none border-0 bg-transparent px-1 py-2.5 text-[15px] leading-6 shadow-none focus-visible:ring-0"
-            placeholder="Message Iris…"
+            placeholder={
+              slashPrompt
+                ? `Type or paste text to ${slashPrompt.name.toLowerCase()}…`
+                : 'Message Iris…'
+            }
             rows={1}
             value={value}
             variant="secondary"
-            onChange={(event) => setValue(event.target.value)}
+            onChange={(event) => {
+              setValue(event.target.value)
+              setPromptIndex(0)
+            }}
             onKeyDown={(event) => {
+              if (slashOpen) {
+                if (event.key === 'ArrowDown') {
+                  event.preventDefault()
+                  setPromptIndex((index) =>
+                    slashMatches.length === 0
+                      ? 0
+                      : (index + 1) % slashMatches.length,
+                  )
+                  return
+                }
+                if (event.key === 'ArrowUp') {
+                  event.preventDefault()
+                  setPromptIndex((index) =>
+                    slashMatches.length === 0
+                      ? 0
+                      : (index - 1 + slashMatches.length) % slashMatches.length,
+                  )
+                  return
+                }
+                if (event.key === 'Escape') {
+                  event.preventDefault()
+                  setValue('')
+                  setPromptIndex(0)
+                  return
+                }
+                if (
+                  event.key === 'Enter' &&
+                  !event.shiftKey &&
+                  !event.nativeEvent.isComposing
+                ) {
+                  event.preventDefault()
+                  const prompt = slashMatches[activePromptIndex]
+                  if (prompt) {
+                    chooseSlashPrompt(prompt)
+                  }
+                  return
+                }
+              }
+
               if (event.key === 'Enter' && !event.shiftKey) {
                 if (event.nativeEvent.isComposing) {
                   return
@@ -168,8 +271,10 @@ function Composer() {
                 isDisabled={
                   !hydrated ||
                   !conversationReady ||
+                  slashOpen ||
                   files.pending ||
                   files.hasError ||
+                  (Boolean(slashPrompt) && !value.trim()) ||
                   (!value.trim() && files.attachments.length === 0)
                 }
                 onPress={submit}

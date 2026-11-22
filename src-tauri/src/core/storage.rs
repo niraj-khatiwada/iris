@@ -68,6 +68,31 @@ pub struct StoredConversationSummary {
     pub archived_at: Option<i64>,
 }
 
+/// One cached spoken summary for an assistant message, used by the history window's summary view.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredSpokenSummary {
+    pub message_id: String,
+    pub summary: String,
+}
+
+/// Provenance for one selection action. The selected text is in the user message; this is the
+/// durable record of where it came from and what the user asked Iris to do with it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectionMetadata {
+    pub message_id: String,
+    pub conversation_id: String,
+    pub source_app: String,
+    #[serde(default)]
+    pub source_bundle_id: Option<String>,
+    pub source_pid: i32,
+    pub action: String,
+    pub character_count: usize,
+    pub truncated: bool,
+    pub from_clipboard: bool,
+}
+
 /// One page of messages, oldest-first, plus the cursor needed to load the page before it.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -618,6 +643,159 @@ impl Storage {
         Ok(())
     }
 
+    /// The spoken summary cached for one assistant message, if automatic read-aloud already
+    /// generated one.
+    pub fn spoken_summary(&self, message_id: &str) -> Result<Option<String>, String> {
+        self.connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .query_row(
+                "SELECT summary FROM message_summaries WHERE message_id = ?1",
+                params![message_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())
+    }
+
+    /// Every cached spoken summary in a conversation, oldest first. The history window uses this
+    /// to decide whether its "Show summary" toggle is available and which messages it affects.
+    pub fn spoken_summaries(
+        &self,
+        conversation_id: &str,
+    ) -> Result<Vec<StoredSpokenSummary>, String> {
+        let connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut statement = connection
+            .prepare(
+                "SELECT message_id, summary
+                 FROM message_summaries
+                 WHERE conversation_id = ?1
+                 ORDER BY created_at ASC",
+            )
+            .map_err(|error| error.to_string())?;
+
+        let summaries = statement
+            .query_map(params![conversation_id], |row| {
+                Ok(StoredSpokenSummary {
+                    message_id: row.get(0)?,
+                    summary: row.get(1)?,
+                })
+            })
+            .map_err(|error| error.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+
+        Ok(summaries)
+    }
+
+    /// Stores provenance for a selection action. The frontend may not have mirrored the created
+    /// user message yet, so there is no foreign key; a delete trigger handles cleanup.
+    pub fn save_selection_metadata(&self, metadata: &SelectionMetadata) -> Result<(), String> {
+        self.connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .execute(
+                "INSERT INTO selection_metadata
+                    (message_id, conversation_id, source_app, source_bundle_id, source_pid, action,
+                     character_count, truncated, from_clipboard, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                 ON CONFLICT(message_id) DO UPDATE SET
+                    conversation_id = excluded.conversation_id,
+                    source_app = excluded.source_app,
+                    source_bundle_id = excluded.source_bundle_id,
+                    source_pid = excluded.source_pid,
+                    action = excluded.action,
+                    character_count = excluded.character_count,
+                    truncated = excluded.truncated,
+                    from_clipboard = excluded.from_clipboard,
+                    created_at = excluded.created_at",
+                params![
+                    metadata.message_id,
+                    metadata.conversation_id,
+                    metadata.source_app,
+                    metadata.source_bundle_id,
+                    metadata.source_pid,
+                    metadata.action,
+                    metadata.character_count as i64,
+                    metadata.truncated,
+                    metadata.from_clipboard,
+                    now_ms()
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    /// Selection provenance for one conversation, oldest first. Used by tests today and available
+    /// for a future source badge in History.
+    pub fn selection_metadata(
+        &self,
+        conversation_id: &str,
+    ) -> Result<Vec<SelectionMetadata>, String> {
+        let connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut statement = connection
+            .prepare(
+                "SELECT message_id, conversation_id, source_app, source_bundle_id, source_pid,
+                        action, character_count, truncated, from_clipboard
+                 FROM selection_metadata
+                 WHERE conversation_id = ?1
+                 ORDER BY created_at ASC",
+            )
+            .map_err(|error| error.to_string())?;
+
+        let rows = statement
+            .query_map(params![conversation_id], |row| {
+                Ok(SelectionMetadata {
+                    message_id: row.get(0)?,
+                    conversation_id: row.get(1)?,
+                    source_app: row.get(2)?,
+                    source_bundle_id: row.get(3)?,
+                    source_pid: row.get(4)?,
+                    action: row.get(5)?,
+                    character_count: row.get::<_, i64>(6)? as usize,
+                    truncated: row.get(7)?,
+                    from_clipboard: row.get(8)?,
+                })
+            })
+            .map_err(|error| error.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+
+        Ok(rows)
+    }
+
+    /// Stores the spoken summary used by automatic read-aloud. The webview may not have mirrored
+    /// the completed assistant message yet, so this table deliberately has no foreign key; a
+    /// delete trigger keeps it in step with the message instead.
+    pub fn save_spoken_summary(
+        &self,
+        conversation_id: &str,
+        message_id: &str,
+        summary: &str,
+    ) -> Result<(), String> {
+        self.connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .execute(
+                "INSERT INTO message_summaries
+                    (message_id, conversation_id, summary, created_at)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(message_id) DO UPDATE SET
+                    conversation_id = excluded.conversation_id,
+                    summary = excluded.summary,
+                    created_at = excluded.created_at",
+                params![message_id, conversation_id, summary, now_ms()],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
     /// Local attachment names for messages that are about to be deleted, so their files can be
     /// removed as well.
     pub fn attachments_for_messages(
@@ -662,6 +840,20 @@ impl Storage {
             transaction
                 .execute("DELETE FROM messages WHERE id = ?1", params![id])
                 .map_err(|error| error.to_string())?;
+            // The triggers also do this; the explicit deletes also cover rows written before the
+            // message itself existed.
+            transaction
+                .execute(
+                    "DELETE FROM message_summaries WHERE message_id = ?1",
+                    params![id],
+                )
+                .map_err(|error| error.to_string())?;
+            transaction
+                .execute(
+                    "DELETE FROM selection_metadata WHERE message_id = ?1",
+                    params![id],
+                )
+                .map_err(|error| error.to_string())?;
         }
         transaction.commit().map_err(|error| error.to_string())
     }
@@ -702,6 +894,18 @@ impl Storage {
             .map_err(|error| error.to_string())?;
         connection
             .execute(
+                "DELETE FROM message_summaries WHERE conversation_id = ?1",
+                params![id],
+            )
+            .map_err(|error| error.to_string())?;
+        connection
+            .execute(
+                "DELETE FROM selection_metadata WHERE conversation_id = ?1",
+                params![id],
+            )
+            .map_err(|error| error.to_string())?;
+        connection
+            .execute(
                 "DELETE FROM app_meta WHERE name = ?1 AND value = ?2",
                 params![QUICK_CONVERSATION_META, id],
             )
@@ -719,6 +923,8 @@ impl Storage {
         connection
             .execute_batch(
                 "DELETE FROM messages;
+                 DELETE FROM message_summaries;
+                 DELETE FROM selection_metadata;
                  DELETE FROM conversations;
                  DELETE FROM app_meta WHERE name = 'quick-conversation';",
             )
@@ -904,6 +1110,18 @@ fn save_in_transaction(
             params![conversation.id],
         )
         .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            "DELETE FROM message_summaries WHERE conversation_id = ?1",
+            params![conversation.id],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            "DELETE FROM selection_metadata WHERE conversation_id = ?1",
+            params![conversation.id],
+        )
+        .map_err(|error| error.to_string())?;
 
     for message in &conversation.messages {
         transaction
@@ -1082,6 +1300,110 @@ mod tests {
             storage.load_all_messages("c1").expect("after delete").len(),
             4
         );
+    }
+
+    #[test]
+    fn spoken_summaries_survive_status_saves_and_follow_message_changes() {
+        let storage = storage();
+        let conversation = super::StoredConversation {
+            id: "c1".to_string(),
+            title: "Talk".to_string(),
+            created_at: 0,
+            updated_at: 1,
+            archived_at: None,
+            messages: vec![message("m1", 1, "A long reply")],
+        };
+        storage.save(&conversation).expect("save");
+
+        assert_eq!(storage.spoken_summary("m1").expect("read"), None);
+        storage
+            .save_spoken_summary("c1", "m1", "A short spoken version.")
+            .expect("save summary");
+        assert_eq!(
+            storage.spoken_summary("m1").expect("read").as_deref(),
+            Some("A short spoken version.")
+        );
+        let summaries = storage.spoken_summaries("c1").expect("list");
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].message_id, "m1");
+        assert_eq!(summaries[0].summary, "A short spoken version.");
+
+        // A status or identical-content save must not invalidate the cached summary.
+        storage
+            .save_message("c1", &message("m1", 1, "A long reply"))
+            .expect("same content");
+        assert!(storage.spoken_summary("m1").expect("read").is_some());
+
+        // Editing the text invalidates it.
+        storage
+            .save_message("c1", &message("m1", 1, "Changed reply"))
+            .expect("edit");
+        assert_eq!(storage.spoken_summary("m1").expect("read"), None);
+
+        // Deleting the message clears it too.
+        storage
+            .save_spoken_summary("c1", "m1", "Again.")
+            .expect("save again");
+        storage
+            .delete_messages(&["m1".to_string()])
+            .expect("delete");
+        assert_eq!(storage.spoken_summary("m1").expect("read"), None);
+        assert!(storage.spoken_summaries("c1").expect("list").is_empty());
+    }
+
+    #[test]
+    fn selection_metadata_survives_and_follows_message_deletion() {
+        let storage = storage();
+        let conversation = super::StoredConversation {
+            id: "c1".to_string(),
+            title: "Talk".to_string(),
+            created_at: 0,
+            updated_at: 1,
+            archived_at: None,
+            messages: vec![message("m1", 1, "selected prompt")],
+        };
+        storage.save(&conversation).expect("save");
+
+        let metadata = super::SelectionMetadata {
+            message_id: "m1".to_string(),
+            conversation_id: "c1".to_string(),
+            source_app: "Brave Browser".to_string(),
+            source_bundle_id: Some("com.brave.Browser".to_string()),
+            source_pid: 42,
+            action: "rewrite".to_string(),
+            character_count: 168,
+            truncated: false,
+            from_clipboard: true,
+        };
+        storage
+            .save_selection_metadata(&metadata)
+            .expect("save metadata");
+
+        let loaded = storage.selection_metadata("c1").expect("read metadata");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].source_app, "Brave Browser");
+        assert_eq!(loaded[0].action, "rewrite");
+        assert_eq!(loaded[0].character_count, 168);
+        assert!(loaded[0].from_clipboard);
+
+        // The row is keyed by message, so a retried save replaces rather than duplicates.
+        storage
+            .save_selection_metadata(&super::SelectionMetadata {
+                action: "summarize".to_string(),
+                ..metadata
+            })
+            .expect("replace metadata");
+        let loaded = storage.selection_metadata("c1").expect("read replaced");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].action, "summarize");
+
+        storage
+            .delete_messages(&["m1".to_string()])
+            .expect("delete message");
+        assert!(storage
+            .selection_metadata("c1")
+            .expect("read after delete")
+            .is_empty());
     }
 
     #[test]

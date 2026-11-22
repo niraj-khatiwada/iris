@@ -7,6 +7,7 @@ pub mod models;
 pub mod overlay;
 pub mod preview;
 pub mod screen;
+pub mod selection;
 pub mod shortcut;
 pub mod storage;
 pub mod theme;

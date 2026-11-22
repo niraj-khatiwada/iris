@@ -1,15 +1,15 @@
 import {
   Button,
-  Dropdown,
   Input,
   Label,
   Modal,
   ScrollShadow,
   TextField,
 } from '@heroui/react'
-import { Archive, MessageSquare, MoreHorizontal, Pencil } from 'lucide-react'
+import { MessageSquare } from 'lucide-react'
 import { useState } from 'react'
 
+import ConversationActions from '@/components/Sidebar/ConversationActions'
 import { NO_WRITING_ASSIST } from '@/constants'
 import { useChatStore } from '@/stores/chatStore'
 import { groupConversations } from '@/utils/format'
@@ -19,7 +19,6 @@ function ConversationList() {
   const conversations = useChatStore((state) => state.conversations)
   const activeId = useChatStore((state) => state.activeConversationId)
   const selectConversation = useChatStore((state) => state.selectConversation)
-  const archiveConversation = useChatStore((state) => state.archiveConversation)
   const renameConversation = useChatStore((state) => state.renameConversation)
   const groups = groupConversations(
     conversations.filter((conversation) => !conversation.archivedAt),
@@ -73,46 +72,13 @@ function ConversationList() {
                           </span>
                         </Button>
 
-                        <Dropdown>
-                          <Button
-                            isIconOnly
-                            aria-label={`Actions for ${conversation.title}`}
-                            className="absolute top-1/2 right-1.5 size-6 min-w-6 -translate-y-1/2 text-muted opacity-0 transition-opacity group-hover/item:opacity-100 focus-visible:opacity-100"
-                            size="sm"
-                            variant="ghost"
-                          >
-                            <MoreHorizontal className="size-3.5" />
-                          </Button>
-                          <Dropdown.Popover className="min-w-40 rounded-lg">
-                            <Dropdown.Menu
-                              onAction={(key) => {
-                                if (key === 'rename') {
-                                  setRenaming(conversation)
-                                  setRenameValue(conversation.title)
-                                } else if (key === 'archive') {
-                                  archiveConversation(conversation.id)
-                                }
-                              }}
-                            >
-                              <Dropdown.Item
-                                id="rename"
-                                className="rounded-md"
-                                textValue="Rename"
-                              >
-                                <Pencil className="size-3.5 text-muted" />
-                                <Label>Rename</Label>
-                              </Dropdown.Item>
-                              <Dropdown.Item
-                                id="archive"
-                                className="rounded-md"
-                                textValue="Archive"
-                              >
-                                <Archive className="size-3.5 text-muted" />
-                                <Label>Archive</Label>
-                              </Dropdown.Item>
-                            </Dropdown.Menu>
-                          </Dropdown.Popover>
-                        </Dropdown>
+                        <ConversationActions
+                          conversation={conversation}
+                          onRename={(item) => {
+                            setRenaming(item)
+                            setRenameValue(item.title)
+                          }}
+                        />
                       </div>
                     )
                   })}

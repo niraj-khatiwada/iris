@@ -115,6 +115,7 @@ pub struct AgentConfig {
     pub base_url: String,
     pub model: String,
     pub auto_speak: bool,
+    pub summarize_speech: bool,
     pub deep_think: bool,
     pub web_search: bool,
     pub tts_voice: String,
@@ -148,12 +149,19 @@ pub async fn stream_reply(
 
             if config.auto_speak && !text.trim().is_empty() {
                 let speech_app = app.clone();
-                let conversation_id = request.conversation_id.clone();
-                let api_key = config.api_key;
-                let tts_url = config.tts_url.clone();
-                let voice = config.tts_voice;
+                let speech_request = speech::SpeechRequest {
+                    conversation_id: request.conversation_id.clone(),
+                    message_id: request.assistant_message_id.clone(),
+                    text,
+                    voice: config.tts_voice,
+                    api_key: config.api_key,
+                    base_url: config.base_url,
+                    model: config.model,
+                    tts_url: config.tts_url,
+                    summarize: config.summarize_speech,
+                };
                 tauri::async_runtime::spawn(async move {
-                    speech::speak(speech_app, conversation_id, api_key, tts_url, voice, text).await;
+                    speech::speak(speech_app, speech_request).await;
                 });
             }
         }
@@ -1125,6 +1133,7 @@ mod tests {
             base_url: "http://127.0.0.1".to_string(),
             model: "deepseek-flash".to_string(),
             auto_speak: false,
+            summarize_speech: false,
             deep_think: false,
             web_search: false,
             tts_voice: "stella".to_string(),
@@ -1152,6 +1161,7 @@ mod tests {
             base_url: "http://127.0.0.1".to_string(),
             model: "deepseek-flash".to_string(),
             auto_speak: false,
+            summarize_speech: false,
             deep_think: false,
             web_search: false,
             tts_voice: "stella".to_string(),
@@ -1220,6 +1230,7 @@ mod tests {
             base_url: "http://127.0.0.1".to_string(),
             model: "deepseek-flash".to_string(),
             auto_speak: false,
+            summarize_speech: false,
             deep_think: false,
             web_search: false,
             tts_voice: "stella".to_string(),
@@ -1252,6 +1263,7 @@ mod tests {
             base_url: server.base_url.clone(),
             model: "deepseek-flash".to_string(),
             auto_speak: false,
+            summarize_speech: false,
             deep_think: false,
             web_search: false,
             tts_voice: "stella".to_string(),
@@ -1354,6 +1366,7 @@ mod format_tests {
             base_url: "https://example.test".to_string(),
             model: "m".to_string(),
             auto_speak: false,
+            summarize_speech: false,
             deep_think: true,
             web_search: true,
             tts_voice: "stella".to_string(),

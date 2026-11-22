@@ -4,4 +4,5 @@ pub mod overlay;
 pub mod platform;
 pub mod preview;
 pub mod screen;
+pub mod selection;
 pub mod speech;

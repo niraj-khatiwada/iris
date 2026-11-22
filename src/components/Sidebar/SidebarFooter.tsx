@@ -50,7 +50,7 @@ function SidebarFooter({ open }: { open: boolean }) {
           aria-label="API key is not set. Open API key settings."
           className="mr-auto h-7 min-w-0 justify-start gap-1 px-1.5 text-[11px] font-normal text-danger hover:text-danger"
           variant="ghost"
-          onPress={() => openSettingsAt('ai')}
+          onPress={() => openSettingsAt('api')}
         >
           <span className="truncate">API key is not set</span>
           <ArrowRight className="size-3 shrink-0" />
