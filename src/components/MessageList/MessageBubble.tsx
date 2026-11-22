@@ -72,6 +72,8 @@ const MessageBubble = memo(function MessageBubble({
   )
   const [thinkingTouched, setThinkingTouched] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const bubbleRef = useRef<HTMLDivElement>(null)
+  const [editWidth, setEditWidth] = useState<number | null>(null)
   const thinkingRef = useRef<HTMLDivElement>(null)
   const pastedRef = useRef(false)
 
@@ -111,6 +113,9 @@ const MessageBubble = memo(function MessageBubble({
   }, [editing, draft])
 
   const startEditing = () => {
+    const width = bubbleRef.current?.getBoundingClientRect().width
+    // Keep the bubble where it was; very short messages still get room to type.
+    setEditWidth(width ? Math.max(width, 320) : null)
     setDraft(message.content)
     pastedRef.current = false
     setEditing(true)
@@ -118,6 +123,7 @@ const MessageBubble = memo(function MessageBubble({
 
   const cancelEditing = () => {
     setEditing(false)
+    setEditWidth(null)
     setDraft(message.content)
   }
 
@@ -132,6 +138,7 @@ const MessageBubble = memo(function MessageBubble({
     }
 
     setEditing(false)
+    setEditWidth(null)
     void editAndResend(conversationId, message.id, text, pastedRef.current)
     pastedRef.current = false
   }
@@ -142,18 +149,22 @@ const MessageBubble = memo(function MessageBubble({
         className={cn(
           'flex min-w-0 max-w-[min(88%,46rem)] flex-col',
           isUser ? 'items-end' : 'items-start',
-          editing && 'w-full',
         )}
       >
         <div
+          ref={bubbleRef}
           className={cn(
             'rounded-2xl px-4 py-3 text-[14px] leading-6',
             isUser
               ? 'bg-accent-soft text-accent-soft-foreground'
               : 'bg-surface/45 ring-1 ring-border/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-xl',
-            editing && 'w-full',
             highlighted && 'ring-2 ring-primary/60',
           )}
+          style={
+            editing && editWidth
+              ? { width: editWidth, maxWidth: '100%' }
+              : undefined
+          }
         >
           {showThinking ? (
             <div className="mb-2 overflow-hidden rounded-xl border border-border/40 bg-background/20">
