@@ -2,7 +2,9 @@
 //!
 //! The demo uses DeepSeek's Anthropic-compatible Messages API, with a separate TTS endpoint for
 //! read-aloud. The UI never shows the reply by default, so tokens are still streamed into the
-//! conversation for history and for the automatic voice playback at the end.
+//! conversation for history and for the automatic voice playback at the end. When automatic
+//! read-aloud summarizes replies, the model appends a hidden `<spoken_summary>` block to the same
+//! stream; the agent strips it from the visible text and hands it to speech.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,6 +17,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::core::attachments;
+use crate::core::read_aloud;
 use crate::core::storage::{Storage, StoredMessage};
 use crate::sys::speech;
 use crate::tauri_commands::chat::{
@@ -124,7 +127,11 @@ pub struct AgentConfig {
 }
 
 enum Outcome {
-    Completed(String),
+    Completed {
+        text: String,
+        /// The reply's own spoken summary, when automatic read-aloud asked for one.
+        spoken_summary: Option<String>,
+    },
     Cancelled,
     Empty,
 }
@@ -143,7 +150,10 @@ pub async fn stream_reply(
     );
 
     match run(&app, &request, &config, &cancelled).await {
-        Ok(Outcome::Completed(text)) => {
+        Ok(Outcome::Completed {
+            text,
+            spoken_summary,
+        }) => {
             emit_done(&app, &request_id, false);
             app.state::<GenerationState>().finish(&request_id);
 
@@ -158,6 +168,12 @@ pub async fn stream_reply(
                     base_url: config.base_url,
                     model: config.model,
                     tts_url: config.tts_url,
+                    // The block is only requested with summarization on; ignore it otherwise.
+                    spoken_summary: if config.summarize_speech {
+                        spoken_summary
+                    } else {
+                        None
+                    },
                     summarize: config.summarize_speech,
                 };
                 tauri::async_runtime::spawn(async move {
@@ -243,6 +259,9 @@ async fn run(
     let mut stream = response.bytes_stream();
     let mut decoder = SseDecoder::default();
     let mut full_text = String::new();
+    // Only hide the block when this request asked for it; otherwise leave the text untouched.
+    let mut summary_filter = (config.auto_speak && config.summarize_speech)
+        .then(read_aloud::SpokenSummaryFilter::default);
     let mut stopped = false;
 
     'stream: loop {
@@ -278,8 +297,14 @@ async fn run(
                         .and_then(Value::as_str)
                     {
                         if !text.is_empty() {
-                            emit_token(app, &request.request_id, text);
-                            full_text.push_str(text);
+                            let visible = match summary_filter.as_mut() {
+                                Some(filter) => filter.push(text),
+                                None => text.to_string(),
+                            };
+                            if !visible.is_empty() {
+                                emit_token(app, &request.request_id, &visible);
+                                full_text.push_str(&visible);
+                            }
                         }
                     }
                 }
@@ -289,8 +314,16 @@ async fn run(
                         .and_then(|delta| delta.get("text"))
                         .and_then(Value::as_str)
                     {
-                        emit_token(app, &request.request_id, text);
-                        full_text.push_str(text);
+                        if !text.is_empty() {
+                            let visible = match summary_filter.as_mut() {
+                                Some(filter) => filter.push(text),
+                                None => text.to_string(),
+                            };
+                            if !visible.is_empty() {
+                                emit_token(app, &request.request_id, &visible);
+                                full_text.push_str(&visible);
+                            }
+                        }
                     }
                 }
                 Some("message_stop") => {
@@ -316,11 +349,21 @@ async fn run(
     if !stopped {
         return Err("The response ended unexpectedly.".to_string());
     }
+    if let Some(filter) = summary_filter.as_mut() {
+        let visible = filter.finish();
+        if !visible.is_empty() {
+            emit_token(app, &request.request_id, &visible);
+            full_text.push_str(&visible);
+        }
+    }
     if full_text.trim().is_empty() {
         return Ok(Outcome::Empty);
     }
 
-    Ok(Outcome::Completed(full_text))
+    Ok(Outcome::Completed {
+        text: full_text,
+        spoken_summary: summary_filter.and_then(|filter| filter.summary()),
+    })
 }
 
 /// Turns the webview history into the request body, compressing older turns when the
@@ -743,7 +786,19 @@ async fn summarize_chunk(
 
 /// Builds the streaming request body for a reply. Both composer toggles only affect the request,
 /// and URL reading is enabled automatically when the newest user message contains a link.
-fn build_body(system: String, messages: Vec<Value>, config: &AgentConfig, read_url: bool) -> Value {
+fn build_body(
+    mut system: String,
+    messages: Vec<Value>,
+    config: &AgentConfig,
+    read_url: bool,
+) -> Value {
+    // Automatic read-aloud asks for its summary in the same completion. The block is hidden by
+    // `SpokenSummaryFilter`, and short answers are told to skip it.
+    if config.auto_speak && config.summarize_speech {
+        system.push_str("\n\n");
+        system.push_str(read_aloud::SPOKEN_SUMMARY_INSTRUCTION);
+    }
+
     let mut body = json!({
         "model": config.model,
         // Required by the Messages API; omitting it is rejected with a 400.
@@ -1399,5 +1454,34 @@ mod format_tests {
         assert_eq!(body["thinking"]["type"], "disabled");
         assert!(body.get("tools").is_none());
         assert_eq!(body["max_tokens"], MAX_OUTPUT_TOKENS);
+    }
+
+    /// Automatic read-aloud asks for its spoken summary in the same completion.
+    #[test]
+    fn the_body_requests_an_in_band_summary_only_when_read_aloud_summarizes() {
+        let mut on = config();
+        on.auto_speak = true;
+        on.summarize_speech = true;
+
+        let body = build_body("sys".to_string(), vec![], &on, false);
+        let system = body["system"].as_str().expect("system prompt");
+        assert!(system.starts_with("sys"));
+        assert!(system.contains("<spoken_summary>"));
+        assert!(system.contains("</spoken_summary>"));
+
+        on.summarize_speech = false;
+        let body = build_body("sys".to_string(), vec![], &on, false);
+        assert!(!body["system"]
+            .as_str()
+            .unwrap()
+            .contains("<spoken_summary>"));
+
+        on.auto_speak = false;
+        on.summarize_speech = true;
+        let body = build_body("sys".to_string(), vec![], &on, false);
+        assert!(!body["system"]
+            .as_str()
+            .unwrap()
+            .contains("<spoken_summary>"));
     }
 }

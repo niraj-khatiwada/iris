@@ -30,6 +30,27 @@ describe code in one short sentence only if it matters. \
 Write in the same language as the reply. \
 Aim for 60 to 100 words, never more than 120 words. Return only the summary.";
 
+/// Marks the hidden summary a reply carries when automatic read-aloud is on.
+pub const SPOKEN_SUMMARY_OPEN: &str = "<spoken_summary>";
+pub const SPOKEN_SUMMARY_CLOSE: &str = "</spoken_summary>";
+
+/// Appended to the chat system prompt only while automatic read-aloud needs a spoken summary.
+///
+/// Asking in-band saves the extra summarization round trip. The model is told to omit the block
+/// for short answers so a confirmation does not pay for tokens nobody will hear.
+pub const SPOKEN_SUMMARY_INSTRUCTION: &str = "\
+The reply may be read aloud. When the answer is long, or contains code, tables, lists, or \
+other formatting that sounds poor when spoken, end the answer with a spoken summary in \
+exactly this form:
+
+<spoken_summary>
+A natural, self-contained summary of 60 to 100 words, written to be heard.
+</spoken_summary>
+
+Write the summary in plain prose in the same language as the answer. Keep the direct answer, \
+the key facts, names, and numbers; do not include markdown, code, links, or headings, and do \
+not mention the summary. Omit the block entirely when the answer is short and reads well aloud.";
+
 /// Whether a reply should be condensed before it is spoken.
 ///
 /// Length is the main signal, but a shorter code- or table-heavy answer is still poor listening.
@@ -150,6 +171,133 @@ pub async fn summarize(
     Ok(summary)
 }
 
+/// Hides the trailing spoken-summary block from a streamed reply and captures its text.
+///
+/// The block can arrive split across any number of deltas, so a partial tag and trailing
+/// whitespace are held back until the next push resolves them. Text is emitted as soon as it is
+/// known not to belong to the block. An unclosed block is dropped and reports no summary, which
+/// lets the caller fall back to the separate summarization request.
+#[derive(Default)]
+pub struct SpokenSummaryFilter {
+    pending: String,
+    summary: String,
+    in_summary: bool,
+    closed: bool,
+}
+
+impl SpokenSummaryFilter {
+    /// Feeds one streamed delta and returns the visible text to emit for it.
+    pub fn push(&mut self, delta: &str) -> String {
+        if delta.is_empty() {
+            return String::new();
+        }
+        self.pending.push_str(delta);
+        let mut visible = String::new();
+
+        loop {
+            if self.in_summary {
+                if let Some(index) = find_tag(&self.pending, SPOKEN_SUMMARY_CLOSE) {
+                    self.summary.push_str(&self.pending[..index]);
+                    self.pending.drain(..index + SPOKEN_SUMMARY_CLOSE.len());
+                    self.in_summary = false;
+                    self.closed = true;
+                    continue;
+                }
+
+                // Keep a suffix that could still become the closing tag.
+                let keep = partial_tag_suffix(&self.pending, SPOKEN_SUMMARY_CLOSE);
+                let emit = self.pending.len() - keep;
+                self.summary.push_str(&self.pending[..emit]);
+                self.pending.drain(..emit);
+                break;
+            }
+
+            // Only the first block is special; anything after it is ordinary reply text.
+            if self.closed {
+                visible.push_str(&self.pending);
+                self.pending.clear();
+                break;
+            }
+
+            if let Some(index) = find_tag(&self.pending, SPOKEN_SUMMARY_OPEN) {
+                visible.push_str(self.pending[..index].trim_end());
+                self.pending.drain(..index + SPOKEN_SUMMARY_OPEN.len());
+                self.in_summary = true;
+                continue;
+            }
+
+            // Hold trailing whitespace so a block that starts in the next delta cannot leave
+            // blank lines behind in the visible answer. A partial opening tag also keeps the
+            // whitespace before it, since that separator disappears with the tag.
+            let keep = held_open_suffix(&self.pending);
+            let emit = self.pending.len() - keep;
+            visible.push_str(&self.pending[..emit]);
+            self.pending.drain(..emit);
+            break;
+        }
+
+        visible
+    }
+
+    /// Flushes the text still held back when the stream ends and trims the answer's tail.
+    pub fn finish(&mut self) -> String {
+        let mut visible = String::new();
+        // An unclosed block never became a summary, so its partial text is not shown either.
+        if !self.in_summary {
+            visible.push_str(&self.pending);
+        }
+        self.pending.clear();
+        visible.trim_end().to_string()
+    }
+
+    /// The normalized summary, when the reply carried a complete block.
+    pub fn summary(&self) -> Option<String> {
+        if !self.closed {
+            return None;
+        }
+        let summary = normalize_summary(&self.summary);
+        if summary.is_empty() {
+            None
+        } else {
+            Some(summary)
+        }
+    }
+}
+
+/// Case-insensitive tag lookup; the returned index is always on a character boundary because the
+/// tags themselves are ASCII.
+fn find_tag(haystack: &str, tag: &str) -> Option<usize> {
+    haystack
+        .as_bytes()
+        .windows(tag.len())
+        .position(|window| window.eq_ignore_ascii_case(tag.as_bytes()))
+}
+
+/// Length of the longest suffix of `text` that is a prefix of `tag`.
+fn partial_tag_suffix(text: &str, tag: &str) -> usize {
+    let bytes = text.as_bytes();
+    let max = tag.len().min(bytes.len());
+    (1..=max)
+        .rev()
+        .find(|&length| {
+            bytes[bytes.len() - length..].eq_ignore_ascii_case(&tag.as_bytes()[..length])
+        })
+        .unwrap_or(0)
+}
+
+/// The suffix to hold back while waiting for a possible opening tag: trailing whitespace plus any
+/// partial tag, including the whitespace immediately before it.
+fn held_open_suffix(text: &str) -> usize {
+    let mut start = text.len() - partial_tag_suffix(text, SPOKEN_SUMMARY_OPEN);
+    while let Some(character) = text[..start].chars().next_back() {
+        if !character.is_whitespace() {
+            break;
+        }
+        start -= character.len_utf8();
+    }
+    text.len() - start
+}
+
 /// Collapses formatting whitespace, removes a leading label, and keeps a runaway summary bounded.
 fn normalize_summary(raw: &str) -> String {
     let collapsed = raw.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -179,7 +327,7 @@ fn normalize_summary(raw: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{needs_summary, normalize_summary, SUMMARY_THRESHOLD_CHARS};
+    use super::{needs_summary, normalize_summary, SpokenSummaryFilter, SUMMARY_THRESHOLD_CHARS};
 
     #[test]
     fn short_plain_replies_are_spoken_as_written() {
@@ -207,5 +355,73 @@ mod tests {
             normalize_summary("  Summary:  One   two.\nThree.  "),
             "One two. Three."
         );
+    }
+
+    #[test]
+    fn a_trailing_summary_is_hidden_and_captured() {
+        let mut filter = SpokenSummaryFilter::default();
+        let visible = filter.push(
+            "The answer is 42.\n\n<spoken_summary>\nThe answer   is forty-two.\n\
+             </spoken_summary>",
+        );
+
+        assert_eq!(visible, "The answer is 42.");
+        assert_eq!(
+            filter.summary().as_deref(),
+            Some("The answer is forty-two.")
+        );
+        assert_eq!(filter.finish(), "");
+    }
+
+    #[test]
+    fn tags_split_across_deltas_are_still_recognized() {
+        let mut filter = SpokenSummaryFilter::default();
+        let mut visible = String::new();
+        for character in "Answer.\n\n<spoken_summary>Spoken.</spoken_summary>".chars() {
+            visible.push_str(&filter.push(&character.to_string()));
+        }
+        visible.push_str(&filter.finish());
+
+        assert_eq!(visible, "Answer.");
+        assert_eq!(filter.summary().as_deref(), Some("Spoken."));
+    }
+
+    #[test]
+    fn text_without_a_block_stays_visible() {
+        let mut filter = SpokenSummaryFilter::default();
+        let mut visible = filter.push("Just a short answer. ");
+        visible.push_str(&filter.push("And a second sentence."));
+        visible.push_str(&filter.finish());
+
+        assert_eq!(visible, "Just a short answer. And a second sentence.");
+        assert_eq!(filter.summary(), None);
+    }
+
+    #[test]
+    fn an_unclosed_block_is_dropped_without_a_summary() {
+        let mut filter = SpokenSummaryFilter::default();
+        let mut visible = filter.push("Answer.\n\n<spoken_summary>Half a summ");
+        visible.push_str(&filter.finish());
+
+        assert_eq!(visible, "Answer.");
+        assert_eq!(filter.summary(), None);
+    }
+
+    #[test]
+    fn tags_are_matched_regardless_of_case() {
+        let mut filter = SpokenSummaryFilter::default();
+        let visible = filter.push("Answer.\n<SPOKEN_SUMMARY>Spoken.</SPOKEN_SUMMARY>");
+
+        assert_eq!(visible, "Answer.");
+        assert_eq!(filter.summary().as_deref(), Some("Spoken."));
+    }
+
+    #[test]
+    fn an_empty_block_falls_back_to_the_separate_summary() {
+        let mut filter = SpokenSummaryFilter::default();
+        filter.push("Answer.<spoken_summary>   </spoken_summary>");
+        filter.finish();
+
+        assert_eq!(filter.summary(), None);
     }
 }

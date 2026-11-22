@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **One-request spoken summaries.** When automatic read-aloud summarizes replies,
+  Iris asks DeepSeek to end long or code-heavy answers with a hidden
+  `<spoken_summary>` block in the same stream. The block is stripped before it
+  reaches the chat or SQLite history, cached, and spoken as soon as the reply
+  finishes. Short answers skip it, and the separate summary call remains the
+  fallback when the block is missing or malformed.
 - **Model metadata per assistant message.** Migration `006-message-metadata` adds a
   JSON `metadata` column. Assistant replies store `{"ai_model":"..."}` so model
   performance can be compared later; user messages and older replies have no

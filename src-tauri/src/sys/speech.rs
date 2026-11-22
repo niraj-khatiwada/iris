@@ -47,6 +47,8 @@ pub struct SpeechRequest {
     pub base_url: String,
     pub model: String,
     pub tts_url: String,
+    /// The summary the reply already carried, when automatic read-aloud requested one.
+    pub spoken_summary: Option<String>,
     pub summarize: bool,
 }
 
@@ -138,6 +140,7 @@ pub async fn speak(app: AppHandle, request: SpeechRequest) {
         base_url,
         model,
         tts_url,
+        spoken_summary,
         summarize,
     } = request;
 
@@ -173,28 +176,44 @@ pub async fn speak(app: AppHandle, request: SpeechRequest) {
     // Summarize before paying for TTS. `speech:preparing` is already visible, and Stop bumps the
     // epoch, so a summary that finishes after Stop is discarded without starting playback.
     if summarize && read_aloud::needs_summary(&text) {
-        let stored = message_id
-            .as_deref()
-            .and_then(|id| cached_summary(&app, id));
-
-        if let Some(summary) = stored {
-            log::info!("Read-aloud is reusing the stored spoken summary");
-            text = summary;
-        } else {
-            match read_aloud::summarize(&api_key, &base_url, &model, &text).await {
-                Ok(summary) => {
-                    log::info!("Read-aloud is using a spoken summary");
-                    if let Some(id) = message_id.as_deref() {
-                        store_summary(&app, &conversation_id, id, &summary);
-                    }
-                    text = summary;
+        let summary = match spoken_summary {
+            // The reply already carried its spoken summary, so no second request is needed.
+            Some(summary) if !summary.trim().is_empty() => {
+                log::info!("Read-aloud is using the reply's own spoken summary");
+                if let Some(id) = message_id.as_deref() {
+                    store_summary(&app, &conversation_id, id, &summary);
                 }
-                Err(error) => {
-                    log::warn!(
-                        "Could not create a spoken summary; reading the full reply: {error}"
-                    );
-                }
+                Some(summary)
             }
+            _ => match message_id
+                .as_deref()
+                .and_then(|id| cached_summary(&app, id))
+            {
+                Some(summary) => {
+                    log::info!("Read-aloud is reusing the stored spoken summary");
+                    Some(summary)
+                }
+                // The model omitted or malformed the block; one extra call is the fallback.
+                None => match read_aloud::summarize(&api_key, &base_url, &model, &text).await {
+                    Ok(summary) => {
+                        log::info!("Read-aloud is using a generated spoken summary");
+                        if let Some(id) = message_id.as_deref() {
+                            store_summary(&app, &conversation_id, id, &summary);
+                        }
+                        Some(summary)
+                    }
+                    Err(error) => {
+                        log::warn!(
+                            "Could not create a spoken summary; reading the full reply: {error}"
+                        );
+                        None
+                    }
+                },
+            },
+        };
+
+        if let Some(summary) = summary {
+            text = summary;
         }
 
         if !state.is_current(epoch) {

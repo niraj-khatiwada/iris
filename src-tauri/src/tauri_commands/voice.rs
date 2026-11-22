@@ -65,6 +65,7 @@ pub fn speak_text(
             base_url,
             model: String::new(),
             tts_url,
+            spoken_summary: None,
             // Manual Read aloud always speaks the original reply, never the cached summary.
             summarize: false,
         },
