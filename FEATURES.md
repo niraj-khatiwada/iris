@@ -19,9 +19,9 @@
 
 **What shipped**
 
-- **Automatic learning.** After a reply has been idle for 20 seconds, a background writer reviews the newest typed exchange and stores up to three durable facts. There is no manual preference form.
+- **Automatic learning.** After a reply has been idle for 20 seconds, a background writer reviews the newest exchange and stores up to three durable facts. There is no manual preference form.
 - **Individual topics.** Each fact is a short, editable item. Corrections replace the previous version instead of piling up contradictory memories.
-- **Safe by default.** Pasted text, selection prompts, screen captures, attachments, credentials, payment/account details, health data, government IDs, exact addresses, and sensitive categories are excluded before storage. A deterministic Rust filter backs up the extraction prompt.
+- **Safe by default.** Selection prompts, screen captures, and attachments are excluded; pasted text is allowed. Credentials, payment/account details, health data, government IDs, exact addresses, and sensitive categories are filtered out before storage. A deterministic Rust filter backs up the extraction prompt.
 - **Both surfaces.** Active, unpaused memories are injected into the quick overlay and history prompts, capped at 30 items / 1,500 characters. Explicit instructions take precedence.
 - **Settings → Memory.** Search, edit, pause, delete, clear all, and undo the newest learned batch. User-edited memories are authoritative and are never overwritten automatically.
 - **Data lifecycle.** Clearing conversations keeps memory; Reset Iris removes it and cancels pending memory tasks.

@@ -140,7 +140,7 @@ type ChatState = {
      * quick-prompt menu so History shows the user's text, not the wrapped instruction.
      */
     requestPrompt?: string,
-    /** True when the draft contained clipboard text; persistent memory skips this turn. */
+    /** True when the draft contained clipboard text; recorded as provenance. */
     pasted?: boolean,
   ) => Promise<string | null>
   /** Replaces an assistant reply with a fresh response to the same user message. */
@@ -154,7 +154,7 @@ type ChatState = {
     conversationId: string,
     messageId: string,
     content: string,
-    /** True when the edit included clipboard text; persistent memory skips the turn. */
+    /** True when the edit included clipboard text; recorded as provenance. */
     pasted?: boolean,
   ) => Promise<void>
   stopStreaming: () => Promise<void>

@@ -1676,7 +1676,7 @@ function MemoryPanel({ query }: { query: string }) {
         <SwitchRow
           isSelected={memoryEnabled}
           title="Learn from conversations"
-          description="Remember durable preferences and facts from typed chats. Pasted text, selections, screenshots, and sensitive details are never saved."
+          description="Remember durable preferences and facts from your chats. Selections, screenshots, and sensitive details are never saved; pasted text is allowed."
           query={query}
           search={[
             'memory',

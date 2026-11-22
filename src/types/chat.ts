@@ -120,7 +120,7 @@ export type AgentMessage = {
   id: string
   role: ChatRole
   content: string
-  /** True when the draft contained clipboard text; persistent memory skips this turn. */
+  /** True when the draft contained clipboard text; recorded as provenance. */
   pasted?: boolean
   attachments?: Array<{
     mediaType: string

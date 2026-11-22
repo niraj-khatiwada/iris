@@ -36,7 +36,7 @@ pub struct ChatMessageInput {
     pub content: String,
     #[serde(default)]
     pub attachments: Vec<ChatAttachmentInput>,
-    /// True when any part of the draft came from the clipboard. Persistent memory skips it.
+    /// True when any part of the draft came from the clipboard; kept as provenance.
     #[serde(default)]
     pub pasted: bool,
 }
