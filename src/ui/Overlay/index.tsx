@@ -11,6 +11,7 @@ import {
   Replace,
   RotateCcw,
   Scan,
+  Search,
   Sparkles,
   Square,
   X,
@@ -26,6 +27,7 @@ import {
 
 import AttachmentStrip from '@/components/AttachmentStrip'
 import ChatToggles from '@/components/ChatToggles'
+import ConversationSwitcher from '@/components/ConversationSwitcher'
 import CopyButton from '@/components/CopyButton'
 import IrisBlob, { type IrisTone } from '@/components/IrisBlob'
 import Markdown from '@/components/Markdown'
@@ -136,6 +138,10 @@ function Overlay() {
   const restorePreviousQuickConversation = useChatStore(
     (state) => state.restorePreviousQuickConversation,
   )
+  const openQuickConversation = useChatStore(
+    (state) => state.openQuickConversation,
+  )
+  const conversations = useChatStore((state) => state.conversations)
   const sendMessage = useChatStore((state) => state.sendMessage)
   const stopStreaming = useChatStore((state) => state.stopStreaming)
   const regenerate = useChatStore((state) => state.regenerate)
@@ -185,6 +191,7 @@ function Overlay() {
   const [value, setValue] = useState('')
   const [slashPrompt, setSlashPrompt] = useState<QuickPrompt | null>(null)
   const [promptIndex, setPromptIndex] = useState(0)
+  const [switcherOpen, setSwitcherOpen] = useState(false)
   // A new reply starts revealed or hidden depending on the setting; Hide/Show still override it
   // for the reply currently on screen.
   const [revealed, setRevealed] = useState(revealResponse)
@@ -326,6 +333,7 @@ function Overlay() {
     clearAttachments()
     setValue('')
     setSlashPrompt(null)
+    setSwitcherOpen(false)
     pastedRef.current = false
     setRevealed(revealResponse)
     setIgnoredResponseId(null)
@@ -351,6 +359,7 @@ function Overlay() {
     clearAttachments()
     setValue('')
     setSlashPrompt(null)
+    setSwitcherOpen(false)
     pastedRef.current = false
     // A selection action always reveals its result; a normal New chat follows the setting.
     setRevealed(forceRevealOnChatChange.current || revealResponse)
@@ -413,7 +422,7 @@ function Overlay() {
       const modifier = event.metaKey || event.ctrlKey
 
       // The voice strip and the selection strip own their keys and ignore action shortcuts.
-      if (voiceActive || selectionView) {
+      if (voiceActive || selectionView || switcherOpen) {
         return
       }
 
@@ -508,6 +517,7 @@ function Overlay() {
     setDeepThink,
     setWebSearch,
     streaming,
+    switcherOpen,
     triggerCapture,
     voiceActive,
     voiceStart,
@@ -670,6 +680,7 @@ function Overlay() {
     let off: (() => void) | undefined
     void subscribeToOverlayHidden(() => {
       voice.cancel()
+      setSwitcherOpen(false)
       setSelectionView(null)
       setSelectionContext(null)
       setCustomSelection(null)
@@ -767,7 +778,37 @@ function Overlay() {
     return () => window.removeEventListener('keydown', onKeyDown, true)
   }, [selectionView])
 
+  // Escape closes the conversation switcher without hiding Iris.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the input ref is stable
+  useEffect(() => {
+    if (!switcherOpen) {
+      return
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') {
+        return
+      }
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      setSwitcherOpen(false)
+      requestAnimationFrame(() => inputRef.current?.focus())
+    }
+
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [switcherOpen])
+
+  // A voice session or selection strip replaces the normal overlay view; do not bring the
+  // switcher back when that view closes.
+  useEffect(() => {
+    if (switcherOpen && (voiceActive || selectionView)) {
+      setSwitcherOpen(false)
+    }
+  }, [selectionView, switcherOpen, voiceActive])
+
   const startCapture = async () => {
+    setSwitcherOpen(false)
     if (!isTauri()) {
       return
     }
@@ -983,7 +1024,36 @@ function Overlay() {
     void startCapture()
   }
 
+  const switchConversation = async (id: string) => {
+    setSwitcherOpen(false)
+    if (id === quickConversationId) {
+      requestAnimationFrame(() => inputRef.current?.focus())
+      return
+    }
+
+    if (isTauri()) {
+      void stopSpeaking()
+    }
+    try {
+      // Save the current chat's pending messages before the overlay leaves it.
+      await flushChatStorage()
+    } catch {
+      // Switching still works; the mirror retries on the next change or focus.
+    }
+
+    openQuickConversation(id)
+    setRevealed(revealResponse)
+    setIgnoredResponseId(null)
+    setSelectionView(null)
+    setSelectionContext(null)
+    setCustomSelection(null)
+    setSelectionReplaceError(null)
+    setSlashPrompt(null)
+    requestAnimationFrame(() => inputRef.current?.focus())
+  }
+
   const openHistory = () => {
+    setSwitcherOpen(false)
     // Keep the history window on the quick conversation when it has content. The overlay and the
     // history window are separate webviews, so the selection is shared through localStorage and
     // an event; changing this window's store alone would not move the other one.
@@ -1310,7 +1380,7 @@ function Overlay() {
                         </Tooltip>
                       ) : null}
 
-                      {responseReady ? (
+                      {responseReady && !switcherOpen ? (
                         <Tooltip delay={500}>
                           <Button
                             isIconOnly
@@ -1327,7 +1397,7 @@ function Overlay() {
                             {formatShortcut(overlayShortcuts.toggleResponse)}
                           </Tooltip.Content>
                         </Tooltip>
-                      ) : showResponse ? (
+                      ) : showResponse && !switcherOpen ? (
                         <Tooltip delay={500}>
                           <Button
                             isIconOnly
@@ -1372,6 +1442,38 @@ function Overlay() {
                           </Tooltip.Content>
                         </Tooltip>
                       ) : null}
+
+                      <Tooltip delay={500}>
+                        <Button
+                          isIconOnly
+                          aria-label={
+                            switcherOpen
+                              ? 'Close conversation search'
+                              : 'Search conversations'
+                          }
+                          className={cn(
+                            'size-7 min-w-7',
+                            switcherOpen
+                              ? 'bg-foreground/10 text-foreground'
+                              : 'text-foreground/45',
+                          )}
+                          size="sm"
+                          variant="ghost"
+                          onPress={() => {
+                            if (switcherOpen) {
+                              setSwitcherOpen(false)
+                              requestAnimationFrame(() =>
+                                inputRef.current?.focus(),
+                              )
+                            } else {
+                              setSwitcherOpen(true)
+                            }
+                          }}
+                        >
+                          <Search className="size-3.5" />
+                        </Button>
+                        <Tooltip.Content>Search conversations</Tooltip.Content>
+                      </Tooltip>
 
                       <Tooltip delay={500}>
                         <Button
@@ -1425,7 +1527,32 @@ function Overlay() {
                     ) : null}
                   </AnimatePresence>
 
-                  {showResponse ? (
+                  <AnimatePresence initial={false}>
+                    {switcherOpen ? (
+                      <motion.div
+                        key="conversation-switcher"
+                        animate={{ opacity: 1, y: 0 }}
+                        className="px-3 pb-1"
+                        exit={{ opacity: 0, y: -6 }}
+                        initial={{ opacity: 0, y: 8 }}
+                        transition={contentSpring}
+                      >
+                        <ConversationSwitcher
+                          conversations={conversations}
+                          currentId={quickConversationId}
+                          onClose={() => {
+                            setSwitcherOpen(false)
+                            requestAnimationFrame(() =>
+                              inputRef.current?.focus(),
+                            )
+                          }}
+                          onSelect={(id) => void switchConversation(id)}
+                        />
+                      </motion.div>
+                    ) : null}
+                  </AnimatePresence>
+
+                  {showResponse && !switcherOpen ? (
                     <div className="iris-response px-5 pb-2 pt-1.5">
                       <div
                         aria-live="polite"
@@ -1619,6 +1746,7 @@ function Overlay() {
                             pastedRef.current = false
                           }
                         }}
+                        onFocus={() => setSwitcherOpen(false)}
                         onPaste={(event) => {
                           if (
                             event.clipboardData.getData('text/plain').trim()

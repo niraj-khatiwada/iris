@@ -111,6 +111,8 @@ type ChatState = {
   ) => void
   resetQuickConversation: () => void
   restorePreviousQuickConversation: () => void
+  /** Switches the overlay to any stored conversation, keeping the current one in History. */
+  openQuickConversation: (id: string) => void
   selectConversation: (id: string) => void
   /**
    * Opens a conversation and loads older pages until `messageId` is in memory, then asks the
@@ -751,6 +753,57 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     if (previousId) {
       persistQuickConversationId(previousId)
     }
+  },
+
+  openQuickConversation: (id) => {
+    const state = get()
+    if (id === state.quickConversationId) {
+      return
+    }
+    if (
+      !state.conversations.some(
+        (conversation) => conversation.id === id && !conversation.archivedAt,
+      )
+    ) {
+      return
+    }
+
+    cancelActiveRun()
+
+    set((current) => {
+      const currentQuick = current.quickConversationId
+        ? current.conversations.find(
+            (conversation) => conversation.id === current.quickConversationId,
+          )
+        : undefined
+      const keepCurrent = hasMessages(currentQuick) && !currentQuick?.archivedAt
+      const keptCurrent =
+        keepCurrent && currentQuick ? settleConversation(currentQuick) : null
+
+      return {
+        conversations: keepCurrent
+          ? current.conversations.map((conversation) =>
+              keptCurrent && conversation.id === keptCurrent.id
+                ? keptCurrent
+                : conversation,
+            )
+          : current.conversations.filter(
+              (conversation) =>
+                conversation.id !== currentQuick?.id ||
+                conversation.archivedAt !== undefined,
+            ),
+        quickConversationId: id,
+        // Keep the chat that was just left one shortcut away.
+        lastQuickConversationId: keepCurrent
+          ? (currentQuick?.id ?? null)
+          : null,
+        streamingRequestId: null,
+        streamingConversationId: null,
+        streamingMessageId: null,
+        focusedMessageId: null,
+      }
+    })
+    persistQuickConversationId(id)
   },
 
   archiveConversation: (id) => {

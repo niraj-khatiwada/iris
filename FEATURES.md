@@ -31,17 +31,25 @@
 
 ~~Add a `memories` table, inject a compact memory block into the system prompt in `core/agent.rs`, and add Settings → Memory with search, edit, delete, and pause. Auto-extract low-risk facts after a conversation and show “Iris remembered…” with an undo; ask before storing anything sensitive. Later, scope memories per project.~~
 
-### 3. Island conversation switcher · Small-medium
+### ~~3. Island conversation switcher · Small-medium~~ — done
 
-Today a finished quick chat is only reachable from History, and **Previous conversation** (`⌘⇧N`) toggles one step back. Add a **search** button in the overlay header that lets you jump to any earlier conversation:
+**What shipped**
 
-- **It searches conversations, not messages.** One query matches conversation titles and returns the recent chats, the same rows the sidebar shows. It is a “get me back to that chat” tool, not a transcript search, so it stays instant and the expanded state stays small.
-- **The island grows for it.** Tapping search expands the panel upward into a compact field with the matching chats underneath. Escape or a second tap collapses it back to the normal one-input, one-response layout; it is not a new window and not a chat redesign.
-- **Selecting a result switches context in place.** The chosen chat becomes the current quick conversation with its title, messages, and attachments, and the overlay keeps working exactly as it does after **Previous conversation** (`⌘⇧N`), just with the full list instead of one step.
-- **Nothing is lost on the way.** The current draft and its pending writes are flushed before the switch, and **New chat** still starts a fresh UUID conversation, so the old chat stays intact in History.
-- **Keyboard-first.** Arrow keys move through results and Enter opens the highlighted chat, so the switcher never requires the mouse.
+- **Header search.** A search button in the overlay header opens a compact title search above the composer. A second click or Escape closes it, and Escape does not hide Iris.
+- **Title-only and instant.** It matches non-archived conversation titles in memory, shows the 8 most recent chats by default or up to 20 matches while searching, and never searches message bodies. The current chat is excluded.
+- **Switch in place.** Choosing a chat flushes pending SQLite writes, settles the previous run, makes the chosen chat the current `quickConversationId`, loads its newest page, and keeps the previous chat one **Previous conversation** (`⌘⇧N`) away. The choice is persisted in `app_meta`.
+- **Keyboard-first.** The search field focuses on open, arrow keys move through results, Enter opens the highlighted chat, and the active row scrolls into view.
+- **No schema change.** It reuses the stored conversation summaries, `quickConversationId`, the existing message-page loader, and the same title rows the sidebar shows.
 
-No schema change is needed: it reuses the stored conversation list, `quickConversationId`, and the existing open-conversation path from History, so the work stays inside the overlay.
+~~Today a finished quick chat is only reachable from History, and **Previous conversation** (`⌘⇧N`) toggles one step back. Add a **search** button in the overlay header that lets you jump to any earlier conversation:~~
+
+- ~~**It searches conversations, not messages.** One query matches conversation titles and returns the recent chats, the same rows the sidebar shows. It is a “get me back to that chat” tool, not a transcript search, so it stays instant and the expanded state stays small.~~
+- ~~**The island grows for it.** Tapping search expands the panel upward into a compact field with the matching chats underneath. Escape or a second tap collapses it back to the normal one-input, one-response layout; it is not a new window and not a chat redesign.~~
+- ~~**Selecting a result switches context in place.** The chosen chat becomes the current quick conversation with its title, messages, and attachments, and the overlay keeps working exactly as it does after **Previous conversation** (`⌘⇧N`), just with the full list instead of one step.~~
+- ~~**Nothing is lost on the way.** The current draft and its pending writes are flushed before the switch, and **New chat** still starts a fresh UUID conversation, so the old chat stays intact in History.~~
+- ~~**Keyboard-first.** Arrow keys move through results and Enter opens the highlighted chat, so the switcher never requires the mouse.~~
+
+~~No schema change is needed: it reuses the stored conversation list, `quickConversationId`, and the existing open-conversation path from History, so the work stays inside the overlay.~~
 
 ### 4. Scheduled tasks and reminders · Medium
 
@@ -54,6 +62,8 @@ Iris already lives in the menu bar and can run while hidden. Add:
 This needs a small Rust scheduler, a `tasks` table, catch-up after sleep, run history, and notifications. Use macOS notifications when Iris is hidden and the Dynamic Island notice system when a window is open. This is the feature that turns Iris from reactive to proactive.
 
 Those four are the biggest jump in usefulness per unit of work.
+
+### 5. REMIND ME: Delete `.commandcode` folder
 
 ## Next tier: the “do everything” layer
 
