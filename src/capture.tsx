@@ -5,7 +5,6 @@ import {
   ArrowUpRight,
   Check,
   type LucideIcon,
-  Move,
   Pencil,
   Square,
   X,
@@ -514,7 +513,8 @@ function Capture() {
     resize.current = null
   }
 
-  // The toolbar's move icon is itself the drag handle: grab it and the selection follows.
+  // The selection's outer edge is the drag handle: grab the frame just outside the crop and the
+  // whole selection follows. The interior stays free for drawing annotations.
   const startMove = (event: React.PointerEvent<HTMLButtonElement>) => {
     if (!selection) {
       return
@@ -712,8 +712,74 @@ function Capture() {
             }}
           />
 
-          {!capturing
-            ? HANDLES.map((handle) => (
+          {!capturing ? (
+            <>
+              <button
+                type="button"
+                aria-label="Move selection"
+                className="absolute z-20 cursor-move border-0 bg-transparent p-0 transition-colors hover:bg-white/[0.04]"
+                style={{
+                  left: selection.x,
+                  top: selection.y - 10,
+                  width: selection.width,
+                  height: 12,
+                }}
+                tabIndex={-1}
+                onPointerCancel={endMove}
+                onPointerDown={startMove}
+                onPointerMove={moveSelection}
+                onPointerUp={endMove}
+              />
+              <button
+                type="button"
+                aria-label="Move selection"
+                className="absolute z-20 cursor-move border-0 bg-transparent p-0 transition-colors hover:bg-white/[0.04]"
+                style={{
+                  left: selection.x,
+                  top: selection.y + selection.height - 2,
+                  width: selection.width,
+                  height: 12,
+                }}
+                tabIndex={-1}
+                onPointerCancel={endMove}
+                onPointerDown={startMove}
+                onPointerMove={moveSelection}
+                onPointerUp={endMove}
+              />
+              <button
+                type="button"
+                aria-label="Move selection"
+                className="absolute z-20 cursor-move border-0 bg-transparent p-0 transition-colors hover:bg-white/[0.04]"
+                style={{
+                  left: selection.x - 10,
+                  top: selection.y,
+                  width: 12,
+                  height: selection.height,
+                }}
+                tabIndex={-1}
+                onPointerCancel={endMove}
+                onPointerDown={startMove}
+                onPointerMove={moveSelection}
+                onPointerUp={endMove}
+              />
+              <button
+                type="button"
+                aria-label="Move selection"
+                className="absolute z-20 cursor-move border-0 bg-transparent p-0 transition-colors hover:bg-white/[0.04]"
+                style={{
+                  left: selection.x + selection.width - 2,
+                  top: selection.y,
+                  width: 12,
+                  height: selection.height,
+                }}
+                tabIndex={-1}
+                onPointerCancel={endMove}
+                onPointerDown={startMove}
+                onPointerMove={moveSelection}
+                onPointerUp={endMove}
+              />
+
+              {HANDLES.map((handle) => (
                 <button
                   key={handle.id}
                   type="button"
@@ -731,8 +797,9 @@ function Capture() {
                 >
                   <span className="size-2 rounded-full border border-black/40 bg-white shadow-sm" />
                 </button>
-              ))
-            : null}
+              ))}
+            </>
+          ) : null}
 
           {!capturing ? (
             <div
@@ -740,7 +807,7 @@ function Capture() {
               className={cn(
                 'fixed z-40 flex items-center gap-0.5 rounded-2xl border border-white/10 bg-[#1b1b1f]/95 px-1.5 py-1 shadow-2xl backdrop-blur-xl',
                 toolbarDragging ? 'cursor-grabbing' : 'cursor-grab',
-                '[&_button:not([data-cursor=grab])]:cursor-default',
+                '[&_button]:cursor-default',
               )}
               style={{
                 left: toolbarLeft,
@@ -752,29 +819,6 @@ function Capture() {
               onPointerMove={moveToolbar}
               onPointerUp={endToolbarDrag}
             >
-              <Tooltip delay={400}>
-                <button
-                  type="button"
-                  aria-label="Drag selection"
-                  data-cursor="grab"
-                  className="flex size-7 cursor-grab items-center justify-center rounded-full text-white/70 transition-colors hover:bg-white/10 active:cursor-grabbing"
-                  onPointerCancel={endMove}
-                  onPointerDown={startMove}
-                  onPointerMove={moveSelection}
-                  onPointerUp={endMove}
-                >
-                  <Move className="size-3.5" />
-                </button>
-                <Tooltip.Content>Drag to move the selection</Tooltip.Content>
-              </Tooltip>
-
-              <span
-                aria-hidden
-                className="mx-0.5 flex h-6 w-2 items-center justify-center"
-              >
-                <span className="h-4 w-px bg-white/10" />
-              </span>
-
               <ToolButton
                 active={tool === 'pen'}
                 icon={Pencil}

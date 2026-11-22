@@ -14,10 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Capture tool shortcuts.** Inside the capture window, **⌘A** selects the
   arrow, **⌘R** the rectangle, and **⌘D** or **⌘P** the pen. They are not listed in
   Settings → Shortcuts and do not affect any other window.
+- **Direct selection dragging.** Grab the selection's outer edge (a move cursor
+  appears) to move the whole crop. The toolbar's four-arrow button is gone, and the
+  inside of the selection stays free for drawing annotations.
 - **Movable capture toolbar.** In screen capture, drag the toolbar's empty space
   (the gaps and separators) to move it away from the area you want to annotate. The
-  move icon still repositions the crop; the toolbar stays where you put it until
-  the capture closes.
+  toolbar stays where you put it until the capture closes.
 - **Stopped and cut-off replies are labeled.** If a stream is stopped after text
   has already arrived, the partial reply now says **Stopped** in History and the
   quick overlay instead of looking finished. A reply cut off by the output limit
