@@ -12,8 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Automatic web search and thinking effort.** Web search is now always available and
   the model decides when to use it, so the Web search toggle and `⌘S` binding are
   gone. Thinking is always enabled; the DeepThink toggle and `⌘D` binding were
-  replaced by a persisted **Low / High / Max** effort selector in both composers,
-  defaulting to **Low**. Existing installs that had DeepThink on migrate to High.
+  replaced by a persisted **Low / High / Max** effort chip in both composers that
+  cycles on click, defaulting to **Low**. Existing installs that had DeepThink on
+  migrate to High.
 - **Conversation switcher in the quick overlay.** A search button in the overlay
   header, or the **Search conversations** overlay shortcut (**⌘F** by default,
   configurable in Settings → Shortcuts), opens a compact title search for recent
