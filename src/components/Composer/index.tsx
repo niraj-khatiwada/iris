@@ -75,8 +75,8 @@ function Composer() {
       return
     }
     previousConversationId.current = activeConversationId
-    setSlashPrompt(null)
     if (previous !== null) {
+      setSlashPrompt(null)
       files.clear()
     }
   }, [activeConversationId, files.clear])
@@ -103,7 +103,6 @@ function Composer() {
     const text = value.trim()
     if (
       (!text && files.attachments.length === 0) ||
-      (Boolean(slashPrompt) && !text) ||
       files.pending ||
       files.hasError ||
       streaming ||
@@ -175,7 +174,9 @@ function Composer() {
             className="max-h-44 min-h-11 w-full resize-none border-0 bg-transparent px-1 py-2.5 text-[15px] leading-6 shadow-none focus-visible:ring-0"
             placeholder={
               slashPrompt
-                ? `Type or paste text to ${slashPrompt.name.toLowerCase()}…`
+                ? files.readyAttachments.length > 0
+                  ? `Press Enter to run ${slashPrompt.name} on the attachment…`
+                  : `Type or paste text to ${slashPrompt.name.toLowerCase()}…`
                 : 'Message Iris…'
             }
             rows={1}
@@ -274,7 +275,9 @@ function Composer() {
                   slashOpen ||
                   files.pending ||
                   files.hasError ||
-                  (Boolean(slashPrompt) && !value.trim()) ||
+                  (Boolean(slashPrompt) &&
+                    !value.trim() &&
+                    files.attachments.length === 0) ||
                   (!value.trim() && files.attachments.length === 0)
                 }
                 onPress={submit}

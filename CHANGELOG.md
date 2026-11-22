@@ -71,6 +71,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Selection prompts, **Custom**, and `/` quick prompts now preserve a screenshot
   already attached to the draft and send it with the prompt. Iris keeps the current
   quick chat when an attachment is present so the image stays in the right folder.
+- A selected quick prompt can now be sent with only an attachment and an empty
+  composer. The prompt itself becomes the model instruction, and the empty
+  `<selected_text>` wrapper is omitted.
 - Accessibility permission errors now use the same neutral permission banner as
   Screen Recording, with one shared `PermissionNotice` component for both.
 - Escape in the selection strip now cancels the selection and returns to the normal

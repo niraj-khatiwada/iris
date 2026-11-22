@@ -835,7 +835,9 @@ function Overlay() {
 
     const selection = customSelection
     const quickPrompt = slashPrompt
-    if ((selection || quickPrompt) && !text) {
+    // A custom selection still needs an instruction. A quick prompt is itself the instruction,
+    // so an attached image can be sent with an empty composer.
+    if (selection && !text) {
       return
     }
 
@@ -912,7 +914,7 @@ function Overlay() {
 
       const selection = customSelection
       const quickPrompt = slashPrompt
-      if ((selection || quickPrompt) && !text) {
+      if (selection && !text) {
         return
       }
       const prompt = selection
@@ -1592,7 +1594,9 @@ function Overlay() {
                           customSelection
                             ? 'Tell Iris what to do with the selection…'
                             : slashPrompt
-                              ? `Type or paste text to ${slashPrompt.name.toLowerCase()}…`
+                              ? files.readyAttachments.length > 0
+                                ? `Press Enter to run ${slashPrompt.name} on the attachment…`
+                                : `Type or paste text to ${slashPrompt.name.toLowerCase()}…`
                               : hasResponse
                                 ? 'Ask a follow-up…'
                                 : 'Ask Iris anything…'
@@ -1686,7 +1690,9 @@ function Overlay() {
                             files.pending ||
                             files.hasError ||
                             (Boolean(customSelection) && !value.trim()) ||
-                            (Boolean(slashPrompt) && !value.trim()) ||
+                            (Boolean(slashPrompt) &&
+                              !value.trim() &&
+                              files.attachments.length === 0) ||
                             (!value.trim() && files.attachments.length === 0)
                           }
                           onPress={submit}
