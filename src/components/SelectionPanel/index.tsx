@@ -3,6 +3,7 @@ import { Sparkles, X } from 'lucide-react'
 import type { Ref } from 'react'
 
 import IrisBlob from '@/components/IrisBlob'
+import PermissionNotice from '@/components/PermissionNotice'
 import { useSettingsStore } from '@/stores/settingsStore'
 import type { SelectionView } from '@/types/selection'
 import type { QuickPrompt } from '@/types/settings'
@@ -95,22 +96,20 @@ function SelectionPanel({
             </Button>
           </div>
         </div>
+      ) : view.permissionRequired ? (
+        <div className="px-4 pb-3">
+          <PermissionNotice
+            message={view.message}
+            onDismiss={onClose}
+            onOpenSettings={onOpenSettings}
+          />
+        </div>
       ) : (
         <div className="px-4 pb-3">
           <p className="max-w-[620px] text-[13px] leading-5 text-danger">
             {view.message}
           </p>
           <div className="mt-3 flex items-center gap-2">
-            {view.permissionRequired ? (
-              <Button
-                className="h-8 rounded-full px-3 text-[11px]"
-                size="sm"
-                variant="secondary"
-                onPress={onOpenSettings}
-              >
-                Open Settings
-              </Button>
-            ) : null}
             <Button
               className="h-8 rounded-full px-3 text-[11px]"
               size="sm"

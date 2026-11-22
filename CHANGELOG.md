@@ -55,6 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Accessibility permission errors now use the same neutral permission banner as
+  Screen Recording, with one shared `PermissionNotice` component for both.
 - Escape in the selection strip now cancels the selection and returns to the normal
   Iris composer without hiding the overlay. The header X still closes Iris.
 - Selection actions now fall back to a temporary copy in every app when

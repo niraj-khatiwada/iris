@@ -6,7 +6,6 @@ import {
   ChevronDown,
   ChevronUp,
   ClipboardPaste,
-  Info,
   Mic,
   Plus,
   Replace,
@@ -30,6 +29,7 @@ import ChatToggles from '@/components/ChatToggles'
 import CopyButton from '@/components/CopyButton'
 import IrisBlob, { type IrisTone } from '@/components/IrisBlob'
 import Markdown from '@/components/Markdown'
+import PermissionNotice from '@/components/PermissionNotice'
 import QuickPromptChip from '@/components/QuickPromptChip'
 import QuickPromptMenu from '@/components/QuickPromptMenu'
 import ReadAloudButton from '@/components/ReadAloudButton'
@@ -1396,32 +1396,12 @@ function Overlay() {
                         initial={{ opacity: 0, height: 0 }}
                         transition={{ duration: 0.18, ease: 'easeOut' }}
                       >
-                        <div className="mx-3 mb-1 flex items-center gap-2 rounded-xl border border-border/50 bg-surface/45 px-3 py-2 text-[11px] leading-4 text-foreground/70 backdrop-blur-xl">
-                          <Info className="size-3.5 shrink-0 text-foreground/55" />
-                          <p className="min-w-0 flex-1">
-                            Screen Recording is off. Enable Iris in System
-                            Settings → Privacy &amp; Security → Screen
-                            Recording, then restart Iris.
-                          </p>
-                          <Button
-                            className="h-7 min-w-0 shrink-0 px-2 text-[11px]"
-                            size="sm"
-                            variant="secondary"
-                            onPress={() => void openScreenSettings()}
-                          >
-                            Open Settings
-                          </Button>
-                          <Button
-                            isIconOnly
-                            aria-label="Dismiss"
-                            className="size-7 min-w-7 shrink-0 text-foreground/45"
-                            size="sm"
-                            variant="ghost"
-                            onPress={() => setCapturePermissionNeeded(false)}
-                          >
-                            <X className="size-3.5" />
-                          </Button>
-                        </div>
+                        <PermissionNotice
+                          className="mx-3 mb-1"
+                          message="Screen Recording is off. Enable Iris in System Settings → Privacy & Security → Screen Recording, then restart Iris."
+                          onDismiss={() => setCapturePermissionNeeded(false)}
+                          onOpenSettings={() => void openScreenSettings()}
+                        />
                       </motion.div>
                     ) : null}
                   </AnimatePresence>
