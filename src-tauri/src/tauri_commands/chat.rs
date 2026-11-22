@@ -91,6 +91,36 @@ pub struct ChatTokenPayload {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ChatThinkingPayload {
+    pub request_id: String,
+    pub token: String,
+}
+
+/// One web result returned by DeepSeek's server-side search or URL reading.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatSource {
+    pub title: String,
+    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snippet: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub site_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub site_icon: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page_age: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatSourcesPayload {
+    pub request_id: String,
+    pub sources: Vec<ChatSource>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChatDonePayload {
     pub request_id: String,
     pub cancelled: bool,

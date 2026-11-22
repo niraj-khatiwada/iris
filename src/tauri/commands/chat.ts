@@ -1,16 +1,28 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
-import type { AgentMessage } from '@/types/chat'
+import type { AgentMessage, ChatSource } from '@/types/chat'
 import type { ThinkingEffort } from '@/types/settings'
 
 const CHAT_TOKEN_EVENT = 'chat:token'
+const CHAT_THINKING_EVENT = 'chat:thinking'
+const CHAT_SOURCES_EVENT = 'chat:sources'
 const CHAT_DONE_EVENT = 'chat:done'
 const CHAT_ERROR_EVENT = 'chat:error'
 
 export type ChatTokenPayload = {
   requestId: string
   token: string
+}
+
+export type ChatThinkingPayload = {
+  requestId: string
+  token: string
+}
+
+export type ChatSourcesPayload = {
+  requestId: string
+  sources: ChatSource[]
 }
 
 export type ChatDonePayload = {
@@ -57,6 +69,22 @@ export function subscribeToChatToken(
   handler: (payload: ChatTokenPayload) => void,
 ): Promise<UnlistenFn> {
   return listen<ChatTokenPayload>(CHAT_TOKEN_EVENT, (event) =>
+    handler(event.payload),
+  )
+}
+
+export function subscribeToChatThinking(
+  handler: (payload: ChatThinkingPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<ChatThinkingPayload>(CHAT_THINKING_EVENT, (event) =>
+    handler(event.payload),
+  )
+}
+
+export function subscribeToChatSources(
+  handler: (payload: ChatSourcesPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<ChatSourcesPayload>(CHAT_SOURCES_EVENT, (event) =>
     handler(event.payload),
   )
 }

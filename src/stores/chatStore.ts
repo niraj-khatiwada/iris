@@ -13,6 +13,7 @@ import type {
   AgentMessage,
   ChatAttachment,
   ChatMessage,
+  ChatSource,
   Conversation,
   ConversationSummary,
   MessagePage,
@@ -229,11 +230,35 @@ function finishConversationMessages(
         return []
       }
 
-      return [{ ...message, status: 'complete' as const }]
+      const thinking = message.thinking?.trim()
+      return [
+        {
+          ...message,
+          status: 'complete' as const,
+          ...(thinking ? { metadata: { ...message.metadata, thinking } } : {}),
+        },
+      ]
     })
 
     return { ...conversation, updatedAt: Date.now(), messages }
   })
+}
+
+/** Adds incoming sources once each, keeping the order the model returned them in. */
+function mergeSources(
+  existing: ChatSource[] | undefined,
+  incoming: ChatSource[],
+): ChatSource[] {
+  const merged = [...(existing ?? [])]
+  const seen = new Set(merged.map((source) => source.url))
+  for (const source of incoming) {
+    if (!source.url || seen.has(source.url)) {
+      continue
+    }
+    seen.add(source.url)
+    merged.push(source)
+  }
+  return merged.slice(0, 30)
 }
 
 type RunContext = {
@@ -298,7 +323,11 @@ async function runAssistantReply({
       assistantMessageId,
       (message) => ({
         ...message,
-        metadata: { ...message.metadata, ai_model: settings.model },
+        metadata: {
+          ...message.metadata,
+          ai_model: settings.model,
+          thinking_effort: settings.thinkingEffort,
+        },
       }),
     ),
   }))
@@ -337,6 +366,43 @@ async function runAssistantReply({
         ),
       }))
     },
+    onThinking: (token) => {
+      if (get().streamingRequestId !== requestId) {
+        return
+      }
+
+      set((current) => ({
+        conversations: withMessage(
+          current.conversations,
+          conversationId,
+          assistantMessageId,
+          (message) => ({
+            ...message,
+            thinking: (message.thinking ?? '') + token,
+          }),
+        ),
+      }))
+    },
+    onSources: (sources) => {
+      if (get().streamingRequestId !== requestId || sources.length === 0) {
+        return
+      }
+
+      set((current) => ({
+        conversations: withMessage(
+          current.conversations,
+          conversationId,
+          assistantMessageId,
+          (message) => ({
+            ...message,
+            metadata: {
+              ...message.metadata,
+              sources: mergeSources(message.metadata?.sources, sources),
+            },
+          }),
+        ),
+      }))
+    },
     onDone: ({ cancelled }) => {
       if (get().streamingRequestId !== requestId) {
         return
@@ -371,6 +437,14 @@ async function runAssistantReply({
             content:
               item.content ||
               'Something went wrong while contacting the agent.',
+            ...(item.thinking?.trim()
+              ? {
+                  metadata: {
+                    ...item.metadata,
+                    thinking: item.thinking.trim(),
+                  },
+                }
+              : {}),
           }),
         ),
         streamingRequestId: null,

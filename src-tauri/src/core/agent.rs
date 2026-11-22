@@ -22,8 +22,8 @@ use crate::core::read_aloud;
 use crate::core::storage::{Storage, StoredMessage};
 use crate::sys::speech;
 use crate::tauri_commands::chat::{
-    ChatAttachmentInput, ChatDonePayload, ChatErrorPayload, ChatMessageInput, ChatTokenPayload,
-    GenerationState, SendMessageRequest,
+    ChatAttachmentInput, ChatDonePayload, ChatErrorPayload, ChatMessageInput, ChatSource,
+    ChatSourcesPayload, ChatThinkingPayload, ChatTokenPayload, GenerationState, SendMessageRequest,
 };
 use crate::utils::event;
 
@@ -310,37 +310,56 @@ async fn run(
 
             match event.get("type").and_then(Value::as_str) {
                 Some("content_block_start") => {
-                    if let Some(text) = event
-                        .get("content_block")
-                        .and_then(|block| block.get("text"))
-                        .and_then(Value::as_str)
-                    {
-                        if !text.is_empty() {
-                            let visible = match summary_filter.as_mut() {
-                                Some(filter) => filter.push(text),
-                                None => text.to_string(),
-                            };
-                            if !visible.is_empty() {
-                                emit_token(app, &request.request_id, &visible);
-                                full_text.push_str(&visible);
+                    if let Some(block) = event.get("content_block") {
+                        match block.get("type").and_then(Value::as_str) {
+                            Some("thinking") => {
+                                if let Some(thinking) =
+                                    block.get("thinking").and_then(Value::as_str)
+                                {
+                                    if !thinking.is_empty() {
+                                        emit_thinking(app, &request.request_id, thinking);
+                                    }
+                                }
+                            }
+                            Some("web_search_tool_result") | Some("web_fetch_tool_result") => {
+                                let sources = sources_from_block(block);
+                                emit_sources(app, &request.request_id, sources);
+                            }
+                            _ => {}
+                        }
+
+                        if let Some(text) = block.get("text").and_then(Value::as_str) {
+                            if !text.is_empty() {
+                                let visible = match summary_filter.as_mut() {
+                                    Some(filter) => filter.push(text),
+                                    None => text.to_string(),
+                                };
+                                if !visible.is_empty() {
+                                    emit_token(app, &request.request_id, &visible);
+                                    full_text.push_str(&visible);
+                                }
                             }
                         }
                     }
                 }
                 Some("content_block_delta") => {
-                    if let Some(text) = event
-                        .get("delta")
-                        .and_then(|delta| delta.get("text"))
-                        .and_then(Value::as_str)
-                    {
-                        if !text.is_empty() {
-                            let visible = match summary_filter.as_mut() {
-                                Some(filter) => filter.push(text),
-                                None => text.to_string(),
-                            };
-                            if !visible.is_empty() {
-                                emit_token(app, &request.request_id, &visible);
-                                full_text.push_str(&visible);
+                    if let Some(delta) = event.get("delta") {
+                        if let Some(thinking) = delta.get("thinking").and_then(Value::as_str) {
+                            if !thinking.is_empty() {
+                                emit_thinking(app, &request.request_id, thinking);
+                            }
+                        }
+
+                        if let Some(text) = delta.get("text").and_then(Value::as_str) {
+                            if !text.is_empty() {
+                                let visible = match summary_filter.as_mut() {
+                                    Some(filter) => filter.push(text),
+                                    None => text.to_string(),
+                                };
+                                if !visible.is_empty() {
+                                    emit_token(app, &request.request_id, &visible);
+                                    full_text.push_str(&visible);
+                                }
                             }
                         }
                     }
@@ -889,6 +908,78 @@ fn emit_token(app: &AppHandle, request_id: &str, token: &str) {
     );
 }
 
+fn emit_thinking(app: &AppHandle, request_id: &str, token: &str) {
+    let _ = app.emit(
+        event::CHAT_THINKING,
+        ChatThinkingPayload {
+            request_id: request_id.to_string(),
+            token: token.to_string(),
+        },
+    );
+}
+
+fn emit_sources(app: &AppHandle, request_id: &str, sources: Vec<ChatSource>) {
+    if sources.is_empty() {
+        return;
+    }
+    let _ = app.emit(
+        event::CHAT_SOURCES,
+        ChatSourcesPayload {
+            request_id: request_id.to_string(),
+            sources,
+        },
+    );
+}
+
+/// Collects the web results carried by a `web_search_tool_result` or `web_fetch_tool_result`
+/// block. DeepSeek sends the whole block in one `content_block_start`.
+fn sources_from_block(block: &Value) -> Vec<ChatSource> {
+    let Some(content) = block.get("content") else {
+        return Vec::new();
+    };
+    let entries: Vec<&Value> = match content {
+        Value::Array(items) => items.iter().collect(),
+        Value::Object(_) => vec![content],
+        _ => return Vec::new(),
+    };
+
+    entries.into_iter().filter_map(source_from_value).collect()
+}
+
+fn source_from_value(value: &Value) -> Option<ChatSource> {
+    if value
+        .get("type")
+        .and_then(Value::as_str)
+        .is_some_and(|kind| kind.ends_with("_error"))
+    {
+        return None;
+    }
+
+    let url = value.get("url").and_then(Value::as_str)?.trim();
+    if url.is_empty() {
+        return None;
+    }
+    let title = optional_string(value, "title").unwrap_or_else(|| url.to_string());
+
+    Some(ChatSource {
+        title,
+        url: url.to_string(),
+        snippet: optional_string(value, "snippet"),
+        site_name: optional_string(value, "site_name"),
+        site_icon: optional_string(value, "site_icon"),
+        page_age: optional_string(value, "page_age"),
+    })
+}
+
+fn optional_string(value: &Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_string)
+}
+
 fn emit_done(app: &AppHandle, request_id: &str, cancelled: bool) {
     let _ = app.emit(
         event::CHAT_DONE,
@@ -993,11 +1084,12 @@ mod tests {
 
     use super::{
         build_body, chunk_end, contains_url, document_count, newest_user_message, prepare_with,
-        split_index, stored_to_input, to_api_messages, trim_to_user, AgentConfig, SummaryCache,
-        Turn, RECENT_BUDGET_CHARS,
+        sources_from_block, split_index, stored_to_input, to_api_messages, trim_to_user,
+        AgentConfig, SummaryCache, Turn, RECENT_BUDGET_CHARS,
     };
     use crate::core::storage::{StoredAttachment, StoredMessage};
     use crate::tauri_commands::chat::{ChatAttachmentInput, ChatMessageInput};
+    use serde_json::json;
 
     /// A tiny DeepSeek stand-in: answers every request with a JSON summary and records the body.
     struct MockDeepSeek {
@@ -1275,6 +1367,36 @@ mod tests {
         assert_eq!(tools.len(), 2);
         assert_eq!(tools[0]["name"], "deepseek_web_search");
         assert_eq!(tools[1]["name"], "deepseek_read_url");
+    }
+
+    #[test]
+    fn web_search_blocks_become_sources() {
+        let block = json!({
+            "type": "web_search_tool_result",
+            "content": [
+                {
+                    "type": "web_search_result",
+                    "title": "DeepSeek",
+                    "url": "https://www.deepseek.com/",
+                    "snippet": "The official site.",
+                    "site_name": "DeepSeek",
+                    "site_icon": null,
+                    "page_age": "2026-11-23T00:00:00Z"
+                },
+                {
+                    "type": "web_search_tool_result_error",
+                    "error_code": "unavailable"
+                }
+            ]
+        });
+
+        let sources = sources_from_block(&block);
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].title, "DeepSeek");
+        assert_eq!(sources[0].url, "https://www.deepseek.com/");
+        assert_eq!(sources[0].snippet.as_deref(), Some("The official site."));
+        assert_eq!(sources[0].site_name.as_deref(), Some("DeepSeek"));
+        assert_eq!(sources[0].page_age.as_deref(), Some("2026-11-23T00:00:00Z"));
     }
 
     #[test]

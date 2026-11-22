@@ -36,6 +36,16 @@ export type DraftAttachment = ChatAttachment & {
   error?: string
 }
 
+/** One web result returned by DeepSeek's server-side search or URL reading. */
+export type ChatSource = {
+  title: string
+  url: string
+  snippet?: string | null
+  siteName?: string | null
+  siteIcon?: string | null
+  pageAge?: string | null
+}
+
 export type ChatMessage = {
   id: string
   role: ChatRole
@@ -43,6 +53,8 @@ export type ChatMessage = {
   createdAt: number
   status: MessageStatus
   error?: string
+  /** Live reasoning while the assistant is streaming; persisted into metadata when complete. */
+  thinking?: string
   /** JSON metadata such as the model that produced an assistant reply. */
   metadata?: MessageMetadata
   attachments?: ChatAttachment[]
@@ -51,6 +63,12 @@ export type ChatMessage = {
 export type MessageMetadata = {
   /** The DeepSeek model id used for this assistant reply. */
   ai_model?: string
+  /** Thinking effort used for this reply. */
+  thinking_effort?: 'low' | 'high' | 'max'
+  /** Reasoning streamed for this reply, kept for the History transcript. */
+  thinking?: string
+  /** Web sources used by the reply. */
+  sources?: ChatSource[]
   /** True when the composer saw a text paste while this user message was drafted. */
   pasted?: boolean
   [key: string]: unknown

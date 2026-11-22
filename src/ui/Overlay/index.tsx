@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { emit, listen } from '@tauri-apps/api/event'
 import {
   ArrowUpRight,
+  Brain,
   ChevronDown,
   ChevronUp,
   ClipboardPaste,
@@ -1691,6 +1692,33 @@ function Overlay() {
                     )}
                     data-tauri-drag-region="deep"
                   >
+                    <AnimatePresence initial={false}>
+                      {streaming && assistant && !assistant.content ? (
+                        <motion.div
+                          key="thinking"
+                          animate={{ opacity: 1, height: 'auto' }}
+                          className="overflow-hidden"
+                          exit={{ opacity: 0, height: 0 }}
+                          initial={{ opacity: 0, height: 0 }}
+                          transition={{ duration: 0.18, ease: 'easeOut' }}
+                        >
+                          <div className="mb-1 flex items-center gap-1.5 px-1 text-[10px] text-muted">
+                            <Brain className="size-3 shrink-0 animate-pulse text-primary/80" />
+                            <span className="font-medium">Thinking</span>
+                            {assistant.metadata?.thinking_effort ? (
+                              <span className="text-muted/50">
+                                ·{' '}
+                                {assistant.metadata.thinking_effort
+                                  .charAt(0)
+                                  .toUpperCase() +
+                                  assistant.metadata.thinking_effort.slice(1)}
+                              </span>
+                            ) : null}
+                          </div>
+                        </motion.div>
+                      ) : null}
+                    </AnimatePresence>
+
                     {customSelection ? (
                       <div className="mb-2 flex items-center gap-2 rounded-xl border border-border/50 bg-surface/45 px-2.5 py-1.5 text-[11px] leading-4">
                         <Sparkles className="size-3.5 shrink-0 text-primary" />

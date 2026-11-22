@@ -3,9 +3,11 @@ import {
   sendMessage,
   subscribeToChatDone,
   subscribeToChatError,
+  subscribeToChatSources,
+  subscribeToChatThinking,
   subscribeToChatToken,
 } from '@/tauri/commands/chat'
-import type { AgentMessage } from '@/types/chat'
+import type { AgentMessage, ChatSource } from '@/types/chat'
 import type { ThinkingEffort, TtsVoice } from '@/types/settings'
 import { newId } from '@/utils/id'
 import { isTauri } from '@/utils/tauri'
@@ -23,6 +25,8 @@ export type AgentRunOptions = {
   memoryEnabled: boolean
   ttsVoice: TtsVoice
   onToken: (token: string) => void
+  onThinking: (token: string) => void
+  onSources: (sources: ChatSource[]) => void
   onDone: (result: { cancelled: boolean }) => void
   onError: (message: string) => void
 }
@@ -77,6 +81,16 @@ export function startAgentRun(options: AgentRunOptions): string {
             options.onToken(payload.token)
           }
         })
+        const offThinking = await subscribeToChatThinking((payload) => {
+          if (payload.requestId === requestId) {
+            options.onThinking(payload.token)
+          }
+        })
+        const offSources = await subscribeToChatSources((payload) => {
+          if (payload.requestId === requestId) {
+            options.onSources(payload.sources)
+          }
+        })
         const offDone = await subscribeToChatDone((payload) => {
           if (payload.requestId === requestId) {
             finish({ cancelled: payload.cancelled })
@@ -90,6 +104,8 @@ export function startAgentRun(options: AgentRunOptions): string {
 
         cleanup = () => {
           offToken()
+          offThinking()
+          offSources()
           offDone()
           offError()
         }
@@ -125,15 +141,46 @@ export function startAgentRun(options: AgentRunOptions): string {
   }
 
   // Browser preview: same streaming contract, so the UI can be developed with `bun run vite:dev`.
+  const thinkingChunks =
+    'Preview mode: reading the prompt and drafting a short reply. '
+      .split(/(\s+)/)
+      .filter(Boolean)
   const chunks = buildPreviewReply(options.messages)
     .split(/(\s+)/)
     .filter(Boolean)
+  let thinkingIndex = 0
   let index = 0
+  let sourcesSent = false
   let timer: ReturnType<typeof setTimeout> | undefined
 
   const tick = () => {
     if (finished) {
       return
+    }
+
+    if (thinkingIndex < thinkingChunks.length) {
+      options.onThinking(thinkingChunks[thinkingIndex])
+      thinkingIndex += 1
+      timer = setTimeout(tick, 18)
+      return
+    }
+
+    if (!sourcesSent) {
+      sourcesSent = true
+      options.onSources([
+        {
+          title: 'Iris on GitHub',
+          url: 'https://github.com/niraj-khatiwada/iris',
+          siteName: 'GitHub',
+          snippet: 'Preview source for the Sources pill.',
+        },
+        {
+          title: 'DeepSeek API documentation',
+          url: 'https://api-docs.deepseek.com/',
+          siteName: 'DeepSeek',
+          snippet: 'Preview source for the Sources pill.',
+        },
+      ])
     }
 
     const chunk = chunks.slice(index, index + 2).join('')

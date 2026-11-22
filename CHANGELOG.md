@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Live thinking and sources.** While the model reasons, Iris now streams its
+  reasoning instead of showing a silent wait. History shows a compact, collapsible
+  **Thinking** panel above the reply with the effort level used; the quick overlay
+  shows a single **Thinking** line and then keeps hiding the answer until **Show
+  response**. Web results used by an answer appear as a small **Sources** pill under
+  it in History, with clickable titles, site names, and snippets. Reasoning and
+  sources are stored with the message, so they survive reloads. Reasoning is never
+  read aloud, copied, or sent back to the model.
 - **Automatic web search and thinking effort.** Web search is now always available and
   the model decides when to use it, so the Web search toggle and `⌘S` binding are
   gone. Thinking is always enabled; the DeepThink toggle and `⌘D` binding were

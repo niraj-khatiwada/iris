@@ -1,11 +1,21 @@
 import { Button, Tooltip } from '@heroui/react'
-import { Check, Download, FileText, Pencil, RotateCcw, X } from 'lucide-react'
+import {
+  Brain,
+  Check,
+  ChevronDown,
+  Download,
+  FileText,
+  Pencil,
+  RotateCcw,
+  X,
+} from 'lucide-react'
 import { memo, useEffect, useRef, useState } from 'react'
 
 import CopyButton from '@/components/CopyButton'
 import Markdown from '@/components/Markdown'
 import AttachmentImage from '@/components/MessageList/AttachmentImage'
 import MessageSummaryMenu from '@/components/MessageList/MessageSummaryMenu'
+import SourcesPill from '@/components/MessageList/SourcesPill'
 import ReadAloudButton from '@/components/ReadAloudButton'
 import { NO_WRITING_ASSIST } from '@/constants'
 import { useChatStore } from '@/stores/chatStore'
@@ -45,12 +55,43 @@ const MessageBubble = memo(function MessageBubble({
   const showingSummary = Boolean(showSummary && summary)
   const displayedText = showSummary && summary ? summary : message.content
   const isEmptyStream = message.status === 'streaming' && !message.content
+  const thinking = (message.thinking ?? message.metadata?.thinking ?? '').trim()
+  const sources = message.metadata?.sources ?? []
+  const isThinkingLive = message.status === 'streaming' && !message.content
+  const showThinking = !isUser && (Boolean(thinking) || isThinkingLive)
+  const effort = message.metadata?.thinking_effort
+  const effortLabel = effort
+    ? `${effort[0].toUpperCase()}${effort.slice(1)}`
+    : null
   const regenerate = useChatStore((state) => state.regenerate)
   const editAndResend = useChatStore((state) => state.editAndResend)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(message.content)
+  const [thinkingOpen, setThinkingOpen] = useState(
+    message.status === 'streaming' && !message.content,
+  )
+  const [thinkingTouched, setThinkingTouched] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const thinkingRef = useRef<HTMLDivElement>(null)
   const pastedRef = useRef(false)
+
+  // The thinking panel is open while the model reasons, then tucks away when the answer starts.
+  useEffect(() => {
+    if (!thinkingTouched && thinkingOpen && message.content) {
+      setThinkingOpen(false)
+    }
+  }, [message.content, thinkingOpen, thinkingTouched])
+
+  // Keep the newest reasoning visible while it streams.
+  useEffect(() => {
+    if (!thinkingOpen || !isThinkingLive || !thinking) {
+      return
+    }
+    const element = thinkingRef.current
+    if (element) {
+      element.scrollTop = element.scrollHeight
+    }
+  }, [isThinkingLive, thinking, thinkingOpen])
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: resizing follows the controlled draft
   useEffect(() => {
@@ -114,6 +155,53 @@ const MessageBubble = memo(function MessageBubble({
             highlighted && 'ring-2 ring-primary/60',
           )}
         >
+          {showThinking ? (
+            <div className="mb-2 overflow-hidden rounded-xl border border-border/40 bg-background/20">
+              <button
+                type="button"
+                aria-expanded={thinkingOpen}
+                className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left"
+                onClick={() => {
+                  setThinkingTouched(true)
+                  setThinkingOpen((open) => !open)
+                }}
+              >
+                <Brain
+                  className={cn(
+                    'size-3.5 shrink-0',
+                    isThinkingLive
+                      ? 'animate-pulse text-primary'
+                      : 'text-muted',
+                  )}
+                />
+                <span className="text-[11px] font-medium text-muted">
+                  Thinking
+                </span>
+                {effortLabel ? (
+                  <span className="text-[10px] text-muted/60">
+                    · {effortLabel}
+                  </span>
+                ) : null}
+                <ChevronDown
+                  className={cn(
+                    'ml-auto size-3 shrink-0 text-muted/60 transition-transform',
+                    thinkingOpen && 'rotate-180',
+                  )}
+                />
+              </button>
+              {thinkingOpen ? (
+                <div
+                  ref={thinkingRef}
+                  className="max-h-64 overflow-y-auto border-t border-border/30 px-2.5 py-2"
+                >
+                  <p className="whitespace-pre-wrap text-[11px] leading-5 text-muted">
+                    {thinking || 'Waiting for reasoning…'}
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           {isUser && message.attachments?.length ? (
             <div className="mb-2 flex flex-wrap gap-2">
               {message.attachments.map((attachment) =>
@@ -198,7 +286,7 @@ const MessageBubble = memo(function MessageBubble({
             message.content ? (
               <p className="whitespace-pre-wrap">{message.content}</p>
             ) : null
-          ) : isEmptyStream ? (
+          ) : isEmptyStream && !showThinking ? (
             <TypingDots />
           ) : (
             <>
@@ -217,6 +305,10 @@ const MessageBubble = memo(function MessageBubble({
 
           {message.status === 'error' ? (
             <p className="mt-2 text-xs text-danger">{message.error}</p>
+          ) : null}
+
+          {!isUser && sources.length > 0 ? (
+            <SourcesPill sources={sources} />
           ) : null}
         </div>
 

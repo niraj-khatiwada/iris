@@ -7,6 +7,12 @@ pub const CHAT_DONE: &str = "chat:done";
 /// A streamed response failed after it started (HTTP, protocol, or provider error).
 pub const CHAT_ERROR: &str = "chat:error";
 
+/// A chunk of the model's reasoning while thinking mode is active.
+pub const CHAT_THINKING: &str = "chat:thinking";
+
+/// Web sources returned by DeepSeek's server tools for the current reply.
+pub const CHAT_SOURCES: &str = "chat:sources";
+
 /// The reply finished and its read-aloud audio is being prepared.
 pub const SPEECH_PREPARING: &str = "speech:preparing";
 

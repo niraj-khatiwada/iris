@@ -67,6 +67,10 @@ Those four are the biggest jump in usefulness per unit of work.
 
 Removed the stale repo-local `.commandcode` folder. The separate `~/.commandcode` directory holds CommandCode CLI auth and history, so it was left untouched.
 
+### 6. Queue messages
+
+Within a conversation, If exisiting message is being requested, when i send another message there, just queue it and send it after all the previous messages complete. Applies to both island and main chat.
+
 ## Next tier: the “do everything” layer
 
 - **Native connectors + a tool loop · Large.** This is the real unlock: “What’s on my calendar tomorrow?”, “Add that to Reminders,” “Find the PDF I edited last week,” “Summarize this Safari tab.” Start read-only with Calendar, Reminders, Notes, and Finder/Spotlight; add writes only with confirmation. It requires extending `core/agent.rs` from text-only streaming to a `tool_use` → execute → `tool_result` loop, plus per-tool permissions and an audit log. It’s also the same foundation you’ll want later for the DeepSeek CLI, so it pays off twice.
