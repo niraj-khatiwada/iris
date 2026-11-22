@@ -25,6 +25,7 @@ function Composer() {
   const [promptIndex, setPromptIndex] = useState(0)
   useSpeechPlayback()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const pastedRef = useRef(false)
   const sendMessage = useChatStore((state) => state.sendMessage)
   const quickPrompts = useSettingsStore((state) => state.quickPrompts)
   const hydrated = useChatStore((state) => state.hydrated)
@@ -77,6 +78,7 @@ function Composer() {
     previousConversationId.current = activeConversationId
     if (previous !== null) {
       setSlashPrompt(null)
+      pastedRef.current = false
       files.clear()
     }
   }, [activeConversationId, files.clear])
@@ -96,6 +98,7 @@ function Composer() {
     setSlashPrompt(prompt)
     setValue('')
     setPromptIndex(0)
+    pastedRef.current = false
     requestAnimationFrame(() => textareaRef.current?.focus())
   }
 
@@ -126,7 +129,9 @@ function Composer() {
       undefined,
       undefined,
       requestPrompt,
+      pastedRef.current,
     )
+    pastedRef.current = false
     requestAnimationFrame(() => textareaRef.current?.focus())
   }
 
@@ -185,6 +190,14 @@ function Composer() {
             onChange={(event) => {
               setValue(event.target.value)
               setPromptIndex(0)
+              if (!event.target.value) {
+                pastedRef.current = false
+              }
+            }}
+            onPaste={(event) => {
+              if (event.clipboardData.getData('text/plain').trim()) {
+                pastedRef.current = true
+              }
             }}
             onKeyDown={(event) => {
               if (slashOpen) {

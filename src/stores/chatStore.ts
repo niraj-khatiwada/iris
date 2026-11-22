@@ -136,6 +136,8 @@ type ChatState = {
      * quick-prompt menu so History shows the user's text, not the wrapped instruction.
      */
     requestPrompt?: string,
+    /** True when the draft contained clipboard text; persistent memory skips this turn. */
+    pasted?: boolean,
   ) => Promise<string | null>
   /** Replaces an assistant reply with a fresh response to the same user message. */
   regenerate: (
@@ -148,6 +150,8 @@ type ChatState = {
     conversationId: string,
     messageId: string,
     content: string,
+    /** True when the edit included clipboard text; persistent memory skips the turn. */
+    pasted?: boolean,
   ) => Promise<void>
   stopStreaming: () => Promise<void>
 }
@@ -175,6 +179,7 @@ function toAgentHistory(messages: ChatMessage[]): AgentMessage[] {
         id: message.id,
         role: message.role,
         content: message.content,
+        ...(message.metadata?.pasted ? { pasted: true } : {}),
         ...(agentAttachments?.length ? { attachments: agentAttachments } : {}),
       }
     })
@@ -310,6 +315,7 @@ async function runAssistantReply({
     summarizeSpeech: settings.summarizeSpeech,
     deepThink: settings.deepThink,
     webSearch: settings.webSearch,
+    memoryEnabled: settings.memoryEnabled,
     ttsVoice: settings.ttsVoice,
     onToken: (token) => {
       if (get().streamingRequestId !== requestId) {
@@ -925,6 +931,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     titleSeed,
     autoSpeak,
     requestPrompt,
+    pasted,
   ) => {
     const text = content.trim()
     const titleText = titleSeed?.trim() || text
@@ -965,6 +972,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       createdAt: now,
       status: 'complete',
       ...(files.length > 0 ? { attachments: files } : {}),
+      ...(pasted ? { metadata: { pasted: true } } : {}),
     }
     const assistantMessage: ChatMessage = {
       id: newId(),
@@ -1087,7 +1095,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     })
   },
 
-  editAndResend: async (conversationId, messageId, content) => {
+  editAndResend: async (conversationId, messageId, content, pasted) => {
     const text = content.trim()
     const conversation = get().conversations.find(
       (item) => item.id === conversationId,
@@ -1116,10 +1124,18 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       createdAt: Date.now(),
       status: 'streaming',
     }
+    const edited: ChatMessage = {
+      ...original,
+      content: text,
+      // Once a turn contained clipboard text, keep that provenance through later edits.
+      metadata: pasted
+        ? { ...original.metadata, pasted: true }
+        : original.metadata,
+    }
     // Editing rewrites this turn: the old reply and everything after it are dropped.
     const kept = conversation.messages
       .slice(0, index)
-      .concat({ ...original, content: text })
+      .concat(edited)
       .concat(reply)
 
     set((current) => ({

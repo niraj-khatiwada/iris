@@ -21,6 +21,7 @@ export type AgentRunOptions = {
   summarizeSpeech: boolean
   deepThink: boolean
   webSearch: boolean
+  memoryEnabled: boolean
   ttsVoice: TtsVoice
   onToken: (token: string) => void
   onDone: (result: { cancelled: boolean }) => void
@@ -111,6 +112,7 @@ export function startAgentRun(options: AgentRunOptions): string {
           summarizeSpeech: options.summarizeSpeech,
           deepThink: options.deepThink,
           webSearch: options.webSearch,
+          memoryEnabled: options.memoryEnabled,
           ttsVoice: options.ttsVoice,
         })
       } catch (error) {

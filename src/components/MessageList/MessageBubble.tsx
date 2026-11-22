@@ -50,6 +50,7 @@ const MessageBubble = memo(function MessageBubble({
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(message.content)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const pastedRef = useRef(false)
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: resizing follows the controlled draft
   useEffect(() => {
@@ -70,6 +71,7 @@ const MessageBubble = memo(function MessageBubble({
 
   const startEditing = () => {
     setDraft(message.content)
+    pastedRef.current = false
     setEditing(true)
   }
 
@@ -89,7 +91,8 @@ const MessageBubble = memo(function MessageBubble({
     }
 
     setEditing(false)
-    void editAndResend(conversationId, message.id, text)
+    void editAndResend(conversationId, message.id, text, pastedRef.current)
+    pastedRef.current = false
   }
 
   return (
@@ -170,6 +173,11 @@ const MessageBubble = memo(function MessageBubble({
               rows={1}
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
+              onPaste={(event) => {
+                if (event.clipboardData.getData('text/plain').trim()) {
+                  pastedRef.current = true
+                }
+              }}
               onKeyDown={(event) => {
                 if (event.key === 'Escape') {
                   event.preventDefault()

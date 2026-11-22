@@ -3,6 +3,7 @@ pub mod attachments;
 pub mod chat;
 pub mod credentials;
 pub mod files;
+pub mod memory;
 pub mod models;
 pub mod overlay;
 pub mod preview;

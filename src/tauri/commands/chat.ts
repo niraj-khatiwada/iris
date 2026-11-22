@@ -34,6 +34,7 @@ export function sendMessage(request: {
   summarizeSpeech: boolean
   deepThink: boolean
   webSearch: boolean
+  memoryEnabled: boolean
   ttsVoice: string
 }) {
   return invoke<void>('send_message', { request })

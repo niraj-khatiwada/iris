@@ -11,9 +11,13 @@ import {
   Tabs,
   TextArea,
   TextField,
+  Tooltip,
 } from '@heroui/react'
+import { listen } from '@tauri-apps/api/event'
 import { ask } from '@tauri-apps/plugin-dialog'
 import {
+  Brain,
+  Check,
   Database,
   Info,
   Keyboard,
@@ -24,14 +28,26 @@ import {
   Monitor,
   Moon,
   Palette,
+  Pause,
+  Pencil,
+  Play,
   RefreshCw,
   SearchX,
   Settings2,
   Sparkles,
   Sun,
+  Trash2,
+  Undo2,
   Volume2,
+  X,
 } from 'lucide-react'
-import { type ReactNode, useCallback, useEffect, useState } from 'react'
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react'
 
 import AvatarEditor from '@/components/AvatarEditor'
 import { useDynamicIslandNotice } from '@/components/dynamic-island/notifications'
@@ -73,6 +89,16 @@ import {
   enableLaunchAtLogin,
   isLaunchAtLoginEnabled,
 } from '@/tauri/commands/autostart'
+import {
+  cancelPendingMemory,
+  clearMemories,
+  deleteMemory,
+  listMemories,
+  type MemoryItem,
+  setMemoryPaused,
+  undoLastMemoryBatch,
+  updateMemory,
+} from '@/tauri/commands/memory'
 import {
   setOpenShortcut as applyOpenShortcut,
   setScreenAskShortcut as applyScreenAskShortcut,
@@ -179,6 +205,21 @@ const CATEGORIES: Category[] = [
       'selected text',
       'slash',
       'custom',
+    ],
+  },
+  {
+    id: 'memory',
+    label: 'Memory',
+    group: 'Settings',
+    icon: Brain,
+    terms: [
+      'memory',
+      'remember',
+      'recall',
+      'personalization',
+      'preferences',
+      'facts',
+      'learning',
     ],
   },
   {
@@ -389,6 +430,8 @@ function SettingsPanel({
       return <ApiPanel query={query} />
     case 'prompts':
       return <PromptsPanel query={query} />
+    case 'memory':
+      return <MemoryPanel query={query} />
     case 'voice':
       return <VoicePanel query={query} />
     case 'storage':
@@ -1390,6 +1433,454 @@ function ModelField({ query }: { query: string }) {
   )
 }
 
+function MemoryPanel({ query }: { query: string }) {
+  const memoryEnabled = useSettingsStore((state) => state.memoryEnabled)
+  const setMemoryEnabled = useSettingsStore((state) => state.setMemoryEnabled)
+  const [memories, setMemories] = useState<MemoryItem[]>([])
+  const [search, setSearch] = useState('')
+  const [loading, setLoading] = useState(isTauri())
+  const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
+  const [undoBusy, setUndoBusy] = useState(false)
+  const [clearBusy, setClearBusy] = useState(false)
+
+  const load = useCallback(async () => {
+    if (!isTauri()) {
+      setLoading(false)
+      return
+    }
+
+    try {
+      const items = await listMemories()
+      setMemories(items)
+      setError(null)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+    if (!isTauri()) {
+      return
+    }
+
+    let disposed = false
+    let unlisten: (() => void) | undefined
+    void listen('memory:changed', () => {
+      void load()
+    }).then((off) => {
+      if (disposed) {
+        off()
+      } else {
+        unlisten = off
+      }
+    })
+
+    return () => {
+      disposed = true
+      unlisten?.()
+    }
+  }, [load])
+
+  const visible = useMemo(() => {
+    const term = search.trim().toLowerCase()
+    return term
+      ? memories.filter((memory) => memory.content.toLowerCase().includes(term))
+      : memories
+  }, [memories, search])
+
+  const latestBatch = useMemo(() => {
+    const batches = new Map<string, { at: number; count: number }>()
+    for (const memory of memories) {
+      if (!memory.batchId) {
+        continue
+      }
+      const batch = batches.get(memory.batchId)
+      if (batch) {
+        batch.count += 1
+      } else {
+        batches.set(memory.batchId, { at: memory.createdAt, count: 1 })
+      }
+    }
+
+    let latest: { id: string; at: number; count: number } | null = null
+    for (const [id, batch] of batches) {
+      if (!latest || batch.at >= latest.at) {
+        latest = { id, ...batch }
+      }
+    }
+    return latest
+  }, [memories])
+
+  const canUndo = Boolean(
+    latestBatch &&
+      memories.some(
+        (memory) => memory.batchId === latestBatch.id && !memory.userEdited,
+      ),
+  )
+
+  const startEditing = (memory: MemoryItem) => {
+    setEditingId(memory.id)
+    setDraft(memory.content)
+    setError(null)
+    setNotice(null)
+  }
+
+  const cancelEditing = () => {
+    setEditingId(null)
+    setDraft('')
+  }
+
+  const save = async (id: string) => {
+    const content = draft.trim()
+    if (!content || busyId) {
+      return
+    }
+
+    setBusyId(id)
+    setError(null)
+    setNotice(null)
+    try {
+      await updateMemory(id, content)
+      setMemories((current) =>
+        current.map((memory) =>
+          memory.id === id
+            ? { ...memory, content, userEdited: true, updatedAt: Date.now() }
+            : memory,
+        ),
+      )
+      setEditingId(null)
+      setDraft('')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const togglePaused = async (memory: MemoryItem) => {
+    setBusyId(memory.id)
+    setError(null)
+    setNotice(null)
+    try {
+      await setMemoryPaused(memory.id, !memory.paused)
+      setMemories((current) =>
+        current.map((item) =>
+          item.id === memory.id ? { ...item, paused: !item.paused } : item,
+        ),
+      )
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const remove = async (memory: MemoryItem) => {
+    setBusyId(memory.id)
+    setError(null)
+    setNotice(null)
+    try {
+      await deleteMemory(memory.id)
+      setMemories((current) => current.filter((item) => item.id !== memory.id))
+      if (editingId === memory.id) {
+        cancelEditing()
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const undo = async () => {
+    setUndoBusy(true)
+    setError(null)
+    setNotice(null)
+    try {
+      const count = await undoLastMemoryBatch()
+      await load()
+      setNotice(
+        count > 0
+          ? `Undid ${count} memory ${count === 1 ? 'change' : 'changes'}.`
+          : 'There was nothing to undo.',
+      )
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setUndoBusy(false)
+    }
+  }
+
+  const clearAll = async () => {
+    const message =
+      'Delete every memory? Iris will start learning again from your next chats.'
+    const confirmed = isTauri()
+      ? await ask(message, {
+          title: 'Clear memory',
+          kind: 'warning',
+          okLabel: 'Delete',
+          cancelLabel: 'Cancel',
+        })
+      : window.confirm(message)
+    if (!confirmed) {
+      return
+    }
+
+    setClearBusy(true)
+    setError(null)
+    setNotice(null)
+    try {
+      await clearMemories()
+      setMemories([])
+      setNotice('All memories deleted.')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setClearBusy(false)
+    }
+  }
+
+  const changeMemoryEnabled = (enabled: boolean) => {
+    setMemoryEnabled(enabled)
+    if (!enabled && isTauri()) {
+      void cancelPendingMemory().catch((reason) => {
+        setError(reason instanceof Error ? reason.message : String(reason))
+      })
+    }
+  }
+
+  return (
+    <>
+      <SettingsSection title="Memory">
+        <SwitchRow
+          isSelected={memoryEnabled}
+          title="Learn from conversations"
+          description="Remember durable preferences and facts from typed chats. Pasted text, selections, screenshots, and sensitive details are never saved."
+          query={query}
+          search={[
+            'memory',
+            'remember',
+            'personalization',
+            'learning',
+            'preferences',
+            'facts',
+          ]}
+          onChange={changeMemoryEnabled}
+        />
+        {!memoryEnabled ? (
+          <p className="py-4 text-xs leading-5 text-muted">
+            Learning is paused. Existing memories are kept but are not used in
+            new replies.
+          </p>
+        ) : null}
+      </SettingsSection>
+
+      <SettingsSection title="What Iris remembers">
+        {isTauri() ? (
+          <>
+            <div className="py-3">
+              <SearchField
+                aria-label="Search memories"
+                className="w-full"
+                name="memory-search"
+                value={search}
+                variant="secondary"
+                onChange={setSearch}
+              >
+                <SearchField.Group>
+                  <SearchField.SearchIcon />
+                  <SearchField.Input
+                    {...NO_WRITING_ASSIST}
+                    placeholder="Search memories"
+                  />
+                  <SearchField.ClearButton />
+                </SearchField.Group>
+              </SearchField>
+            </div>
+
+            {notice ? (
+              <p className="py-2 text-xs leading-5 text-primary">{notice}</p>
+            ) : null}
+            {error ? (
+              <p className="py-2 text-xs leading-5 text-danger">{error}</p>
+            ) : null}
+
+            {loading ? (
+              <div className="flex items-center gap-2 py-4 text-xs text-muted">
+                <LoaderCircle className="size-3.5 animate-spin" />
+                Loading memories…
+              </div>
+            ) : visible.length === 0 ? (
+              <p className="py-4 text-xs leading-5 text-muted">
+                {search
+                  ? 'No memories match that search.'
+                  : 'Nothing remembered yet. Iris learns durable preferences and facts as you chat.'}
+              </p>
+            ) : (
+              <div className="divide-y divide-border/40">
+                {visible.map((memory) => (
+                  <div key={memory.id} className="flex items-start gap-3 py-4">
+                    <div className="min-w-0 flex-1">
+                      {editingId === memory.id ? (
+                        <div className="space-y-2">
+                          <TextArea
+                            {...NO_WRITING_ASSIST}
+                            aria-label="Edit memory"
+                            className="min-h-16 w-full resize-y text-[13px] leading-5"
+                            rows={2}
+                            value={draft}
+                            variant="secondary"
+                            onChange={(event) => setDraft(event.target.value)}
+                          />
+                          <div className="flex items-center gap-1.5">
+                            <Button
+                              isDisabled={busyId === memory.id || !draft.trim()}
+                              size="sm"
+                              variant="primary"
+                              onPress={() => void save(memory.id)}
+                            >
+                              <Check className="size-3.5" />
+                              Save
+                            </Button>
+                            <Button
+                              isDisabled={busyId === memory.id}
+                              size="sm"
+                              variant="ghost"
+                              onPress={cancelEditing}
+                            >
+                              <X className="size-3.5" />
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-sm leading-6">{memory.content}</p>
+                      )}
+                      <p className="mt-1 text-[11px] leading-4 text-muted">
+                        {memory.paused
+                          ? 'Paused'
+                          : memory.userEdited
+                            ? 'Edited by you'
+                            : 'Learned automatically'}
+                        {' · '}
+                        Updated {formatMemoryTime(memory.updatedAt)}
+                      </p>
+                    </div>
+
+                    {editingId === memory.id ? null : (
+                      <div className="flex shrink-0 items-center gap-0.5">
+                        <Tooltip delay={400}>
+                          <Button
+                            isIconOnly
+                            aria-label={
+                              memory.paused ? 'Resume memory' : 'Pause memory'
+                            }
+                            className="size-7 min-w-7 text-muted"
+                            isDisabled={busyId === memory.id}
+                            size="sm"
+                            variant="ghost"
+                            onPress={() => void togglePaused(memory)}
+                          >
+                            {memory.paused ? (
+                              <Play className="size-3.5" />
+                            ) : (
+                              <Pause className="size-3.5" />
+                            )}
+                          </Button>
+                          <Tooltip.Content>
+                            {memory.paused ? 'Resume' : 'Pause'}
+                          </Tooltip.Content>
+                        </Tooltip>
+
+                        <Tooltip delay={400}>
+                          <Button
+                            isIconOnly
+                            aria-label="Edit memory"
+                            className="size-7 min-w-7 text-muted"
+                            isDisabled={busyId === memory.id}
+                            size="sm"
+                            variant="ghost"
+                            onPress={() => startEditing(memory)}
+                          >
+                            <Pencil className="size-3.5" />
+                          </Button>
+                          <Tooltip.Content>Edit</Tooltip.Content>
+                        </Tooltip>
+
+                        <Tooltip delay={400}>
+                          <Button
+                            isIconOnly
+                            aria-label="Delete memory"
+                            className="size-7 min-w-7 text-muted"
+                            isDisabled={busyId === memory.id}
+                            size="sm"
+                            variant="ghost"
+                            onPress={() => void remove(memory)}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                          <Tooltip.Content>Delete</Tooltip.Content>
+                        </Tooltip>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center justify-between gap-3 py-4">
+              {canUndo ? (
+                <Button
+                  isDisabled={undoBusy}
+                  size="sm"
+                  variant="ghost"
+                  onPress={() => void undo()}
+                >
+                  <Undo2 className="size-3.5" />
+                  {undoBusy ? 'Undoing…' : 'Undo last learned batch'}
+                </Button>
+              ) : (
+                <span />
+              )}
+              <Button
+                isDisabled={clearBusy || memories.length === 0}
+                size="sm"
+                variant="danger-soft"
+                onPress={() => void clearAll()}
+              >
+                Clear all
+              </Button>
+            </div>
+          </>
+        ) : (
+          <p className="py-4 text-xs leading-5 text-muted">
+            Persistent memory is available in the desktop app.
+          </p>
+        )}
+      </SettingsSection>
+    </>
+  )
+}
+
+function formatMemoryTime(timestamp: number) {
+  const date = new Date(timestamp)
+  const today = new Date()
+  if (date.toDateString() === today.toDateString()) {
+    return 'today'
+  }
+  return date.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
 function VoicePanel({ query }: { query: string }) {
   const autoSpeak = useSettingsStore((state) => state.autoSpeak)
   const setAutoSpeak = useSettingsStore((state) => state.setAutoSpeak)
@@ -1613,6 +2104,7 @@ function StoragePanel({ query }: { query: string }) {
               autoSpeakSelection: false,
               summarizeSpeech: true,
               autoSendVoice: true,
+              memoryEnabled: true,
               revealResponse: true,
               deepThink: false,
               webSearch: false,

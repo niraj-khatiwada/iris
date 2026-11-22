@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Persistent memory.** Iris now learns durable preferences and facts from typed
+  chats in the background and applies them to both Quick chat and History. Settings →
+  Memory lists every remembered item with search, edit, pause, delete, clear all, and
+  an Undo for the newest learned batch. Pasted text, selection prompts, screenshots,
+  attachments, and sensitive details are never saved; clearing conversations keeps
+  memory, while Reset Iris removes it.
 - **One-request spoken summaries.** When automatic read-aloud summarizes replies,
   Iris asks DeepSeek to end long or code-heavy answers with a hidden
   `<spoken_summary>` block in the same stream. The block is stripped before it

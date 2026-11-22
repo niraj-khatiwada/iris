@@ -57,6 +57,7 @@ export type SettingsCategory =
   | 'shortcuts'
   | 'api'
   | 'prompts'
+  | 'memory'
   | 'voice'
   | 'storage'
   | 'about'

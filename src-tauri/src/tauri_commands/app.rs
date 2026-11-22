@@ -70,6 +70,9 @@ pub fn reset_app_data(app: AppHandle, storage: State<'_, Storage>) -> Result<(),
     if let Some(cache) = app.try_state::<crate::core::agent::SummaryCache>() {
         cache.clear();
     }
+    if let Some(memory) = app.try_state::<crate::core::memory::MemoryState>() {
+        memory.cancel_all();
+    }
 
     // Drop the schema and immediately rebuild an empty one, so the backend is usable during the
     // short window before the webviews reload.

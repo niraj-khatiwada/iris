@@ -45,3 +45,6 @@ pub const OVERLAY_GUIDES: &str = "overlay:guides";
 
 /// Every stored conversation was cleared; each window drops its local chat state too.
 pub const CHAT_CLEARED: &str = "chat:cleared";
+
+/// The background memory writer added or corrected persistent memories.
+pub const MEMORY_CHANGED: &str = "memory:changed";

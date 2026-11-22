@@ -70,6 +70,7 @@ fn main() {
         .setup(|app| {
             app.manage(GenerationState::default());
             app.manage(crate::core::agent::SummaryCache::default());
+            app.manage(crate::core::memory::MemoryState::default());
             app.manage(crate::sys::overlay::OverlayPosition::load(app.handle()));
             crate::sys::menu::remove_close_window_items(app.handle());
             app.manage(crate::sys::speech::SpeechState::default());
@@ -241,6 +242,13 @@ fn main() {
             tauri_commands::credentials::has_api_key,
             tauri_commands::credentials::remove_api_key,
             tauri_commands::credentials::save_api_key,
+            tauri_commands::memory::cancel_pending_memory,
+            tauri_commands::memory::clear_memories,
+            tauri_commands::memory::delete_memory,
+            tauri_commands::memory::list_memories,
+            tauri_commands::memory::set_memory_paused,
+            tauri_commands::memory::undo_last_memory_batch,
+            tauri_commands::memory::update_memory,
             tauri_commands::models::list_models,
             tauri_commands::overlay::overlay_ready,
             tauri_commands::overlay::show_overlay,

@@ -310,6 +310,8 @@ type SettingsState = {
   autoSendVoice: boolean
   /** Show the reply in the quick overlay as soon as it arrives, without pressing Show response. */
   revealResponse: boolean
+  /** Learn durable facts from typed chats and use them in future prompts. */
+  memoryEnabled: boolean
   /** Toggle in the composer: enable thinking mode before answering. */
   deepThink: boolean
   /** Toggle in the composer: let Iris search the web when it needs to. */
@@ -348,6 +350,7 @@ type SettingsState = {
   setSummarizeSpeech: (summarizeSpeech: boolean) => void
   setRevealResponse: (revealResponse: boolean) => void
   setAutoSendVoice: (autoSendVoice: boolean) => void
+  setMemoryEnabled: (memoryEnabled: boolean) => void
   setDeepThink: (deepThink: boolean) => void
   setWebSearch: (webSearch: boolean) => void
   setTtsVoice: (ttsVoice: TtsVoice) => void
@@ -380,6 +383,7 @@ export const useSettingsStore = create<SettingsState>()(
       summarizeSpeech: true,
       revealResponse: true,
       autoSendVoice: true,
+      memoryEnabled: true,
       deepThink: false,
       webSearch: false,
       ttsVoice: DEFAULT_TTS_VOICE,
@@ -431,6 +435,7 @@ export const useSettingsStore = create<SettingsState>()(
       setSummarizeSpeech: (summarizeSpeech) => set({ summarizeSpeech }),
       setRevealResponse: (revealResponse) => set({ revealResponse }),
       setAutoSendVoice: (autoSendVoice) => set({ autoSendVoice }),
+      setMemoryEnabled: (memoryEnabled) => set({ memoryEnabled }),
       setDeepThink: (deepThink) => set({ deepThink }),
       setWebSearch: (webSearch) => set({ webSearch }),
       setTtsVoice: (ttsVoice) => set({ ttsVoice }),
@@ -480,6 +485,7 @@ export const useSettingsStore = create<SettingsState>()(
           ...rest,
           autoSpeakSelection: saved.autoSpeakSelection === true,
           summarizeSpeech: saved.summarizeSpeech !== false,
+          memoryEnabled: saved.memoryEnabled !== false,
           islandSystemPrompt: normalizePrompt(
             saved.islandSystemPrompt ?? legacySystemPrompt,
           ),

@@ -17,6 +17,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::core::attachments;
+use crate::core::memory;
 use crate::core::read_aloud;
 use crate::core::storage::{Storage, StoredMessage};
 use crate::sys::speech;
@@ -113,6 +114,7 @@ impl SummaryCache {
     }
 }
 
+#[derive(Clone)]
 pub struct AgentConfig {
     pub api_key: String,
     pub base_url: String,
@@ -121,6 +123,8 @@ pub struct AgentConfig {
     pub summarize_speech: bool,
     pub deep_think: bool,
     pub web_search: bool,
+    /// Learn durable facts from this conversation and inject remembered ones into the prompt.
+    pub memory_enabled: bool,
     pub tts_voice: String,
     /// Full TTS endpoint derived from the base URL.
     pub tts_url: String,
@@ -156,6 +160,16 @@ pub async fn stream_reply(
         }) => {
             emit_done(&app, &request_id, false);
             app.state::<GenerationState>().finish(&request_id);
+
+            if config.memory_enabled && !text.trim().is_empty() {
+                memory::schedule(
+                    app.clone(),
+                    config.clone(),
+                    request.conversation_id.clone(),
+                    &request.messages,
+                    text.clone(),
+                );
+            }
 
             if config.auto_speak && !text.trim().is_empty() {
                 let speech_app = app.clone();
@@ -221,7 +235,12 @@ async fn run(
         ));
     }
     let includes_document = documents > 0;
-    let body = build_body(prepared.system, prepared.messages, config, read_url);
+    let system = if config.memory_enabled {
+        memory::inject(app, prepared.system)
+    } else {
+        prepared.system
+    };
+    let body = build_body(system, prepared.messages, config, read_url);
 
     let client = crate::utils::http::client()
         .timeout(Duration::from_secs(300))
@@ -430,6 +449,12 @@ fn stored_to_input(message: &StoredMessage) -> ChatMessageInput {
         id: message.id.clone(),
         role: message.role.clone(),
         content: message.content.clone(),
+        pasted: message
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.get("pasted"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         attachments: message
             .attachments
             .iter()
@@ -1057,6 +1082,7 @@ mod tests {
             role: role.to_string(),
             content,
             attachments: Vec::new(),
+            pasted: false,
         }
     }
 
@@ -1192,6 +1218,7 @@ mod tests {
             summarize_speech: false,
             deep_think: false,
             web_search: false,
+            memory_enabled: false,
             tts_voice: "stella".to_string(),
             tts_url: String::new(),
         };
@@ -1220,6 +1247,7 @@ mod tests {
             summarize_speech: false,
             deep_think: false,
             web_search: false,
+            memory_enabled: false,
             tts_voice: "stella".to_string(),
             tts_url: String::new(),
         };
@@ -1259,18 +1287,21 @@ mod tests {
                 role: "user".to_string(),
                 content: "https://example.com".to_string(),
                 attachments: Vec::new(),
+                pasted: false,
             },
             ChatMessageInput {
                 id: "m2".to_string(),
                 role: "assistant".to_string(),
                 content: "I read it.".to_string(),
                 attachments: Vec::new(),
+                pasted: false,
             },
             ChatMessageInput {
                 id: "m3".to_string(),
                 role: "user".to_string(),
                 content: "And what about this?".to_string(),
                 attachments: Vec::new(),
+                pasted: false,
             },
         ];
 
@@ -1289,6 +1320,7 @@ mod tests {
             summarize_speech: false,
             deep_think: false,
             web_search: false,
+            memory_enabled: false,
             tts_voice: "stella".to_string(),
             tts_url: String::new(),
         };
@@ -1322,6 +1354,7 @@ mod tests {
             summarize_speech: false,
             deep_think: false,
             web_search: false,
+            memory_enabled: false,
             tts_voice: "stella".to_string(),
             tts_url: String::new(),
         };
@@ -1425,6 +1458,7 @@ mod format_tests {
             summarize_speech: false,
             deep_think: true,
             web_search: true,
+            memory_enabled: false,
             tts_voice: "stella".to_string(),
             tts_url: String::new(),
         }

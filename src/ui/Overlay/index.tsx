@@ -207,6 +207,7 @@ function Overlay() {
   const contentRef = useRef<HTMLDivElement>(null)
   const selectionPanelRef = useRef<HTMLDivElement>(null)
   const forceRevealOnChatChange = useRef(false)
+  const pastedRef = useRef(false)
   const finishVoiceRef = useRef<(forceSend?: boolean) => void>(() => {})
   const startCaptureRef = useRef<() => void>(() => {})
   const captureGuard = useRef(0)
@@ -325,6 +326,7 @@ function Overlay() {
     clearAttachments()
     setValue('')
     setSlashPrompt(null)
+    pastedRef.current = false
     setRevealed(revealResponse)
     setIgnoredResponseId(null)
     setSelectionView(null)
@@ -349,6 +351,7 @@ function Overlay() {
     clearAttachments()
     setValue('')
     setSlashPrompt(null)
+    pastedRef.current = false
     // A selection action always reveals its result; a normal New chat follows the setting.
     setRevealed(forceRevealOnChatChange.current || revealResponse)
     forceRevealOnChatChange.current = false
@@ -817,6 +820,7 @@ function Overlay() {
     setSlashPrompt(prompt)
     setValue('')
     setPromptIndex(0)
+    pastedRef.current = false
     requestAnimationFrame(() => inputRef.current?.focus())
   }
 
@@ -865,7 +869,9 @@ function Overlay() {
       selection?.text ?? (quickPrompt ? text : undefined),
       selection ? selectionAutoSpeak : undefined,
       requestPrompt,
+      pastedRef.current,
     )
+    pastedRef.current = false
     if (quickPrompt) {
       setSlashPrompt(null)
     }
@@ -941,7 +947,9 @@ function Overlay() {
         selection?.text ?? (quickPrompt ? text : undefined),
         selection ? selectionAutoSpeak : undefined,
         requestPrompt,
+        pastedRef.current,
       )
+      pastedRef.current = false
       if (quickPrompt) {
         setSlashPrompt(null)
       }
@@ -1607,6 +1615,16 @@ function Overlay() {
                         onChange={(event) => {
                           setValue(event.target.value)
                           setPromptIndex(0)
+                          if (!event.target.value) {
+                            pastedRef.current = false
+                          }
+                        }}
+                        onPaste={(event) => {
+                          if (
+                            event.clipboardData.getData('text/plain').trim()
+                          ) {
+                            pastedRef.current = true
+                          }
                         }}
                         onKeyDown={(event) => {
                           if (slashOpen) {

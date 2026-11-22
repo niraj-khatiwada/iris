@@ -79,6 +79,30 @@ pub struct StoredSpokenSummary {
     pub summary: String,
 }
 
+/// One persistent memory item. `active` marks the current version; an update inserts a new row
+/// and links the old one through `superseded_by` so the latest learned batch can be undone.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredMemory {
+    pub id: String,
+    pub content: String,
+    pub source_conversation_id: Option<String>,
+    pub source_message_id: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub paused: bool,
+    pub user_edited: bool,
+    pub batch_id: Option<String>,
+}
+
+/// One validated change from the memory writer. `replace` points at an active memory whose fact
+/// this change corrects; `None` inserts a new item.
+#[derive(Clone, Debug)]
+pub struct MemoryWrite {
+    pub replace: Option<String>,
+    pub content: String,
+}
+
 /// Provenance for one selection action. The selected text is in the user message; this is the
 /// durable record of where it came from and what the user asked Iris to do with it.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -700,6 +724,246 @@ impl Storage {
         Ok(summaries)
     }
 
+    /// Active, unpaused memories in the order they should be injected. The cap keeps the system
+    /// prompt small when the store has grown over time.
+    pub fn active_memories(&self, limit: usize) -> Result<Vec<StoredMemory>, String> {
+        let connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut statement = connection
+            .prepare(
+                "SELECT id, content, source_conversation_id, source_message_id, created_at,
+                        updated_at, paused, user_edited, batch_id
+                 FROM memories
+                 WHERE active = 1 AND paused = 0
+                 ORDER BY updated_at DESC, rowid DESC
+                 LIMIT ?1",
+            )
+            .map_err(|error| error.to_string())?;
+
+        let memories = statement
+            .query_map(params![limit as i64], memory_from_row)
+            .map_err(|error| error.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+
+        Ok(memories)
+    }
+
+    /// Every current memory for Settings, including paused ones, newest first.
+    pub fn list_memories(&self) -> Result<Vec<StoredMemory>, String> {
+        let connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut statement = connection
+            .prepare(
+                "SELECT id, content, source_conversation_id, source_message_id, created_at,
+                        updated_at, paused, user_edited, batch_id
+                 FROM memories
+                 WHERE active = 1
+                 ORDER BY updated_at DESC, rowid DESC",
+            )
+            .map_err(|error| error.to_string())?;
+
+        let memories = statement
+            .query_map([], memory_from_row)
+            .map_err(|error| error.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+
+        Ok(memories)
+    }
+
+    /// Applies one extraction batch. Updates deactivate the old row and insert the new version in
+    /// the same transaction, so an interruption can never leave two current versions of a fact.
+    pub fn apply_memories(
+        &self,
+        batch_id: &str,
+        conversation_id: &str,
+        message_id: Option<&str>,
+        writes: &[MemoryWrite],
+    ) -> Result<usize, String> {
+        if writes.is_empty() {
+            return Ok(0);
+        }
+
+        let mut connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        let now = now_ms();
+        let mut applied = 0;
+
+        for write in writes {
+            let new_id = uuid::Uuid::new_v4().to_string();
+            let mut paused = false;
+
+            if let Some(previous) = write.replace.as_deref() {
+                // Only an active, non-edited memory can be replaced. Carry its paused state so a
+                // corrected fact stays paused if the user had paused it.
+                let previous_paused: Option<bool> = transaction
+                    .query_row(
+                        "SELECT paused FROM memories
+                         WHERE id = ?1 AND active = 1 AND user_edited = 0",
+                        params![previous],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .map_err(|error| error.to_string())?;
+                let Some(previous_paused) = previous_paused else {
+                    continue;
+                };
+                paused = previous_paused;
+
+                transaction
+                    .execute(
+                        "UPDATE memories
+                         SET active = 0, superseded_by = ?1, updated_at = ?2
+                         WHERE id = ?3 AND active = 1 AND user_edited = 0",
+                        params![new_id, now, previous],
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
+
+            transaction
+                .execute(
+                    "INSERT INTO memories
+                        (id, content, source_conversation_id, source_message_id, created_at,
+                         updated_at, active, paused, user_edited, superseded_by, batch_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?5, 1, ?6, 0, NULL, ?7)",
+                    params![
+                        new_id,
+                        write.content,
+                        conversation_id,
+                        message_id,
+                        now,
+                        paused,
+                        batch_id
+                    ],
+                )
+                .map_err(|error| error.to_string())?;
+            applied += 1;
+        }
+
+        transaction.commit().map_err(|error| error.to_string())?;
+        Ok(applied)
+    }
+
+    /// Rewrites one memory in place. User edits are authoritative and are never overwritten by the
+    /// memory writer.
+    pub fn update_memory(&self, id: &str, content: &str) -> Result<(), String> {
+        let updated = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .execute(
+                "UPDATE memories
+                 SET content = ?1, updated_at = ?2, user_edited = 1
+                 WHERE id = ?3 AND active = 1",
+                params![content, now_ms(), id],
+            )
+            .map_err(|error| error.to_string())?;
+
+        if updated == 0 {
+            Err("That memory no longer exists.".to_string())
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn set_memory_paused(&self, id: &str, paused: bool) -> Result<(), String> {
+        self.connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .execute(
+                "UPDATE memories SET paused = ?1 WHERE id = ?2 AND active = 1",
+                params![paused, id],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    pub fn delete_memory(&self, id: &str) -> Result<(), String> {
+        self.connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .execute("DELETE FROM memories WHERE id = ?1", params![id])
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    /// Removes every memory, including inactive versions kept for undo.
+    pub fn clear_memories(&self) -> Result<(), String> {
+        self.connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .execute("DELETE FROM memories", [])
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    /// Reverts the most recent learned batch: new rows are deleted and the versions they replaced
+    /// become current again. User-edited rows are left alone.
+    pub fn undo_last_memory_batch(&self) -> Result<usize, String> {
+        let mut connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let batch: Option<String> = connection
+            .query_row(
+                "SELECT batch_id FROM memories
+                 WHERE batch_id IS NOT NULL
+                 ORDER BY created_at DESC, rowid DESC
+                 LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        let Some(batch) = batch else {
+            return Ok(0);
+        };
+
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        let ids = {
+            let mut statement = transaction
+                .prepare(
+                    "SELECT id FROM memories
+                     WHERE batch_id = ?1 AND user_edited = 0",
+                )
+                .map_err(|error| error.to_string())?;
+            let collected = statement
+                .query_map(params![batch], |row| row.get::<_, String>(0))
+                .map_err(|error| error.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| error.to_string())?;
+            collected
+        };
+
+        for id in &ids {
+            transaction
+                .execute(
+                    "UPDATE memories SET active = 1, superseded_by = NULL
+                     WHERE superseded_by = ?1",
+                    params![id],
+                )
+                .map_err(|error| error.to_string())?;
+            transaction
+                .execute("DELETE FROM memories WHERE id = ?1", params![id])
+                .map_err(|error| error.to_string())?;
+        }
+
+        transaction.commit().map_err(|error| error.to_string())?;
+        Ok(ids.len())
+    }
+
     /// Stores provenance for a selection action. The frontend may not have mirrored the created
     /// user message yet, so there is no foreign key; a delete trigger handles cleanup.
     pub fn save_selection_metadata(&self, metadata: &SelectionMetadata) -> Result<(), String> {
@@ -1103,6 +1367,20 @@ fn metadata_json(metadata: &Option<serde_json::Value>) -> Result<Option<String>,
 
 fn metadata_from(value: Option<String>) -> Option<serde_json::Value> {
     value.and_then(|json| serde_json::from_str(&json).ok())
+}
+
+fn memory_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredMemory> {
+    Ok(StoredMemory {
+        id: row.get(0)?,
+        content: row.get(1)?,
+        source_conversation_id: row.get(2)?,
+        source_message_id: row.get(3)?,
+        created_at: row.get(4)?,
+        updated_at: row.get(5)?,
+        paused: row.get(6)?,
+        user_edited: row.get(7)?,
+        batch_id: row.get(8)?,
+    })
 }
 
 fn save_in_transaction(
@@ -1687,5 +1965,164 @@ mod tests {
 
         storage.save_api_key("sk-new").expect("save after reset");
         assert!(storage.has_api_key());
+    }
+
+    #[test]
+    fn memories_are_learned_updated_paused_undone_and_cleared() {
+        let storage = storage();
+        let writes = vec![
+            super::MemoryWrite {
+                replace: None,
+                content: "Prefers concise answers.".to_string(),
+            },
+            super::MemoryWrite {
+                replace: None,
+                content: "Works on Iris.".to_string(),
+            },
+        ];
+        assert_eq!(
+            storage
+                .apply_memories("batch-add", "c1", Some("m1"), &writes)
+                .expect("add"),
+            2
+        );
+        let listed = storage.list_memories().expect("list");
+        assert_eq!(listed.len(), 2);
+        assert_eq!(storage.active_memories(10).expect("active").len(), 2);
+
+        let old_id = listed
+            .iter()
+            .find(|memory| memory.content.starts_with("Prefers"))
+            .expect("concise memory")
+            .id
+            .clone();
+        assert_eq!(
+            storage
+                .apply_memories(
+                    "batch-update",
+                    "c1",
+                    Some("m2"),
+                    &[super::MemoryWrite {
+                        replace: Some(old_id.clone()),
+                        content: "Prefers short answers.".to_string(),
+                    }],
+                )
+                .expect("update"),
+            1
+        );
+
+        // The old version is hidden, not deleted, so the batch can be undone.
+        let listed = storage.list_memories().expect("list");
+        assert_eq!(listed.len(), 2);
+        assert!(listed
+            .iter()
+            .any(|memory| memory.content == "Prefers short answers."));
+        assert!(!listed.iter().any(|memory| memory.id == old_id));
+
+        let other_id = listed
+            .iter()
+            .find(|memory| memory.content == "Works on Iris.")
+            .expect("other memory")
+            .id
+            .clone();
+        storage.set_memory_paused(&other_id, true).expect("pause");
+        assert_eq!(storage.active_memories(10).expect("active").len(), 1);
+
+        assert_eq!(
+            storage.undo_last_memory_batch().expect("undo"),
+            1,
+            "the newest batch had one memory"
+        );
+        let listed = storage.list_memories().expect("list after undo");
+        assert!(listed
+            .iter()
+            .any(|memory| memory.id == old_id && memory.content == "Prefers concise answers."));
+        assert!(!listed
+            .iter()
+            .any(|memory| memory.content == "Prefers short answers."));
+        assert!(listed
+            .iter()
+            .any(|memory| memory.id == other_id && memory.paused));
+
+        // A user edit is authoritative: an automatic update must not create a second version.
+        storage
+            .update_memory(&old_id, "Prefers very short answers.")
+            .expect("edit");
+        assert_eq!(
+            storage
+                .apply_memories(
+                    "batch-after-edit",
+                    "c1",
+                    None,
+                    &[super::MemoryWrite {
+                        replace: Some(old_id.clone()),
+                        content: "Prefers long answers.".to_string(),
+                    }],
+                )
+                .expect("stale update"),
+            0
+        );
+        assert_eq!(
+            storage
+                .list_memories()
+                .expect("list")
+                .into_iter()
+                .find(|memory| memory.id == old_id)
+                .expect("edited memory")
+                .content,
+            "Prefers very short answers."
+        );
+
+        // Clearing conversations is not clearing memory.
+        storage.clear().expect("clear conversations");
+        assert_eq!(storage.list_memories().expect("list").len(), 2);
+
+        storage.delete_memory(&other_id).expect("delete one");
+        assert_eq!(storage.list_memories().expect("list").len(), 1);
+        storage.clear_memories().expect("clear all");
+        assert!(storage.list_memories().expect("list").is_empty());
+
+        // Reset Iris drops the table too.
+        storage.reset_schema().expect("reset");
+        assert!(storage
+            .list_memories()
+            .expect("list after reset")
+            .is_empty());
+    }
+
+    #[test]
+    fn updating_a_paused_memory_keeps_it_paused() {
+        let storage = storage();
+        storage
+            .apply_memories(
+                "batch-add",
+                "c1",
+                Some("m1"),
+                &[super::MemoryWrite {
+                    replace: None,
+                    content: "Lives in Kathmandu.".to_string(),
+                }],
+            )
+            .expect("add");
+        let id = storage.list_memories().expect("list")[0].id.clone();
+        storage.set_memory_paused(&id, true).expect("pause");
+
+        storage
+            .apply_memories(
+                "batch-update",
+                "c1",
+                Some("m2"),
+                &[super::MemoryWrite {
+                    replace: Some(id),
+                    content: "Lives in Pokhara.".to_string(),
+                }],
+            )
+            .expect("update");
+
+        let memories = storage.list_memories().expect("list");
+        assert_eq!(memories.len(), 1);
+        assert_eq!(memories[0].content, "Lives in Pokhara.");
+        assert!(memories[0].paused, "a paused memory must stay paused");
+        assert!(storage.active_memories(10).expect("active").is_empty());
     }
 }

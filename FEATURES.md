@@ -15,11 +15,21 @@
 
 ~~This is the highest-leverage feature you can add. It makes Iris useful in Mail, Safari, VS Code, PDFs, and every text field on the Mac without building a single new chat screen. It reuses the overlay and DeepSeek; the new work is macOS Accessibility (`AXSelectedText`), a configurable shortcut, and a permission flow. Fall back to clipboard when an app doesn’t expose selection, and never read secure/password fields.~~
 
-### 2. Persistent memory · Medium
+### ~~2. Persistent memory · Medium~~ — v1 done
 
-Right now the summary cache compresses _one_ conversation. ChatGPT/Claude memory is different: a small, editable store of facts about you that follows you into every chat — “prefers concise answers,” “works on Iris,” “timezone is …,” “don’t suggest X.”
+**What shipped**
 
-Add a `memories` table, inject a compact memory block into the system prompt in `core/agent.rs`, and add Settings → Memory with search, edit, delete, and pause. Auto-extract low-risk facts after a conversation and show “Iris remembered…” with an undo; ask before storing anything sensitive. Later, scope memories per project.
+- **Automatic learning.** After a reply has been idle for 20 seconds, a background writer reviews the newest typed exchange and stores up to three durable facts. There is no manual preference form.
+- **Individual topics.** Each fact is a short, editable item. Corrections replace the previous version instead of piling up contradictory memories.
+- **Safe by default.** Pasted text, selection prompts, screen captures, attachments, credentials, payment/account details, health data, government IDs, exact addresses, and sensitive categories are excluded before storage. A deterministic Rust filter backs up the extraction prompt.
+- **Both surfaces.** Active, unpaused memories are injected into the quick overlay and history prompts, capped at 30 items / 1,500 characters. Explicit instructions take precedence.
+- **Settings → Memory.** Search, edit, pause, delete, clear all, and undo the newest learned batch. User-edited memories are authoritative and are never overwritten automatically.
+- **Data lifecycle.** Clearing conversations keeps memory; Reset Iris removes it and cancels pending memory tasks.
+- **Still open.** Project-scoped memory and a per-chat memory toggle. Project scoping is deliberately deferred to the Projects feature.
+
+~~Right now the summary cache compresses _one_ conversation. ChatGPT/Claude memory is different: a small, editable store of facts about you that follows you into every chat — “prefers concise answers,” “works on Iris,” “timezone is …,” “don’t suggest X.”~~
+
+~~Add a `memories` table, inject a compact memory block into the system prompt in `core/agent.rs`, and add Settings → Memory with search, edit, delete, and pause. Auto-extract low-risk facts after a conversation and show “Iris remembered…” with an undo; ask before storing anything sensitive. Later, scope memories per project.~~
 
 ### 3. Scheduled tasks and reminders · Medium
 

@@ -51,6 +51,8 @@ export type ChatMessage = {
 export type MessageMetadata = {
   /** The DeepSeek model id used for this assistant reply. */
   ai_model?: string
+  /** True when the composer saw a text paste while this user message was drafted. */
+  pasted?: boolean
   [key: string]: unknown
 }
 
@@ -118,6 +120,8 @@ export type AgentMessage = {
   id: string
   role: ChatRole
   content: string
+  /** True when the draft contained clipboard text; persistent memory skips this turn. */
+  pasted?: boolean
   attachments?: Array<{
     mediaType: string
     data: string

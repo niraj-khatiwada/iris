@@ -36,9 +36,16 @@ pub struct ChatMessageInput {
     pub content: String,
     #[serde(default)]
     pub attachments: Vec<ChatAttachmentInput>,
+    /// True when any part of the draft came from the clipboard. Persistent memory skips it.
+    #[serde(default)]
+    pub pasted: bool,
 }
 
 fn default_summarize_speech() -> bool {
+    true
+}
+
+fn default_memory_enabled() -> bool {
     true
 }
 
@@ -68,6 +75,9 @@ pub struct SendMessageRequest {
     /// Declares the web search tool in addition to reading links.
     #[serde(default)]
     pub web_search: bool,
+    /// Automatically learn durable facts from this conversation.
+    #[serde(default = "default_memory_enabled")]
+    pub memory_enabled: bool,
     pub tts_voice: String,
 }
 
@@ -186,6 +196,7 @@ pub fn send_message(
         summarize_speech: request.summarize_speech,
         deep_think: request.deep_think,
         web_search: request.web_search,
+        memory_enabled: request.memory_enabled,
         tts_voice,
         tts_url: endpoints::url(&base_url, endpoints::TTS_PATH),
     };
