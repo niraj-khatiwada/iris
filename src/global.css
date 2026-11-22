@@ -591,10 +591,14 @@ input:focus-visible {
   --tw-ring-offset-shadow: 0 0 #0000 !important;
 }
 
-/* HeroUI draws its accent ring on the search-field group rather than the input. The switcher
-   follows the same quiet-input rule as the composers: only the caret marks focus. */
-.conversation-search .search-field__group:focus-within,
-.conversation-search .search-field__group[data-focus-within="true"] {
+/* HeroUI draws its accent ring on field wrappers rather than the input itself. Every text field
+   follows the same quiet-input rule: only the caret marks focus. */
+.search-field__group:focus-within,
+.search-field__group[data-focus-within="true"],
+.input-group:focus-within,
+.input-group[data-focus-within="true"],
+.input-group:has([data-slot="input-group-input"]:focus),
+.input-group:has([data-slot="input-group-textarea"]:focus) {
   outline: none !important;
   box-shadow: none !important;
   --tw-ring-shadow: 0 0 #0000 !important;
