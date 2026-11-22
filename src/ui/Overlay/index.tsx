@@ -1346,7 +1346,9 @@ function Overlay() {
                     <span className="text-[10px] font-semibold tracking-[0.16em] text-foreground/55">
                       IRIS
                     </span>
-                    {conversation && conversation.messages.length > 0 ? (
+                    {conversation &&
+                    (conversation.messages.length > 0 ||
+                      !conversation.messagesLoaded) ? (
                       <>
                         <span
                           aria-hidden
