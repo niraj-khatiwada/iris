@@ -1,8 +1,19 @@
-### 1. Selection actions — “Ask Iris about this” · Medium
+### ~~1. Selection actions — “Ask Iris about this” · Medium~~ — done
 
-Select text in any app → press a shortcut → a small action menu appears: **Explain, Summarize, Rewrite, Translate, Fix grammar, Extract tasks, Reply**. The result opens in the overlay, with **Copy** and **Replace selection**.
+**What shipped**
 
-This is the highest-leverage feature you can add. It makes Iris useful in Mail, Safari, VS Code, PDFs, and every text field on the Mac without building a single new chat screen. It reuses the overlay and DeepSeek; the new work is macOS Accessibility (`AXSelectedText`), a configurable shortcut, and a permission flow. Fall back to clipboard when an app doesn’t expose selection, and never read secure/password fields.
+- **Any app, one shortcut.** A configurable global shortcut (default `⌘⇧Space`) hides Iris, reads the frontmost app's selected text, and opens the action strip in the overlay.
+- **Accessibility with a clipboard fallback.** Uses `AXSelectedText` when available, then a temporary `⌘C` in every app when not, including Chromium/Electron apps. The pasteboard must actually change before the text is accepted, and secure fields are rejected.
+- **Editable action set.** Explain, Summarize, Improve (formerly Rewrite), Simplify, Translate, Fix grammar, Extract tasks, and Reply, plus user-created prompts with icons, rename, delete, drag-to-reorder, and restore defaults.
+- **Custom instructions.** **Custom** carries the selection into the composer, where typed or dictated text is combined with it; the selection stays visible as a chip.
+- **Result actions.** Copy the result, paste it at the source app's caret, or replace the original selection. Read aloud and regenerate remain in the normal response footer.
+- **Drafts survive.** Selection prompts send any image, screenshot, or document already attached and keep the same quick chat so the files stay in the right folder.
+- **Escape returns.** Escape cancels the selection strip and returns to the normal composer without hiding Iris.
+- **Read aloud and metadata.** `autoSpeakSelection` (off by default) controls automatic speech for selection results; manual Read aloud always works. The source app, bundle id, pid, action, and selection stats are stored against the user message, and Accessibility errors use the shared permission notice.
+
+~~Select text in any app → press a shortcut → a small action menu appears: **Explain, Summarize, Rewrite, Translate, Fix grammar, Extract tasks, Reply**. The result opens in the overlay, with **Copy** and **Replace selection**.~~
+
+~~This is the highest-leverage feature you can add. It makes Iris useful in Mail, Safari, VS Code, PDFs, and every text field on the Mac without building a single new chat screen. It reuses the overlay and DeepSeek; the new work is macOS Accessibility (`AXSelectedText`), a configurable shortcut, and a permission flow. Fall back to clipboard when an app doesn’t expose selection, and never read secure/password fields.~~
 
 ### 2. Persistent memory · Medium
 
