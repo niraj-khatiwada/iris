@@ -1,4 +1,4 @@
-import { Button, Dropdown, Label } from '@heroui/react'
+import { Button, Dropdown } from '@heroui/react'
 import { Brain, ChevronDown } from 'lucide-react'
 
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -7,23 +7,10 @@ import type { ThinkingEffort as Effort } from '@/types/settings'
 const OPTIONS: Array<{
   id: Effort
   label: string
-  description: string
 }> = [
-  {
-    id: 'low',
-    label: 'Low',
-    description: 'Fast, light reasoning',
-  },
-  {
-    id: 'high',
-    label: 'High',
-    description: 'More reasoning for complex work',
-  },
-  {
-    id: 'max',
-    label: 'Max',
-    description: 'Deepest reasoning',
-  },
+  { id: 'low', label: 'Low' },
+  { id: 'high', label: 'High' },
+  { id: 'max', label: 'Max' },
 ]
 
 /**
@@ -40,17 +27,18 @@ function ThinkingEffort() {
     <Dropdown>
       <Button
         aria-label={`Thinking effort: ${current.label}`}
-        className="h-7 gap-1.5 rounded-full px-2 text-[11px] text-foreground/55"
+        className="h-6 gap-1 rounded-full px-1.5 text-[10px] text-foreground/55"
         size="sm"
         variant="ghost"
       >
-        <Brain className="size-3.5 text-primary/80" />
+        <Brain className="size-3 text-primary/80" />
         <span className="font-medium">{current.label}</span>
-        <ChevronDown className="size-3 text-muted/70" />
+        <ChevronDown className="size-2.5 text-muted/70" />
       </Button>
-      <Dropdown.Popover className="min-w-48 rounded-lg" placement="top start">
+      <Dropdown.Popover className="min-w-28 rounded-lg" placement="top start">
         <Dropdown.Menu
           aria-label="Thinking effort"
+          className="p-1"
           selectedKeys={[thinkingEffort]}
           selectionMode="single"
           onAction={(key) => {
@@ -62,17 +50,12 @@ function ThinkingEffort() {
           {OPTIONS.map((option) => (
             <Dropdown.Item
               key={option.id}
-              className="rounded-md"
+              className="h-6 min-h-6 rounded-md px-1.5 text-[10px]"
               id={option.id}
               textValue={option.label}
             >
-              <span className="flex min-w-0 flex-col">
-                <Label>{option.label}</Label>
-                <span className="text-[11px] leading-4 text-muted">
-                  {option.description}
-                </span>
-              </span>
-              <Dropdown.ItemIndicator />
+              <span className="flex-1">{option.label}</span>
+              <Dropdown.ItemIndicator className="size-3" />
             </Dropdown.Item>
           ))}
         </Dropdown.Menu>
