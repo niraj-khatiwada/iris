@@ -10,7 +10,7 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
-use tauri::tray::TrayIconBuilder;
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
 use tauri::Emitter;
 use tauri::Manager;
@@ -158,7 +158,20 @@ fn main() {
                     // Menu bar icons should follow the system's light/dark appearance.
                     .icon_as_template(true)
                     .menu(&menu)
-                    .show_menu_on_left_click(true)
+                    .show_menu_on_left_click(false)
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
+                            let app = tray.app_handle();
+                            if let Err(error) = crate::sys::overlay::toggle_visible(app) {
+                                log::error!("Failed to toggle Iris from the tray: {error}");
+                            }
+                        }
+                    })
                     .on_menu_event(|app, event| match event.id.as_ref() {
                         "ask" => {
                             if let Err(error) = crate::sys::overlay::show(app) {

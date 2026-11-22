@@ -71,8 +71,9 @@ Iris launches as a floating quick-chat window, not a normal app window.
   toggles it.
 - The clock button opens the history window, where the older conversation UI still lives.
 - Double-click the Iris mascot to open History on the current quick conversation.
-- The AI blob in the menu bar offers **Ask Iris**, **History**, and **Quit Iris**. Iris keeps
-  running when the overlay hides; quit from there.
+- The AI blob in the menu bar is a direct toggle: left-click shows the quick overlay if it is
+  hidden and hides it if visible. Right-click opens **Ask Iris**, **History**, and **Quit Iris**.
+  Iris keeps running when the overlay hides; quit from the menu.
 - Every quick chat is a normal UUID conversation, so it appears in history and owns its own
   attachment folder. **+** starts a fresh one and leaves the previous chat in History, while `⌘⇧N`
   switches back to the previous one. The header shows the same conversation title as the sidebar;

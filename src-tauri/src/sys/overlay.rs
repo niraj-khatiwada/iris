@@ -344,18 +344,7 @@ pub fn toggle(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    #[cfg(target_os = "macos")]
-    let visible = {
-        use tauri_nspanel::ManagerExt;
-
-        app.get_webview_panel(OVERLAY_LABEL)
-            .map(|panel| panel.is_visible())
-            .unwrap_or(false)
-    };
-    #[cfg(not(target_os = "macos"))]
-    let visible = overlay_window(app)?
-        .is_visible()
-        .map_err(|error| error.to_string())?;
+    let visible = overlay_visible(app)?;
 
     if !visible {
         return show(app);
@@ -370,6 +359,38 @@ pub fn toggle(app: &AppHandle) -> Result<(), String> {
         hide(app)
     } else {
         show(app)
+    }
+}
+
+/// The tray icon is a direct visibility switch: visible hides, hidden shows, regardless of
+/// whether the non-activating panel currently has key focus.
+pub fn toggle_visible(app: &AppHandle) -> Result<(), String> {
+    if !OVERLAY_READY.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+
+    if overlay_visible(app)? {
+        hide(app)
+    } else {
+        show(app)
+    }
+}
+
+fn overlay_visible(app: &AppHandle) -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        use tauri_nspanel::ManagerExt;
+
+        return Ok(app
+            .get_webview_panel(OVERLAY_LABEL)
+            .map(|panel| panel.is_visible())
+            .unwrap_or(false));
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        overlay_window(app)?
+            .is_visible()
+            .map_err(|error| error.to_string())
     }
 }
 

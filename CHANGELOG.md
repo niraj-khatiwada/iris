@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Menu bar direct toggle.** Left-click the Iris icon to show the overlay if
+  hidden, or hide it if visible. Right-click opens **Ask Iris**, **History**, and
+  **Quit Iris**.
 - **Built-in quick prompts avoid em dashes.** Every pre-built prompt now includes
   `Do not use em-dash, use ";" instead of em-dash.` Existing saved built-ins are
   migrated once; prompts you create yourself are left exactly as written.
