@@ -26,7 +26,6 @@ import {
 } from 'react'
 
 import AttachmentStrip from '@/components/AttachmentStrip'
-import ChatToggles from '@/components/ChatToggles'
 import ConversationSwitcher from '@/components/ConversationSwitcher'
 import CopyButton from '@/components/CopyButton'
 import IrisBlob, { type IrisTone } from '@/components/IrisBlob'
@@ -38,6 +37,7 @@ import ReadAloudButton from '@/components/ReadAloudButton'
 import SelectionPanel from '@/components/SelectionPanel'
 import SendButton from '@/components/SendButton'
 import SpeechControl from '@/components/SpeechControl'
+import ThinkingEffort from '@/components/ThinkingEffort'
 import VoiceStrip from '@/components/VoiceStrip'
 import { NO_WRITING_ASSIST } from '@/constants'
 import { useAttachments } from '@/hooks/useAttachments'
@@ -210,10 +210,6 @@ function Overlay() {
   )
   const selectionAutoSpeak = autoSpeak && autoSpeakSelection
   const overlayShortcuts = useSettingsStore((state) => state.overlayShortcuts)
-  const deepThink = useSettingsStore((state) => state.deepThink)
-  const webSearch = useSettingsStore((state) => state.webSearch)
-  const setDeepThink = useSettingsStore((state) => state.setDeepThink)
-  const setWebSearch = useSettingsStore((state) => state.setWebSearch)
   const voice = useVoiceInput()
   const voiceStart = voice.start
   const files = useAttachments({
@@ -518,18 +514,6 @@ function Overlay() {
         return
       }
 
-      if (matchesShortcut(event, overlayShortcuts.deepThink)) {
-        event.preventDefault()
-        setDeepThink(!deepThink)
-        return
-      }
-
-      if (matchesShortcut(event, overlayShortcuts.webSearch)) {
-        event.preventDefault()
-        setWebSearch(!webSearch)
-        return
-      }
-
       if (matchesShortcut(event, overlayShortcuts.voiceInput)) {
         event.preventDefault()
         if (!streaming) {
@@ -561,7 +545,6 @@ function Overlay() {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [
-    deepThink,
     hasResponse,
     inputRef,
     newChat,
@@ -570,14 +553,11 @@ function Overlay() {
     restorePreviousQuickConversation,
     revealResponse,
     selectionView,
-    setDeepThink,
-    setWebSearch,
     streaming,
     switcherOpen,
     triggerCapture,
     voiceActive,
     voiceStart,
-    webSearch,
   ])
 
   // Cmd+C is the macOS Copy menu accelerator; catch the resulting copy event so the overlay can
@@ -1758,16 +1738,7 @@ function Overlay() {
 
                     <div className="flex items-end gap-2">
                       <div className="pb-1.5">
-                        <ChatToggles
-                          shortcutHints={{
-                            webSearch: formatShortcut(
-                              overlayShortcuts.webSearch,
-                            ),
-                            deepThink: formatShortcut(
-                              overlayShortcuts.deepThink,
-                            ),
-                          }}
-                        />
+                        <ThinkingEffort />
                       </div>
 
                       <TextArea

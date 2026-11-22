@@ -14,6 +14,7 @@ import {
   DEFAULT_SELECTION_SHORTCUT,
   DEFAULT_SIDEBAR_WIDTH,
   DEFAULT_SYSTEM_PROMPT,
+  DEFAULT_THINKING_EFFORT,
   DEFAULT_TTS_VOICE,
   MAX_SIDEBAR_WIDTH,
   MIN_SIDEBAR_WIDTH,
@@ -24,6 +25,7 @@ import type {
   IrisAvatar,
   QuickPrompt,
   ThemeMode,
+  ThinkingEffort,
   TtsVoice,
 } from '@/types/settings'
 import { isQuickPromptIcon } from '@/utils/quickPrompts'
@@ -39,6 +41,9 @@ type LegacySettings = {
   asrUrl?: unknown
   /** The single prompt from before island and main chat had separate instructions. */
   systemPrompt?: unknown
+  /** Old composer toggles, replaced by `thinkingEffort`. */
+  deepThink?: unknown
+  webSearch?: unknown
 }
 
 /**
@@ -66,6 +71,17 @@ function normalizeSidebarWidth(saved: unknown): number {
   )
 }
 
+function normalizeThinkingEffort(
+  saved: unknown,
+  legacyDeepThink?: unknown,
+): ThinkingEffort {
+  if (saved === 'low' || saved === 'high' || saved === 'max') {
+    return saved
+  }
+  // Preserve the intent of the old on/off toggle once, then default to Low forever.
+  return legacyDeepThink === true ? 'high' : DEFAULT_THINKING_EFFORT
+}
+
 function normalizeOverlayShortcuts(saved: unknown): OverlayShortcuts {
   const value = (saved ?? {}) as Partial<Record<string, unknown>>
   const shortcuts = { ...DEFAULT_OVERLAY_SHORTCUTS } as OverlayShortcuts
@@ -83,11 +99,6 @@ function normalizeOverlayShortcuts(saved: unknown): OverlayShortcuts {
   // over so existing installs follow the new binding.
   if (shortcuts.capture === 'CommandOrControl+KeyC') {
     shortcuts.capture = DEFAULT_OVERLAY_SHORTCUTS.capture
-  }
-
-  // Web search moved from ⌘W to ⌘S; carry the untouched old default over.
-  if (shortcuts.webSearch === 'CommandOrControl+KeyW') {
-    shortcuts.webSearch = DEFAULT_OVERLAY_SHORTCUTS.webSearch
   }
 
   // Voice input moved from ⌘M to ⌘I; carry the untouched old default over.
@@ -312,10 +323,8 @@ type SettingsState = {
   revealResponse: boolean
   /** Learn durable facts from typed chats and use them in future prompts. */
   memoryEnabled: boolean
-  /** Toggle in the composer: enable thinking mode before answering. */
-  deepThink: boolean
-  /** Toggle in the composer: let Iris search the web when it needs to. */
-  webSearch: boolean
+  /** Thinking is always enabled; this controls how much effort it uses. */
+  thinkingEffort: ThinkingEffort
   ttsVoice: TtsVoice
   /** Tauri shortcut syntax, chosen with the recorder in Settings → Shortcuts. */
   openShortcut: string
@@ -351,8 +360,7 @@ type SettingsState = {
   setRevealResponse: (revealResponse: boolean) => void
   setAutoSendVoice: (autoSendVoice: boolean) => void
   setMemoryEnabled: (memoryEnabled: boolean) => void
-  setDeepThink: (deepThink: boolean) => void
-  setWebSearch: (webSearch: boolean) => void
+  setThinkingEffort: (thinkingEffort: ThinkingEffort) => void
   setTtsVoice: (ttsVoice: TtsVoice) => void
   setOpenShortcut: (openShortcut: string) => void
   setSelectionShortcut: (selectionShortcut: string) => void
@@ -384,8 +392,7 @@ export const useSettingsStore = create<SettingsState>()(
       revealResponse: true,
       autoSendVoice: true,
       memoryEnabled: true,
-      deepThink: false,
-      webSearch: false,
+      thinkingEffort: DEFAULT_THINKING_EFFORT,
       ttsVoice: DEFAULT_TTS_VOICE,
       openShortcut: DEFAULT_OPEN_SHORTCUT,
       selectionShortcut: DEFAULT_SELECTION_SHORTCUT,
@@ -436,8 +443,7 @@ export const useSettingsStore = create<SettingsState>()(
       setRevealResponse: (revealResponse) => set({ revealResponse }),
       setAutoSendVoice: (autoSendVoice) => set({ autoSendVoice }),
       setMemoryEnabled: (memoryEnabled) => set({ memoryEnabled }),
-      setDeepThink: (deepThink) => set({ deepThink }),
-      setWebSearch: (webSearch) => set({ webSearch }),
+      setThinkingEffort: (thinkingEffort) => set({ thinkingEffort }),
       setTtsVoice: (ttsVoice) => set({ ttsVoice }),
       setOpenShortcut: (openShortcut) => set({ openShortcut }),
       setSelectionShortcut: (selectionShortcut) => set({ selectionShortcut }),
@@ -467,6 +473,8 @@ export const useSettingsStore = create<SettingsState>()(
           ttsUrl: _legacyTtsUrl,
           asrUrl: _legacyAsrUrl,
           systemPrompt: legacySystemPrompt,
+          deepThink: legacyDeepThink,
+          webSearch: _legacyWebSearch,
           ...rest
         } = saved
         const quickPromptSchema =
@@ -486,6 +494,10 @@ export const useSettingsStore = create<SettingsState>()(
           autoSpeakSelection: saved.autoSpeakSelection === true,
           summarizeSpeech: saved.summarizeSpeech !== false,
           memoryEnabled: saved.memoryEnabled !== false,
+          thinkingEffort: normalizeThinkingEffort(
+            saved.thinkingEffort,
+            legacyDeepThink,
+          ),
           islandSystemPrompt: normalizePrompt(
             saved.islandSystemPrompt ?? legacySystemPrompt,
           ),
@@ -519,6 +531,8 @@ export const useSettingsStore = create<SettingsState>()(
           ttsUrl: _legacyTtsUrl,
           asrUrl: _legacyAsrUrl,
           systemPrompt: legacySystemPrompt,
+          deepThink: legacyDeepThink,
+          webSearch: _legacyWebSearch,
           ...rest
         } = saved
         const openShortcut =
@@ -546,8 +560,10 @@ export const useSettingsStore = create<SettingsState>()(
           // New behaviour defaults on, so an older stored shape gains it without user action.
           revealResponse: rest.revealResponse ?? true,
           autoSendVoice: rest.autoSendVoice ?? true,
-          deepThink: rest.deepThink ?? false,
-          webSearch: rest.webSearch ?? false,
+          thinkingEffort: normalizeThinkingEffort(
+            rest.thinkingEffort,
+            legacyDeepThink,
+          ),
           ttsVoice: rest.ttsVoice === 'tide' ? 'tide' : DEFAULT_TTS_VOICE,
           openShortcut,
           selectionShortcut: normalizeShortcut(

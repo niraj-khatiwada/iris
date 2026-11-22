@@ -121,8 +121,8 @@ pub struct AgentConfig {
     pub model: String,
     pub auto_speak: bool,
     pub summarize_speech: bool,
-    pub deep_think: bool,
-    pub web_search: bool,
+    /// Thinking is always enabled; this is `low`, `high`, or `max`.
+    pub thinking_effort: String,
     /// Learn durable facts from this conversation and inject remembered ones into the prompt.
     pub memory_enabled: bool,
     pub tts_voice: String,
@@ -809,8 +809,9 @@ async fn summarize_chunk(
     Ok(Some(summary.trim().to_string()))
 }
 
-/// Builds the streaming request body for a reply. Both composer toggles only affect the request,
-/// and URL reading is enabled automatically when the newest user message contains a link.
+/// Builds the streaming request body for a reply. Thinking is always enabled at the selected
+/// effort, web search is always available, and URL reading is added when the newest user message
+/// contains a link.
 fn build_body(
     mut system: String,
     messages: Vec<Value>,
@@ -833,26 +834,24 @@ fn build_body(
         "stream": true
     });
 
-    // DeepSeek enables thinking by default for deepseek-flash, so the off state must be explicit.
-    body["thinking"] = if config.deep_think {
-        json!({ "type": "adaptive" })
-    } else {
-        json!({ "type": "disabled" })
+    body["thinking"] = json!({ "type": "enabled" });
+    let effort = match config.thinking_effort.trim().to_ascii_lowercase().as_str() {
+        "high" => "high",
+        "max" => "max",
+        _ => "low",
     };
+    body["output_config"] = json!({ "effort": effort });
 
-    // DeepSeek's own server tools. They cannot be mixed with other server tools, so the legacy
-    // `web_search_20250305` is gone. With thinking and search both on, DeepSeek runs deep thinking
-    // search and skips the user's links, so URL reading takes precedence in that case.
-    let mut tools = Vec::new();
-    if config.web_search && !(read_url && config.deep_think) {
-        tools.push(json!({ "type": "deepseek_web_search", "name": "deepseek_web_search" }));
-    }
+    // DeepSeek's own server tools; the model decides whether to search. They cannot be mixed with
+    // other server tools, so the legacy `web_search_20250305` is gone.
+    let mut tools = vec![json!({
+        "type": "deepseek_web_search",
+        "name": "deepseek_web_search"
+    })];
     if read_url {
         tools.push(json!({ "type": "deepseek_read_url", "name": "deepseek_read_url" }));
     }
-    if !tools.is_empty() {
-        body["tools"] = Value::Array(tools);
-    }
+    body["tools"] = Value::Array(tools);
 
     body
 }
@@ -1209,44 +1208,53 @@ mod tests {
     }
 
     #[test]
-    fn toggles_shape_the_request() {
+    fn thinking_effort_and_web_search_shape_the_request() {
         let mut config = AgentConfig {
             api_key: "test-key".to_string(),
             base_url: "http://127.0.0.1".to_string(),
             model: "deepseek-flash".to_string(),
             auto_speak: false,
             summarize_speech: false,
-            deep_think: false,
-            web_search: false,
+            thinking_effort: "low".to_string(),
             memory_enabled: false,
             tts_voice: "stella".to_string(),
             tts_url: String::new(),
         };
 
-        // Off: thinking is explicitly disabled and no tool is sent.
-        let off = build_body("system".to_string(), vec![], &config, false);
-        assert_eq!(off["thinking"]["type"], "disabled");
-        assert!(off.get("tools").is_none());
-
-        config.deep_think = true;
-        config.web_search = true;
-        let on = build_body("system".to_string(), vec![], &config, false);
-        assert_eq!(on["thinking"]["type"], "adaptive");
-        let tools = on["tools"].as_array().unwrap();
+        let body = build_body("system".to_string(), vec![], &config, false);
+        assert_eq!(body["thinking"]["type"], "enabled");
+        assert_eq!(body["output_config"]["effort"], "low");
+        let tools = body["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["name"], "deepseek_web_search");
+
+        config.thinking_effort = "high".to_string();
+        assert_eq!(
+            build_body("system".to_string(), vec![], &config, false)["output_config"]["effort"],
+            "high"
+        );
+        config.thinking_effort = "max".to_string();
+        assert_eq!(
+            build_body("system".to_string(), vec![], &config, false)["output_config"]["effort"],
+            "max"
+        );
+        // Unknown legacy values fall back to the low default instead of reaching the API.
+        config.thinking_effort = "adaptive".to_string();
+        assert_eq!(
+            build_body("system".to_string(), vec![], &config, false)["output_config"]["effort"],
+            "low"
+        );
     }
 
     #[test]
-    fn links_enable_url_reading() {
-        let mut config = AgentConfig {
+    fn links_add_url_reading_to_the_always_available_search_tool() {
+        let config = AgentConfig {
             api_key: "test-key".to_string(),
             base_url: "http://127.0.0.1".to_string(),
             model: "deepseek-flash".to_string(),
             auto_speak: false,
             summarize_speech: false,
-            deep_think: false,
-            web_search: false,
+            thinking_effort: "low".to_string(),
             memory_enabled: false,
             tts_voice: "stella".to_string(),
             tts_url: String::new(),
@@ -1257,26 +1265,16 @@ mod tests {
         assert!(!contains_url("There is no link here."));
         assert!(!contains_url("https://"));
 
-        let read = build_body("system".to_string(), vec![], &config, true);
-        let tools = read["tools"].as_array().unwrap();
+        let no_link = build_body("system".to_string(), vec![], &config, false);
+        let tools = no_link["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0]["name"], "deepseek_read_url");
+        assert_eq!(tools[0]["name"], "deepseek_web_search");
 
-        // Search and URL reading can be declared together in normal mode.
-        config.web_search = true;
-        let both = build_body("system".to_string(), vec![], &config, true);
-        let tools = both["tools"].as_array().unwrap();
+        let with_link = build_body("system".to_string(), vec![], &config, true);
+        let tools = with_link["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 2);
         assert_eq!(tools[0]["name"], "deepseek_web_search");
         assert_eq!(tools[1]["name"], "deepseek_read_url");
-
-        // With thinking on, search would turn into deep thinking search and skip the links, so
-        // URL reading is the only tool declared.
-        config.deep_think = true;
-        let read_only = build_body("system".to_string(), vec![], &config, true);
-        let tools = read_only["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0]["name"], "deepseek_read_url");
     }
 
     #[test]
@@ -1318,8 +1316,7 @@ mod tests {
             model: "deepseek-flash".to_string(),
             auto_speak: false,
             summarize_speech: false,
-            deep_think: false,
-            web_search: false,
+            thinking_effort: "low".to_string(),
             memory_enabled: false,
             tts_voice: "stella".to_string(),
             tts_url: String::new(),
@@ -1352,8 +1349,7 @@ mod tests {
             model: "deepseek-flash".to_string(),
             auto_speak: false,
             summarize_speech: false,
-            deep_think: false,
-            web_search: false,
+            thinking_effort: "low".to_string(),
             memory_enabled: false,
             tts_voice: "stella".to_string(),
             tts_url: String::new(),
@@ -1456,37 +1452,36 @@ mod format_tests {
             model: "m".to_string(),
             auto_speak: false,
             summarize_speech: false,
-            deep_think: true,
-            web_search: true,
+            thinking_effort: "high".to_string(),
             memory_enabled: false,
             tts_voice: "stella".to_string(),
             tts_url: String::new(),
         }
     }
 
-    /// The reply body uses the Messages API shape and only sends extras when toggled on.
+    /// The reply body uses the Messages API shape, always enables thinking, and always offers
+    /// web search.
     #[test]
     fn the_body_uses_the_messages_shape() {
         let body = build_body("sys".to_string(), vec![], &config(), false);
         assert_eq!(body["system"], "sys");
         // Required by the Messages API.
         assert_eq!(body["max_tokens"], MAX_OUTPUT_TOKENS);
-        // The fixture enables thinking and web search.
-        assert_eq!(body["thinking"]["type"], "adaptive");
+        assert_eq!(body["thinking"]["type"], "enabled");
+        assert_eq!(body["output_config"]["effort"], "high");
         assert_eq!(body["tools"][0]["name"], "deepseek_web_search");
         assert!(body.get("reasoning_effort").is_none());
     }
 
-    /// With the toggles off thinking is disabled explicitly and no tool is sent.
+    /// Unknown effort strings from old settings never reach the API.
     #[test]
-    fn the_body_omits_optional_fields_when_toggles_are_off() {
-        let mut off = config();
-        off.deep_think = false;
-        off.web_search = false;
+    fn the_body_falls_back_to_low_for_an_unknown_effort() {
+        let mut config = config();
+        config.thinking_effort = "adaptive".to_string();
 
-        let body = build_body("sys".to_string(), vec![], &off, false);
-        assert_eq!(body["thinking"]["type"], "disabled");
-        assert!(body.get("tools").is_none());
+        let body = build_body("sys".to_string(), vec![], &config, false);
+        assert_eq!(body["thinking"]["type"], "enabled");
+        assert_eq!(body["output_config"]["effort"], "low");
         assert_eq!(body["max_tokens"], MAX_OUTPUT_TOKENS);
     }
 

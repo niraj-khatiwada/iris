@@ -6,7 +6,7 @@ import {
   subscribeToChatToken,
 } from '@/tauri/commands/chat'
 import type { AgentMessage } from '@/types/chat'
-import type { TtsVoice } from '@/types/settings'
+import type { ThinkingEffort, TtsVoice } from '@/types/settings'
 import { newId } from '@/utils/id'
 import { isTauri } from '@/utils/tauri'
 
@@ -19,8 +19,7 @@ export type AgentRunOptions = {
   autoSpeak: boolean
   assistantMessageId: string
   summarizeSpeech: boolean
-  deepThink: boolean
-  webSearch: boolean
+  thinkingEffort: ThinkingEffort
   memoryEnabled: boolean
   ttsVoice: TtsVoice
   onToken: (token: string) => void
@@ -110,8 +109,7 @@ export function startAgentRun(options: AgentRunOptions): string {
           autoSpeak: options.autoSpeak,
           assistantMessageId: options.assistantMessageId,
           summarizeSpeech: options.summarizeSpeech,
-          deepThink: options.deepThink,
-          webSearch: options.webSearch,
+          thinkingEffort: options.thinkingEffort,
           memoryEnabled: options.memoryEnabled,
           ttsVoice: options.ttsVoice,
         })

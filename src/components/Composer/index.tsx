@@ -3,11 +3,11 @@ import { Mic, Square } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import AttachmentStrip from '@/components/AttachmentStrip'
-import ChatToggles from '@/components/ChatToggles'
 import QuickPromptChip from '@/components/QuickPromptChip'
 import QuickPromptMenu from '@/components/QuickPromptMenu'
 import SendButton from '@/components/SendButton'
 import SpeechControl from '@/components/SpeechControl'
+import ThinkingEffort from '@/components/ThinkingEffort'
 import { NO_WRITING_ASSIST } from '@/constants'
 import { useAttachments } from '@/hooks/useAttachments'
 import { useSpeechPlayback } from '@/hooks/useSpeechPlayback'
@@ -169,7 +169,7 @@ function Composer() {
 
         <div className="flex items-end gap-2 px-1.5">
           <div className="pb-2">
-            <ChatToggles />
+            <ThinkingEffort />
           </div>
 
           <TextArea

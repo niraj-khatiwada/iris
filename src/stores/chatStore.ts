@@ -317,8 +317,7 @@ async function runAssistantReply({
     autoSpeak: autoSpeak ?? settings.autoSpeak,
     assistantMessageId,
     summarizeSpeech: settings.summarizeSpeech,
-    deepThink: settings.deepThink,
-    webSearch: settings.webSearch,
+    thinkingEffort: settings.thinkingEffort,
     memoryEnabled: settings.memoryEnabled,
     ttsVoice: settings.ttsVoice,
     onToken: (token) => {

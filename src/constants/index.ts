@@ -2,6 +2,7 @@ import type {
   IrisAvatar,
   QuickPrompt,
   ThemeMode,
+  ThinkingEffort,
   TtsVoice,
 } from '@/types/settings'
 
@@ -178,11 +179,11 @@ export const DEFAULT_OVERLAY_SHORTCUTS = {
   newChat: 'CommandOrControl+KeyN',
   restorePrevious: 'CommandOrControl+Shift+KeyN',
   toggleResponse: 'CommandOrControl+KeyB',
-  deepThink: 'CommandOrControl+KeyD',
-  webSearch: 'CommandOrControl+KeyS',
   voiceInput: 'CommandOrControl+KeyI',
   stopSpeaking: 'CommandOrControl+KeyX',
 } as const
+/** Thinking is always on; this is the starting effort for new installs. */
+export const DEFAULT_THINKING_EFFORT: ThinkingEffort = 'low'
 export const THEME_LABELS: Record<ThemeMode, string> = {
   light: 'Light',
   dark: 'Dark',

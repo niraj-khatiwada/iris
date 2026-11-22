@@ -11,6 +11,9 @@ export type ThemeMode = 'light' | 'dark' | 'system'
 /** DeepSeek TTS voices exposed by the demo API. */
 export type TtsVoice = 'stella' | 'tide'
 
+/** How much thinking DeepSeek should spend before answering. Thinking itself is always on. */
+export type ThinkingEffort = 'low' | 'high' | 'max'
+
 /** The avatar's saved look. Emotion and tone stay driven by the app's state. */
 export type IrisAvatar = {
   type: BotAvatarType

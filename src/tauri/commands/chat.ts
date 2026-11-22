@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
 import type { AgentMessage } from '@/types/chat'
+import type { ThinkingEffort } from '@/types/settings'
 
 const CHAT_TOKEN_EVENT = 'chat:token'
 const CHAT_DONE_EVENT = 'chat:done'
@@ -32,8 +33,7 @@ export function sendMessage(request: {
   autoSpeak: boolean
   assistantMessageId: string
   summarizeSpeech: boolean
-  deepThink: boolean
-  webSearch: boolean
+  thinkingEffort: ThinkingEffort
   memoryEnabled: boolean
   ttsVoice: string
 }) {

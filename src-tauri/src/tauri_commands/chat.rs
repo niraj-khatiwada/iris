@@ -49,6 +49,10 @@ fn default_memory_enabled() -> bool {
     true
 }
 
+fn default_thinking_effort() -> String {
+    "low".to_string()
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SendMessageRequest {
@@ -69,12 +73,9 @@ pub struct SendMessageRequest {
     /// Condense long replies into a spoken summary before automatic read-aloud.
     #[serde(default = "default_summarize_speech")]
     pub summarize_speech: bool,
-    /// Enables DeepSeek's DeepThink before the reply.
-    #[serde(default)]
-    pub deep_think: bool,
-    /// Declares the web search tool in addition to reading links.
-    #[serde(default)]
-    pub web_search: bool,
+    /// Thinking is always enabled; this selects its effort (`low`, `high`, or `max`).
+    #[serde(default = "default_thinking_effort")]
+    pub thinking_effort: String,
     /// Automatically learn durable facts from this conversation.
     #[serde(default = "default_memory_enabled")]
     pub memory_enabled: bool,
@@ -194,8 +195,7 @@ pub fn send_message(
         model,
         auto_speak: request.auto_speak,
         summarize_speech: request.summarize_speech,
-        deep_think: request.deep_think,
-        web_search: request.web_search,
+        thinking_effort: request.thinking_effort.clone(),
         memory_enabled: request.memory_enabled,
         tts_voice,
         tts_url: endpoints::url(&base_url, endpoints::TTS_PATH),
