@@ -427,13 +427,9 @@ function Overlay() {
         return
       }
 
-      // Cmd+F opens the conversation switcher, or returns focus to its field when it is open.
-      if (
-        modifier &&
-        !event.altKey &&
-        !event.shiftKey &&
-        event.code === 'KeyF'
-      ) {
+      // The configured search shortcut opens the conversation switcher, or returns focus to its
+      // field when it is already open.
+      if (matchesShortcut(event, overlayShortcuts.searchConversations)) {
         event.preventDefault()
         setSwitcherOpen(true)
         setSwitcherFocusNonce((value) => value + 1)
@@ -1494,7 +1490,7 @@ function Overlay() {
                         </Button>
                         <Tooltip.Content>
                           Search conversations ·{' '}
-                          {formatShortcut('CommandOrControl+KeyF')}
+                          {formatShortcut(overlayShortcuts.searchConversations)}
                         </Tooltip.Content>
                       </Tooltip>
 

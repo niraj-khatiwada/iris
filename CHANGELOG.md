@@ -10,11 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Conversation switcher in the quick overlay.** A search button in the overlay
-  header, or **⌘F**, opens a compact title search for recent chats. **⌘F** again
-  refocuses the field. Arrow keys and Enter switch context in place; the current
-  chat's pending writes are flushed first, and Escape closes the switcher without
-  hiding Iris. The current chat is excluded, and the chat you left stays one
-  **Previous conversation** (`⌘⇧N`) away.
+  header, or the **Search conversations** overlay shortcut (**⌘F** by default,
+  configurable in Settings → Shortcuts), opens a compact title search for recent
+  chats. The shortcut again refocuses the field. Arrow keys and Enter switch context
+  in place; the current chat's pending writes are flushed first, and Escape closes
+  the switcher without hiding Iris. The current chat is excluded, and the chat you
+  left stays one **Previous conversation** (`⌘⇧N`) away.
 - **Persistent memory.** Iris now learns durable preferences and facts from typed
   chats in the background and applies them to both Quick chat and History. Settings →
   Memory lists every remembered item with search, edit, pause, delete, clear all, and

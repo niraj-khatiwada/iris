@@ -613,6 +613,20 @@ const OVERLAY_SHORTCUT_ROWS: Array<{
     search: ['new', 'chat', 'conversation', 'shortcut'],
   },
   {
+    id: 'searchConversations',
+    title: 'Search conversations',
+    description: 'Open the title search for earlier quick chats.',
+    search: [
+      'search',
+      'find',
+      'conversation',
+      'chat',
+      'title',
+      'switch',
+      'shortcut',
+    ],
+  },
+  {
     id: 'restorePrevious',
     title: 'Previous conversation',
     description: 'Switch back to the previous quick conversation.',

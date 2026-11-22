@@ -174,6 +174,7 @@ export const SETTINGS_STORAGE_KEY = 'iris.settings'
 /** In-app shortcuts recorded in Settings; stopping read-aloud also works in the history window. */
 export const DEFAULT_OVERLAY_SHORTCUTS = {
   capture: 'CommandOrControl+Shift+KeyS',
+  searchConversations: 'CommandOrControl+KeyF',
   newChat: 'CommandOrControl+KeyN',
   restorePrevious: 'CommandOrControl+Shift+KeyN',
   toggleResponse: 'CommandOrControl+KeyB',
