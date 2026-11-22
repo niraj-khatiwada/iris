@@ -10,6 +10,8 @@ import { cn } from '@/utils/tailwind'
 type ConversationSwitcherProps = {
   conversations: Conversation[]
   currentId: string | null
+  /** Bumped when the shortcut asks the already-open field to take focus again. */
+  focusNonce: number
   onSelect: (id: string) => void
   onClose: () => void
 }
@@ -24,12 +26,14 @@ const SEARCH_LIMIT = 20
 function ConversationSwitcher({
   conversations,
   currentId,
+  focusNonce,
   onSelect,
   onClose,
 }: ConversationSwitcherProps) {
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
   const listRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   const rows = useMemo(() => {
     const term = query.trim().toLowerCase()
@@ -56,6 +60,14 @@ function ConversationSwitcher({
       listRef.current?.querySelectorAll<HTMLElement>('[role="option"]')
     rowsInView?.[active]?.scrollIntoView({ block: 'nearest' })
   }, [active])
+
+  useEffect(() => {
+    if (focusNonce === 0) {
+      return
+    }
+    inputRef.current?.focus()
+    inputRef.current?.select()
+  }, [focusNonce])
 
   const move = (direction: 1 | -1) => {
     if (rows.length === 0) {
@@ -91,6 +103,7 @@ function ConversationSwitcher({
             <SearchField.SearchIcon />
             <SearchField.Input
               {...NO_WRITING_ASSIST}
+              ref={inputRef}
               autoFocus
               placeholder="Search conversations"
               onKeyDown={(event) => {

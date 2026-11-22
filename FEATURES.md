@@ -35,7 +35,7 @@
 
 **What shipped**
 
-- **Header search.** A search button in the overlay header opens a compact title search above the composer. A second click or Escape closes it, and Escape does not hide Iris.
+- **Header search.** A search button in the overlay header, or **⌘F**, opens a compact title search above the composer. **⌘F** again refocuses the field. A second click or Escape closes it, and Escape does not hide Iris.
 - **Title-only and instant.** It matches non-archived conversation titles in memory, shows the 8 most recent chats by default or up to 20 matches while searching, and never searches message bodies. The current chat is excluded.
 - **Switch in place.** Choosing a chat flushes pending SQLite writes, settles the previous run, makes the chosen chat the current `quickConversationId`, loads its newest page, and keeps the previous chat one **Previous conversation** (`⌘⇧N`) away. The choice is persisted in `app_meta`.
 - **Keyboard-first.** The search field focuses on open, arrow keys move through results, Enter opens the highlighted chat, and the active row scrolls into view.

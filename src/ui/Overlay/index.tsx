@@ -192,6 +192,7 @@ function Overlay() {
   const [slashPrompt, setSlashPrompt] = useState<QuickPrompt | null>(null)
   const [promptIndex, setPromptIndex] = useState(0)
   const [switcherOpen, setSwitcherOpen] = useState(false)
+  const [switcherFocusNonce, setSwitcherFocusNonce] = useState(0)
   // A new reply starts revealed or hidden depending on the setting; Hide/Show still override it
   // for the reply currently on screen.
   const [revealed, setRevealed] = useState(revealResponse)
@@ -422,7 +423,24 @@ function Overlay() {
       const modifier = event.metaKey || event.ctrlKey
 
       // The voice strip and the selection strip own their keys and ignore action shortcuts.
-      if (voiceActive || selectionView || switcherOpen) {
+      if (voiceActive || selectionView) {
+        return
+      }
+
+      // Cmd+F opens the conversation switcher, or returns focus to its field when it is open.
+      if (
+        modifier &&
+        !event.altKey &&
+        !event.shiftKey &&
+        event.code === 'KeyF'
+      ) {
+        event.preventDefault()
+        setSwitcherOpen(true)
+        setSwitcherFocusNonce((value) => value + 1)
+        return
+      }
+
+      if (switcherOpen) {
         return
       }
 
@@ -1474,7 +1492,10 @@ function Overlay() {
                         >
                           <Search className="size-3.5" />
                         </Button>
-                        <Tooltip.Content>Search conversations</Tooltip.Content>
+                        <Tooltip.Content>
+                          Search conversations ·{' '}
+                          {formatShortcut('CommandOrControl+KeyF')}
+                        </Tooltip.Content>
                       </Tooltip>
 
                       <Tooltip delay={500}>
@@ -1542,6 +1563,7 @@ function Overlay() {
                         <ConversationSwitcher
                           conversations={conversations}
                           currentId={quickConversationId}
+                          focusNonce={switcherFocusNonce}
                           onClose={() => {
                             setSwitcherOpen(false)
                             requestAnimationFrame(() =>
