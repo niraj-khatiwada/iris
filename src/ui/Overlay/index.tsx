@@ -1500,7 +1500,7 @@ function Overlay() {
                           className={cn(
                             'size-7 min-w-7',
                             switcherOpen
-                              ? 'bg-foreground/10 text-foreground'
+                              ? 'bg-primary/15 text-primary'
                               : 'text-foreground/45',
                           )}
                           size="sm"

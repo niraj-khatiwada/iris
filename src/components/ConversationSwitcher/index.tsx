@@ -150,14 +150,19 @@ function ConversationSwitcher({
                 aria-selected={isActive}
                 className={cn(
                   'flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition-colors',
-                  isActive ? 'bg-foreground/10' : 'hover:bg-foreground/5',
+                  isActive ? 'bg-primary/15' : 'hover:bg-foreground/5',
                 )}
                 role="option"
                 type="button"
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => onSelect(conversation.id)}
               >
-                <MessageSquare className="size-3.5 shrink-0 text-muted" />
+                <MessageSquare
+                  className={cn(
+                    'size-3.5 shrink-0',
+                    isActive ? 'text-primary' : 'text-muted',
+                  )}
+                />
                 <span className="min-w-0 flex-1 truncate text-[12px] font-medium">
                   {conversation.title}
                 </span>
@@ -165,7 +170,7 @@ function ConversationSwitcher({
                   {formatConversationTime(conversation.updatedAt)}
                 </span>
                 {isActive ? (
-                  <CornerDownLeft className="size-3 shrink-0 text-muted/70" />
+                  <CornerDownLeft className="size-3 shrink-0 text-primary/70" />
                 ) : null}
               </button>
             )
