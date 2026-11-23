@@ -13,6 +13,9 @@ pub const OVERLAY_LABEL: &str = "overlay";
 pub const CANVAS_LABEL: &str = "canvas";
 
 static OVERLAY_READY: AtomicBool = AtomicBool::new(false);
+/// A summon that arrived before the overlay's first paint. `ready` reveals Iris when it is set,
+/// so a shortcut pressed during startup is never swallowed.
+static SUMMON_BEFORE_READY: AtomicBool = AtomicBool::new(false);
 
 const OVERLAY_WIDTH: f64 = 792.0;
 /// The visible panel inside the 792px overlay window (16px shadow gutter on each side).
@@ -192,13 +195,25 @@ fn overlay_window(app: &AppHandle) -> Result<WebviewWindow, String> {
 /// reveal an empty native surface before the webview has anything in it.
 pub fn ready(app: &AppHandle) -> Result<(), String> {
     OVERLAY_READY.store(true, Ordering::SeqCst);
+
+    // A login launch stays in the menu bar. The webview still loads and paints while hidden, so
+    // the first shortcut press reveals it immediately.
+    if crate::sys::startup::launched_at_login()
+        && !SUMMON_BEFORE_READY.swap(false, Ordering::SeqCst)
+    {
+        log::info!("Iris started at login; staying in the menu bar until summoned");
+        return Ok(());
+    }
+
     log::info!("Overlay webview painted; revealing Iris");
     show(app)
 }
 
 pub fn show(app: &AppHandle) -> Result<(), String> {
     if !OVERLAY_READY.load(Ordering::SeqCst) {
-        log::debug!("Overlay has not painted yet; leaving it hidden");
+        // The user asked for Iris before the first paint; `ready` reveals it once it has one.
+        SUMMON_BEFORE_READY.store(true, Ordering::SeqCst);
+        log::debug!("Overlay has not painted yet; leaving it hidden until it has");
         return Ok(());
     }
 
@@ -341,6 +356,8 @@ pub fn hide(app: &AppHandle) -> Result<(), String> {
 
 pub fn toggle(app: &AppHandle) -> Result<(), String> {
     if !OVERLAY_READY.load(Ordering::SeqCst) {
+        // Reveal as soon as the first paint lands; see `ready`.
+        SUMMON_BEFORE_READY.store(true, Ordering::SeqCst);
         return Ok(());
     }
 
@@ -366,6 +383,8 @@ pub fn toggle(app: &AppHandle) -> Result<(), String> {
 /// whether the non-activating panel currently has key focus.
 pub fn toggle_visible(app: &AppHandle) -> Result<(), String> {
     if !OVERLAY_READY.load(Ordering::SeqCst) {
+        // Reveal as soon as the first paint lands; see `ready`.
+        SUMMON_BEFORE_READY.store(true, Ordering::SeqCst);
         return Ok(());
     }
 

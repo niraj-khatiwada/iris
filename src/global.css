@@ -649,6 +649,17 @@ input:focus-visible {
   margin-inline-start: 8px;
 }
 
+/* Keep tooltips compact: a 10px label in a tighter pill than HeroUI's default. */
+.tooltip {
+  max-width: 15rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.5rem;
+  font-size: 0.625rem;
+  line-height: 0.875rem;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
 /* Native macOS controls keep the arrow cursor; only real links show the pointer. Tailwind
    preflight and HeroUI set a pointer on buttons, so override both the base layer and any
    `cursor-pointer` utility without touching explicit resize/text cursors. */

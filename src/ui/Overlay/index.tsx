@@ -31,6 +31,7 @@ import CopyButton from '@/components/CopyButton'
 import IrisBlob, { type IrisTone } from '@/components/IrisBlob'
 import Markdown from '@/components/Markdown'
 import PermissionNotice from '@/components/PermissionNotice'
+import QueuedMessages from '@/components/QueuedMessages'
 import QuickPromptChip from '@/components/QuickPromptChip'
 import QuickPromptMenu from '@/components/QuickPromptMenu'
 import ReadAloudButton from '@/components/ReadAloudButton'
@@ -908,7 +909,6 @@ function Overlay() {
       (!text && files.attachments.length === 0) ||
       files.pending ||
       files.hasError ||
-      streaming ||
       !hydrated ||
       !quickLoaded
     ) {
@@ -1384,6 +1384,42 @@ function Overlay() {
                         </span>
                       </>
                     ) : null}
+
+                    {responseReady && !switcherOpen ? (
+                      <Tooltip delay={500}>
+                        <Button
+                          isIconOnly
+                          aria-label="Show response"
+                          className="-ml-1 size-5 min-w-5 shrink-0 text-foreground/45"
+                          size="sm"
+                          variant="ghost"
+                          onPress={() => setRevealed(true)}
+                        >
+                          <ChevronUp className="size-3" />
+                        </Button>
+                        <Tooltip.Content>
+                          Show response ·{' '}
+                          {formatShortcut(overlayShortcuts.toggleResponse)}
+                        </Tooltip.Content>
+                      </Tooltip>
+                    ) : showResponse && !switcherOpen ? (
+                      <Tooltip delay={500}>
+                        <Button
+                          isIconOnly
+                          aria-label="Hide response"
+                          className="-ml-1 size-5 min-w-5 shrink-0 text-foreground/45"
+                          size="sm"
+                          variant="ghost"
+                          onPress={() => setRevealed(false)}
+                        >
+                          <ChevronDown className="size-3" />
+                        </Button>
+                        <Tooltip.Content>
+                          Hide response ·{' '}
+                          {formatShortcut(overlayShortcuts.toggleResponse)}
+                        </Tooltip.Content>
+                      </Tooltip>
+                    ) : null}
                     {errorLabel ? (
                       <span className="truncate text-[11px] text-danger/90">
                         {errorLabel}
@@ -1412,42 +1448,6 @@ function Overlay() {
                             <Square className="size-3.5 fill-current" />
                           </Button>
                           <Tooltip.Content>Stop</Tooltip.Content>
-                        </Tooltip>
-                      ) : null}
-
-                      {responseReady && !switcherOpen ? (
-                        <Tooltip delay={500}>
-                          <Button
-                            isIconOnly
-                            aria-label="Show response"
-                            className="size-7 min-w-7 text-foreground/45"
-                            size="sm"
-                            variant="ghost"
-                            onPress={() => setRevealed(true)}
-                          >
-                            <ChevronUp className="size-3.5" />
-                          </Button>
-                          <Tooltip.Content>
-                            Show response ·{' '}
-                            {formatShortcut(overlayShortcuts.toggleResponse)}
-                          </Tooltip.Content>
-                        </Tooltip>
-                      ) : showResponse && !switcherOpen ? (
-                        <Tooltip delay={500}>
-                          <Button
-                            isIconOnly
-                            aria-label="Hide response"
-                            className="size-7 min-w-7 text-foreground/45"
-                            size="sm"
-                            variant="ghost"
-                            onPress={() => setRevealed(false)}
-                          >
-                            <ChevronDown className="size-3.5" />
-                          </Button>
-                          <Tooltip.Content>
-                            Hide response ·{' '}
-                            {formatShortcut(overlayShortcuts.toggleResponse)}
-                          </Tooltip.Content>
                         </Tooltip>
                       ) : null}
 
@@ -1739,6 +1739,11 @@ function Overlay() {
                         onClear={() => setSlashPrompt(null)}
                       />
                     ) : null}
+                    <QueuedMessages
+                      compact
+                      className="pb-2"
+                      conversationId={quickConversationId}
+                    />
                     <AttachmentStrip
                       attachments={files.attachments}
                       className="pb-2"
@@ -1761,15 +1766,17 @@ function Overlay() {
                         aria-label="Ask Iris"
                         className="max-h-[120px] min-h-10 w-full resize-none border-0 bg-transparent pr-1 pl-0.5 py-2 text-[15px] leading-6 text-foreground shadow-none placeholder:text-foreground/35 focus-visible:ring-0"
                         placeholder={
-                          customSelection
-                            ? 'Tell Iris what to do with the selection…'
-                            : slashPrompt
-                              ? files.readyAttachments.length > 0
-                                ? `Press Enter to run ${slashPrompt.name} on the attachment…`
-                                : `Type or paste text to ${slashPrompt.name.toLowerCase()}…`
-                              : hasResponse
-                                ? 'Ask a follow-up…'
-                                : 'Ask Iris anything…'
+                          streaming
+                            ? 'Queue a message…'
+                            : customSelection
+                              ? 'Tell Iris what to do with the selection…'
+                              : slashPrompt
+                                ? files.readyAttachments.length > 0
+                                  ? `Press Enter to run ${slashPrompt.name} on the attachment…`
+                                  : `Type or paste text to ${slashPrompt.name.toLowerCase()}…`
+                                : hasResponse
+                                  ? 'Ask a follow-up…'
+                                  : 'Ask Iris anything…'
                         }
                         rows={1}
                         value={value}
@@ -1864,7 +1871,6 @@ function Overlay() {
 
                         <SendButton
                           isDisabled={
-                            streaming ||
                             slashOpen ||
                             !hydrated ||
                             !quickLoaded ||
@@ -1876,6 +1882,7 @@ function Overlay() {
                               files.attachments.length === 0) ||
                             (!value.trim() && files.attachments.length === 0)
                           }
+                          label={streaming ? 'Queue message' : undefined}
                           onPress={submit}
                         />
                       </div>

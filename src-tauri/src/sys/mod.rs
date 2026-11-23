@@ -5,4 +5,5 @@ pub mod platform;
 pub mod preview;
 pub mod screen;
 pub mod selection;
+pub mod startup;
 pub mod speech;

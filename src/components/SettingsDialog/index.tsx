@@ -566,7 +566,7 @@ function GeneralPanel({ query }: { query: string }) {
           isDisabled={!launchAtLoginReady || launchAtLoginBusy}
           isSelected={launchAtLogin}
           title="Start at login"
-          description="Launch Iris in the menu bar automatically when you sign in to this Mac."
+          description="Open Iris in the menu bar when you sign in to this Mac, without showing any windows. Use the shortcut when you need it."
           query={query}
           search={[
             'startup',

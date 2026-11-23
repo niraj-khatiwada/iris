@@ -27,9 +27,23 @@ fn main() {
 
     let builder = tauri::Builder::default()
         // A second launch summons the quick chat instead of starting another app.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Err(error) = crate::sys::overlay::show(app) {
-                log::error!("Failed to show Iris from a second launch: {error}");
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // A login launch is headless by design; never reveal a window because of it.
+            if args
+                .iter()
+                .any(|arg| arg == crate::sys::startup::AUTOSTART_ARG)
+            {
+                return;
+            }
+
+            // The callback runs on a worker thread; AppKit window work must run on the main one.
+            let handle = app.clone();
+            if let Err(error) = app.run_on_main_thread(move || {
+                if let Err(error) = crate::sys::overlay::show(&handle) {
+                    log::error!("Failed to show Iris from a second launch: {error}");
+                }
+            }) {
+                log::error!("Could not schedule the Iris overlay for a second launch: {error}");
             }
         }))
         .plugin(
@@ -46,12 +60,10 @@ fn main() {
         .plugin(
             // The LaunchAgent is the macOS default. Keep the development registration separate
             // so testing Start at login in a dev build never repoints the installed app's entry.
+            // The argument is how a login launch asks Iris to stay in the menu bar.
             tauri_plugin_autostart::Builder::new()
-                .app_name(if cfg!(debug_assertions) {
-                    "Iris Dev"
-                } else {
-                    "Iris"
-                })
+                .arg(crate::sys::startup::AUTOSTART_ARG)
+                .app_name(crate::sys::startup::AUTOSTART_APP_NAME)
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
@@ -79,6 +91,9 @@ fn main() {
             let storage =
                 crate::core::storage::Storage::open(app.handle()).map_err(std::io::Error::other)?;
             app.manage(storage);
+            // Entries written by older builds do not pass the autostart argument; rewrite them so
+            // the next login starts in the menu bar too.
+            crate::sys::startup::ensure_registration(app.handle());
 
             #[cfg(target_os = "macos")]
             if let Err(error) = crate::sys::overlay::setup_panels(app.handle()) {

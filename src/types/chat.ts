@@ -60,6 +60,24 @@ export type ChatMessage = {
   attachments?: ChatAttachment[]
 }
 
+/**
+ * A message waiting for the reply currently streaming in its conversation to finish. It becomes
+ * a normal user message with this same id when it is sent. Queues are in memory only.
+ */
+export type QueuedMessage = {
+  id: string
+  content: string
+  attachments: ChatAttachment[]
+  /** A shorter title seed for prompts that wrap the user's actual text (selection actions). */
+  titleSeed?: string
+  /** Overrides the normal auto-speak setting for this reply. */
+  autoSpeak?: boolean
+  /** Sent as the newest user turn while the stored message keeps `content`. */
+  requestPrompt?: string
+  /** True when the draft contained clipboard text; recorded as provenance. */
+  pasted?: boolean
+}
+
 export type MessageMetadata = {
   /** The DeepSeek model id used for this assistant reply. */
   ai_model?: string

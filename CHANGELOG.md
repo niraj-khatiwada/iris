@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Queued messages.** While a reply is streaming, sending another message now
+  queues it instead of cancelling the reply. The queue is per conversation and
+  sends in order as each answer finishes. In both Quick chat and History it
+  stays as a compact stack of cards above the composer and opens into removable
+  rows on hover or keyboard focus. History floats the opened rows above the
+  composer, so the conversation behind never moves. Stop ends only the current
+  reply and continues with the next queued message. The summary row always has
+  a Clear All button; New chat, switching chats, archiving, editing, regenerating,
+  and Settings → Clear also discard the queue. The queue is in memory only and never
+  written to SQLite.
 - **Sidebar header actions.** The theme and Settings buttons moved from the sidebar
   footer to compact controls in the top-right header, beside the traffic lights. They
   are hidden when the sidebar is collapsed; the footer now only appears for the
@@ -115,8 +125,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Start at login** in Settings → General → Startup, so Iris can launch in the
   menu bar when you sign in to your Mac. Reset Iris turns it off again.
 
+### Changed
+
+- **Start at login is silent.** When macOS launches Iris at sign-in, it now stays
+  in the menu bar without opening the quick overlay or History. The first
+  shortcut press, or the menu bar item, brings Iris up as usual.
+
 ### Fixed
 
+- A second launch no longer crashes the running Iris: the single-instance
+  handler now summons the overlay on the main thread, where AppKit window work
+  belongs.
 - **New chat cleans up empty conversations.** Starting a new quick chat now
   removes unarchived conversations that contain no messages, after flushing
   pending writes. It keeps the new chat, the History window's active chat,

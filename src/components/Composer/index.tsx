@@ -3,6 +3,7 @@ import { Mic, Square } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import AttachmentStrip from '@/components/AttachmentStrip'
+import QueuedMessages from '@/components/QueuedMessages'
 import QuickPromptChip from '@/components/QuickPromptChip'
 import QuickPromptMenu from '@/components/QuickPromptMenu'
 import SendButton from '@/components/SendButton'
@@ -35,6 +36,11 @@ function Composer() {
   const conversationReady = activeConversation?.messagesLoaded ?? true
   const stopStreaming = useChatStore((state) => state.stopStreaming)
   const streaming = useChatStore((state) => Boolean(state.streamingRequestId))
+  const conversationStreaming = useChatStore(
+    (state) =>
+      Boolean(state.streamingRequestId) &&
+      state.streamingConversationId === state.activeConversationId,
+  )
   const focusToken = useUIStore((state) => state.composerFocusToken)
   const activeConversationId = useChatStore(
     (state) => state.activeConversationId,
@@ -108,7 +114,6 @@ function Composer() {
       (!text && files.attachments.length === 0) ||
       files.pending ||
       files.hasError ||
-      streaming ||
       !hydrated ||
       !conversationReady
     ) {
@@ -136,7 +141,8 @@ function Composer() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-6 pb-6 pt-2">
+    <div className="relative mx-auto w-full max-w-3xl px-6 pb-6 pt-2">
+      <QueuedMessages conversationId={activeConversationId} />
       <div
         className={cn(
           'glass-control rounded-3xl p-2 transition-colors focus-within:border-accent/40',
@@ -178,11 +184,13 @@ function Composer() {
             aria-label="Message Iris"
             className="max-h-44 min-h-11 w-full resize-none border-0 bg-transparent pr-1 pl-0.5 py-2.5 text-[15px] leading-6 shadow-none focus-visible:ring-0"
             placeholder={
-              slashPrompt
-                ? files.readyAttachments.length > 0
-                  ? `Press Enter to run ${slashPrompt.name} on the attachment…`
-                  : `Type or paste text to ${slashPrompt.name.toLowerCase()}…`
-                : 'Message Iris…'
+              conversationStreaming
+                ? 'Queue a message…'
+                : slashPrompt
+                  ? files.readyAttachments.length > 0
+                    ? `Press Enter to run ${slashPrompt.name} on the attachment…`
+                    : `Type or paste text to ${slashPrompt.name.toLowerCase()}…`
+                  : 'Message Iris…'
             }
             rows={1}
             value={value}
@@ -280,22 +288,23 @@ function Composer() {
                 </Button>
                 <Tooltip.Content>Stop</Tooltip.Content>
               </Tooltip>
-            ) : (
-              <SendButton
-                isDisabled={
-                  !hydrated ||
-                  !conversationReady ||
-                  slashOpen ||
-                  files.pending ||
-                  files.hasError ||
-                  (Boolean(slashPrompt) &&
-                    !value.trim() &&
-                    files.attachments.length === 0) ||
-                  (!value.trim() && files.attachments.length === 0)
-                }
-                onPress={submit}
-              />
-            )}
+            ) : null}
+
+            <SendButton
+              isDisabled={
+                !hydrated ||
+                !conversationReady ||
+                slashOpen ||
+                files.pending ||
+                files.hasError ||
+                (Boolean(slashPrompt) &&
+                  !value.trim() &&
+                  files.attachments.length === 0) ||
+                (!value.trim() && files.attachments.length === 0)
+              }
+              label={conversationStreaming ? 'Queue message' : undefined}
+              onPress={submit}
+            />
           </div>
         </div>
       </div>

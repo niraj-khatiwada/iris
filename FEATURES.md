@@ -67,9 +67,17 @@ Those four are the biggest jump in usefulness per unit of work.
 
 Removed the stale repo-local `.commandcode` folder. The separate `~/.commandcode` directory holds CommandCode CLI auth and history, so it was left untouched.
 
-### 6. Queue messages
+### ~~6. Queue messages~~ — done
 
-Within a conversation, If exisiting message is being requested, when i send another message there, just queue it and send it after all the previous messages complete. Applies to both island and main chat.
+**What shipped**
+
+- **Queue instead of cancel.** Sending another message while its conversation is still answering adds it behind that reply instead of cancelling the stream. Each reply finishes before the next queued message is sent, so every request sees the previous answer in its history.
+- **Both surfaces.** The quick overlay and the History composer accept messages while streaming and keep the queue as a compact stack of cards above the input. Hovering or focusing it opens the rows; clicking the stack pins it open. In History the rows float above the composer, so the transcript behind never moves. Queued rows show the text and attachment count and can be removed individually.
+- **In memory and per conversation.** The queue never touches SQLite. Stop ends only the current reply and immediately continues with the next queued message. The summary row always has a Clear All button; starting a new chat, switching the quick chat, archiving, regenerating, editing, or Settings → Clear also drops the pending messages for that conversation.
+- **Drafts travel intact.** A queued message keeps its uploaded files, its `/` prompt wrapper, its title seed, and its auto-speak choice. A custom selection keeps the same message id, so provenance still matches once it is sent.
+- **Keyboard and buttons.** Enter queues, the send button stays available beside Stop, and the composer placeholder changes to “Queue a message…”.
+
+~~Within a conversation, If exisiting message is being requested, when i send another message there, just queue it and send it after all the previous messages complete. Applies to both island and main chat.~~
 
 ## Next tier: the “do everything” layer
 

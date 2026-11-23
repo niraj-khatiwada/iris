@@ -4,6 +4,7 @@ import { create } from 'zustand'
 import { MESSAGE_PAGE_SIZE, QUICK_CONVERSATION_TITLE } from '@/constants'
 import { cancelActiveRun, startAgentRun } from '@/services/agent'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { deleteAttachmentFiles } from '@/tauri/commands/attachments'
 import { generateConversationTitle } from '@/tauri/commands/chat'
 import {
   loadMessagePage,
@@ -17,6 +18,7 @@ import type {
   Conversation,
   ConversationSummary,
   MessagePage,
+  QueuedMessage,
 } from '@/types/chat'
 import { newId } from '@/utils/id'
 import { attachmentToAgent } from '@/utils/image'
@@ -24,6 +26,12 @@ import { titleFromMessage } from '@/utils/string'
 import { isTauri } from '@/utils/tauri'
 
 const HISTORY_INDEX_BASE = 1_000_000
+
+/**
+ * The request a local Stop is cancelling. A cancelled run normally drops its queue because
+ * another window took over the conversation; a local Stop keeps it so the next message starts.
+ */
+let locallyStoppedRequestId: string | null = null
 
 /** A quick chat is a normal conversation; this is its empty starting row. */
 function emptyConversation(
@@ -92,6 +100,12 @@ type ChatState = {
   streamingRequestId: string | null
   streamingConversationId: string | null
   streamingMessageId: string | null
+  /** Messages waiting behind the reply currently streaming in each conversation. In memory only. */
+  messageQueue: Record<string, QueuedMessage[]>
+  /** Removes one message that has not been sent yet. */
+  removeQueuedMessage: (conversationId: string, messageId: string) => void
+  /** Drops every message waiting behind a conversation's active reply. */
+  clearQueuedMessages: (conversationId: string) => void
   /** A message a search result asked to reveal; the message list scrolls to it once loaded. */
   focusedMessageId: string | null
   /** False until the first SQLite hydration finishes. */
@@ -273,6 +287,219 @@ type RunContext = {
   get: () => ChatState
 }
 
+/** Removes the local files of messages that were queued but will never be sent. */
+function discardQueuedAttachments(
+  conversationId: string,
+  queue: QueuedMessage[],
+) {
+  if (!isTauri()) {
+    return
+  }
+
+  const fileNames = queue.flatMap((item) =>
+    item.attachments.flatMap((attachment) =>
+      [attachment.fileName, attachment.previewName].filter(
+        (name): name is string => Boolean(name),
+      ),
+    ),
+  )
+  if (fileNames.length === 0) {
+    return
+  }
+
+  void deleteAttachmentFiles(conversationId, fileNames).catch(() => {
+    // The conversation folder is still cleaned when the chat is deleted or Iris is reset.
+  })
+}
+
+/** Drops messages queued behind a conversation's stream, e.g. when it is stopped or left. */
+function clearMessageQueue(
+  { set, get }: RunContext,
+  conversationId: string | null,
+) {
+  const queue = conversationId ? get().messageQueue[conversationId] : undefined
+  if (!conversationId || !queue?.length) {
+    return
+  }
+
+  discardQueuedAttachments(conversationId, queue)
+  set((state) => {
+    const messageQueue = { ...state.messageQueue }
+    delete messageQueue[conversationId]
+    return { messageQueue }
+  })
+}
+
+/**
+ * Sends one message now, whether it came from the composer or from the queue. A queued message
+ * keeps its id so any selection provenance saved while it waited still matches.
+ */
+async function dispatchChatMessage({
+  set,
+  get,
+  conversationId,
+  userMessageId,
+  content,
+  attachments,
+  titleSeed,
+  autoSpeak,
+  requestPrompt,
+  pasted,
+}: RunContext & {
+  conversationId: string
+  userMessageId: string
+  content: string
+  attachments: ChatAttachment[]
+  titleSeed?: string
+  autoSpeak?: boolean
+  requestPrompt?: string
+  pasted?: boolean
+}) {
+  const conversation = get().conversations.find(
+    (item) => item.id === conversationId,
+  )
+  if (!conversation || conversation.archivedAt) {
+    return false
+  }
+
+  const text = content.trim()
+  const titleText = titleSeed?.trim() || text
+  const files = attachments
+  const now = Date.now()
+  const userMessage: ChatMessage = {
+    id: userMessageId,
+    role: 'user',
+    content: text,
+    createdAt: now,
+    status: 'complete',
+    ...(files.length > 0 ? { attachments: files } : {}),
+    ...(pasted ? { metadata: { pasted: true } } : {}),
+  }
+  const assistantMessage: ChatMessage = {
+    id: newId(),
+    role: 'assistant',
+    content: '',
+    createdAt: now,
+    status: 'streaming',
+  }
+
+  const isUntitled =
+    conversation.messages.length === 0 ||
+    conversation.title === 'New conversation' ||
+    conversation.title === QUICK_CONVERSATION_TITLE
+  const sharedFileNames = files
+    .map((file) => file.name)
+    .filter(Boolean)
+    .join(', ')
+  const fallbackTitle = titleText
+    ? titleFromMessage(titleText)
+    : (files[0]?.name ?? 'Attachment')
+
+  set((current) => ({
+    conversations: current.conversations.map((item) =>
+      item.id === conversationId
+        ? {
+            ...item,
+            title: isUntitled ? fallbackTitle : item.title,
+            updatedAt: now,
+            messages: [...item.messages, userMessage, assistantMessage],
+          }
+        : item,
+    ),
+  }))
+
+  if (isUntitled && isTauri()) {
+    const settings = useSettingsStore.getState()
+    void generateConversationTitle({
+      baseUrl: settings.baseUrl,
+      model: settings.model,
+      prompt:
+        titleText ||
+        (sharedFileNames
+          ? `The user shared ${sharedFileNames}.`
+          : 'The user shared a file with no text.'),
+    })
+      .then((title) => {
+        // Apply only if this is still the same conversation and the user has not renamed it.
+        set((current) => ({
+          conversations: current.conversations.map((item) =>
+            item.id === conversationId &&
+            !item.archivedAt &&
+            item.title === fallbackTitle &&
+            item.messages.some((message) => message.id === userMessage.id)
+              ? { ...item, title }
+              : item,
+          ),
+        }))
+      })
+      .catch(() => {
+        // Keep the local fallback title when the service is unavailable.
+      })
+  }
+
+  await runAssistantReply({
+    set,
+    get,
+    conversationId,
+    assistantMessageId: assistantMessage.id,
+    autoSpeak,
+    requestPrompt,
+  })
+
+  return true
+}
+
+/**
+ * Sends the next queued message after a reply finishes. Draining one at a time keeps every later
+ * request behind its own answer and out of the previous request's history.
+ */
+function drainMessageQueue(context: RunContext, conversationId: string) {
+  const { get, set } = context
+  if (get().streamingConversationId === conversationId) {
+    return
+  }
+
+  const next = get().messageQueue[conversationId]?.[0]
+  if (!next) {
+    return
+  }
+
+  set((state) => {
+    const remaining = (state.messageQueue[conversationId] ?? []).filter(
+      (item) => item.id !== next.id,
+    )
+    const messageQueue = { ...state.messageQueue }
+    if (remaining.length > 0) {
+      messageQueue[conversationId] = remaining
+    } else {
+      delete messageQueue[conversationId]
+    }
+    return { messageQueue }
+  })
+
+  void dispatchChatMessage({
+    ...context,
+    conversationId,
+    userMessageId: next.id,
+    content: next.content,
+    attachments: next.attachments,
+    titleSeed: next.titleSeed,
+    autoSpeak: next.autoSpeak,
+    requestPrompt: next.requestPrompt,
+    pasted: next.pasted,
+  })
+    .then((sent) => {
+      if (!sent) {
+        // The chat was archived or removed while waiting; drop the rest instead of stalling.
+        clearMessageQueue(context, conversationId)
+      }
+    })
+    .catch(() => {
+      // Never leave the queue stuck behind a send that could not start.
+      clearMessageQueue(context, conversationId)
+    })
+}
+
 /**
  * Streams one assistant reply for an already-stored user turn. `sendMessage`, `regenerate`, and
  * `editAndResend` all differ only in how they prepare the conversation, so the request, streaming,
@@ -424,6 +651,22 @@ async function runAssistantReply({
         streamingConversationId: null,
         streamingMessageId: null,
       }))
+      if (cancelled) {
+        const localStop = locallyStoppedRequestId === requestId
+        if (localStop) {
+          locallyStoppedRequestId = null
+        }
+        if (!localStop) {
+          // Every other local interruption clears the queue before cancelling. A cancel that
+          // still has queued messages came from another window taking over, so do not restart it.
+          clearMessageQueue({ set, get }, conversationId)
+        } else {
+          // Stop only ends the current reply; the next queued message starts immediately.
+          drainMessageQueue({ set, get }, conversationId)
+        }
+      } else {
+        drainMessageQueue({ set, get }, conversationId)
+      }
     },
     onError: (message) => {
       if (get().streamingRequestId !== requestId) {
@@ -456,6 +699,7 @@ async function runAssistantReply({
         streamingConversationId: null,
         streamingMessageId: null,
       }))
+      drainMessageQueue({ set, get }, conversationId)
     },
   })
 
@@ -475,6 +719,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   streamingRequestId: null,
   streamingConversationId: null,
   streamingMessageId: null,
+  messageQueue: {},
   focusedMessageId: null,
 
   createConversation: () => {
@@ -736,6 +981,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     })),
 
   resetQuickConversation: () => {
+    clearMessageQueue({ set, get }, get().streamingConversationId)
     cancelActiveRun()
     const now = Date.now()
     const id = newId()
@@ -781,6 +1027,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   },
 
   restorePreviousQuickConversation: () => {
+    clearMessageQueue({ set, get }, get().streamingConversationId)
     cancelActiveRun()
     let previousId: string | null = null
 
@@ -848,6 +1095,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       return
     }
 
+    clearMessageQueue({ set, get }, get().streamingConversationId)
     cancelActiveRun()
 
     set((current) => {
@@ -889,6 +1137,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   archiveConversation: (id) => {
     const wasStreaming = get().streamingConversationId === id
     if (wasStreaming) {
+      clearMessageQueue({ set, get }, id)
       cancelActiveRun()
     }
 
@@ -1072,6 +1321,11 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         removed.has(state.streamingConversationId)
           ? null
           : state.streamingConversationId
+      const messageQueue = Object.fromEntries(
+        Object.entries(state.messageQueue).filter(
+          ([conversationId]) => !removed.has(conversationId),
+        ),
+      )
 
       return {
         conversations,
@@ -1083,10 +1337,13 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         streamingConversationId,
         streamingMessageId:
           streamingConversationId === null ? null : state.streamingMessageId,
+        messageQueue,
       }
     }),
 
   clearAll: () => {
+    // Clear the queue first: cancelling the run below drains it otherwise.
+    set({ messageQueue: {} })
     cancelActiveRun()
     set({
       conversations: [],
@@ -1110,13 +1367,10 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     pasted,
   ) => {
     const text = content.trim()
-    const titleText = titleSeed?.trim() || text
     const files = attachments ?? []
     if (!text && files.length === 0) {
       return null
     }
-
-    cancelActiveRun()
 
     const state = get()
     let conversationId = targetConversationId ?? state.activeConversationId
@@ -1132,96 +1386,80 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       conversationId = state.createConversation()
     }
 
+    const targetId = conversationId as string
     const conversation = get().conversations.find(
-      (item) => item.id === conversationId,
+      (item) => item.id === targetId,
     )
     if (!conversation || conversation.archivedAt) {
       // Archived conversations are read-only.
       return null
     }
 
-    const now = Date.now()
-    const userMessage: ChatMessage = {
-      id: newId(),
-      role: 'user',
-      content: text,
-      createdAt: now,
-      status: 'complete',
-      ...(files.length > 0 ? { attachments: files } : {}),
-      ...(pasted ? { metadata: { pasted: true } } : {}),
-    }
-    const assistantMessage: ChatMessage = {
-      id: newId(),
-      role: 'assistant',
-      content: '',
-      createdAt: now,
-      status: 'streaming',
-    }
+    // This conversation is already answering: hold the message behind that reply instead of
+    // cancelling it. `runAssistantReply` drains the queue when the reply finishes.
+    if (get().streamingConversationId === targetId) {
+      const queued: QueuedMessage = {
+        id: newId(),
+        content: text,
+        attachments: files,
+        ...(titleSeed?.trim() ? { titleSeed: titleSeed.trim() } : {}),
+        ...(autoSpeak !== undefined ? { autoSpeak } : {}),
+        ...(requestPrompt ? { requestPrompt } : {}),
+        ...(pasted ? { pasted: true } : {}),
+      }
 
-    const isUntitled =
-      conversation.messages.length === 0 ||
-      conversation.title === 'New conversation' ||
-      conversation.title === QUICK_CONVERSATION_TITLE
-    const sharedFileNames = files
-      .map((file) => file.name)
-      .filter(Boolean)
-      .join(', ')
-    const fallbackTitle = titleText
-      ? titleFromMessage(titleText)
-      : (files[0]?.name ?? 'Attachment')
+      set((current) => ({
+        messageQueue: {
+          ...current.messageQueue,
+          [targetId]: [...(current.messageQueue[targetId] ?? []), queued],
+        },
+      }))
 
-    set((current) => ({
-      conversations: current.conversations.map((item) =>
-        item.id === conversationId
-          ? {
-              ...item,
-              title: isUntitled ? fallbackTitle : item.title,
-              updatedAt: now,
-              messages: [...item.messages, userMessage, assistantMessage],
-            }
-          : item,
-      ),
-    }))
-
-    if (isUntitled && isTauri()) {
-      const settings = useSettingsStore.getState()
-      void generateConversationTitle({
-        baseUrl: settings.baseUrl,
-        model: settings.model,
-        prompt:
-          titleText ||
-          (sharedFileNames
-            ? `The user shared ${sharedFileNames}.`
-            : 'The user shared a file with no text.'),
-      })
-        .then((title) => {
-          // Apply only if this is still the same conversation and the user has not renamed it.
-          set((current) => ({
-            conversations: current.conversations.map((item) =>
-              item.id === conversationId &&
-              !item.archivedAt &&
-              item.title === fallbackTitle &&
-              item.messages.some((message) => message.id === userMessage.id)
-                ? { ...item, title }
-                : item,
-            ),
-          }))
-        })
-        .catch(() => {
-          // Keep the local fallback title when the service is unavailable.
-        })
+      return queued.id
     }
 
-    await runAssistantReply({
+    // Sending in another conversation replaces the current work, as before. Drop its queue
+    // before cancelling so the cancellation cannot dispatch a leftover message.
+    clearMessageQueue({ set, get }, get().streamingConversationId)
+    cancelActiveRun()
+
+    const userMessageId = newId()
+    await dispatchChatMessage({
       set,
       get,
-      conversationId: conversationId as string,
-      assistantMessageId: assistantMessage.id,
+      conversationId: targetId,
+      userMessageId,
+      content: text,
+      attachments: files,
+      titleSeed,
       autoSpeak,
       requestPrompt,
+      pasted,
     })
 
-    return userMessage.id
+    return userMessageId
+  },
+
+  removeQueuedMessage: (conversationId, messageId) => {
+    const queue = get().messageQueue[conversationId]
+    const removed = queue?.find((item) => item.id === messageId)
+    if (!queue || !removed) {
+      return
+    }
+
+    discardQueuedAttachments(conversationId, [removed])
+    const remaining = queue.filter((item) => item.id !== messageId)
+    const messageQueue = { ...get().messageQueue }
+    if (remaining.length > 0) {
+      messageQueue[conversationId] = remaining
+    } else {
+      delete messageQueue[conversationId]
+    }
+    set({ messageQueue })
+  },
+
+  clearQueuedMessages: (conversationId) => {
+    clearMessageQueue({ set, get }, conversationId)
   },
 
   regenerate: async (conversationId, messageId, autoSpeak) => {
@@ -1239,6 +1477,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       return
     }
 
+    clearMessageQueue({ set, get }, conversationId)
     cancelActiveRun()
 
     const reply: ChatMessage = {
@@ -1291,6 +1530,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       return
     }
 
+    clearMessageQueue({ set, get }, conversationId)
     cancelActiveRun()
 
     const reply: ChatMessage = {
@@ -1331,10 +1571,17 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   },
 
   stopStreaming: async () => {
-    if (!get().streamingRequestId) {
+    const state = get()
+    if (!state.streamingRequestId) {
       return
     }
 
+    // Stop only ends the active reply. The queue is kept, and `onDone` starts the next message.
+    locallyStoppedRequestId = state.streamingRequestId
     cancelActiveRun()
+    if (locallyStoppedRequestId === state.streamingRequestId) {
+      // The run finished without calling onDone; never let the flag leak into a later cancel.
+      locallyStoppedRequestId = null
+    }
   },
 }))
